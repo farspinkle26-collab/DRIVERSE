@@ -220,6 +220,8 @@ export default function MapScreen() {
   const [tripHistory, setTripHistory] = useState<TripRecord[]>([]); // past trips
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const isRecordingRef = useRef(false);
+  const userLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   // Animations
   const carFloat = useRef(new Animated.Value(0)).current;
@@ -325,7 +327,11 @@ export default function MapScreen() {
     }
   }, []);
 
-  // --- GPS detection ---
+  // --- GPS detection (runs once, uses refs for recording state to avoid restarts) ---
+  // Keep userLocationRef in sync
+  useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
     let mounted = true;
@@ -381,10 +387,9 @@ export default function MapScreen() {
             if (pos.coords.heading != null) setHeading(pos.coords.heading);
 
             // --- Recording: append new coordinate and update distance ---
-            if (isRecording) {
+            if (isRecordingRef.current) {
               setRecordedPath((prev) => {
                 const next = [...prev, newCoord];
-                // Calculate distance from the last recorded point
                 if (lastCoordRef.current) {
                   const dist = haversineMeters(lastCoordRef.current, newCoord);
                   if (dist > 0.1) {
@@ -409,7 +414,8 @@ export default function MapScreen() {
       mounted = false;
       sub?.remove();
     };
-  }, [fetchAllIndonesiaCafes, fadeIn, isRecording]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --- Recording timer ---
   useEffect(() => {
@@ -480,14 +486,14 @@ export default function MapScreen() {
     );
   }, [userLocation, heading]);
 
-  const handleCafePress = (cafe: CafePOI) => {
+  const handleCafePress = useCallback((cafe: CafePOI) => {
     setSelectedDestination({ type: "cafe", data: cafe });
     setRouteInfo(null);
     mapRef.current?.animateCamera(
       { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 16, pitch: 40 },
       { duration: 600 }
     );
-  };
+  }, []);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -509,8 +515,13 @@ export default function MapScreen() {
     setNavigating(false);
   }, []);
 
-  // --- Map press: drop a pin at tapped location ---
+  // --- Map press: drop a pin at tapped location (single tap) ---
+  const mapPressCooldownRef = useRef(0);
   const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+    const now = Date.now();
+    // Tiny 200ms cooldown to prevent accidental double-taps from map + marker conflicts
+    if (now - mapPressCooldownRef.current < 200) return;
+    mapPressCooldownRef.current = now;
     const { latitude, longitude } = event.nativeEvent.coordinate;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setRouteInfo(null);
