@@ -225,13 +225,20 @@ export default function MapScreen() {
   const [tripStartMs, setTripStartMs] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [tripHistory, setTripHistory] = useState<TripRecord[]>([]); // past trips
+  const [currentSpeed, setCurrentSpeed] = useState(0); // km/h during recording
+  const [routeSplitIdx, setRouteSplitIdx] = useState<number | null>(null); // index where user crossed on route polyline
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastCoordTimeRef = useRef<number>(0);
   const isRecordingRef = useRef(false);
   const userLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   // Estimated route duration (seconds) — saved when route is fetched, used for XP comparison
   const estimatedDurationRef = useRef<number | null>(null);
+
+  // Refs for GPS watcher to read live state without restarting the effect
+  const routeInfoRef = useRef<RouteInfo | null>(null);
+  const destCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   // XP reward display state
   const [xpEarned, setXpEarned] = useState<number | null>(null);
@@ -351,6 +358,7 @@ export default function MapScreen() {
   // Keep userLocationRef in sync
   useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { routeInfoRef.current = routeInfo; }, [routeInfo]);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -406,8 +414,9 @@ export default function MapScreen() {
             setUserLocation(newCoord);
             if (pos.coords.heading != null) setHeading(pos.coords.heading);
 
-            // --- Recording: append new coordinate and update distance ---
+            // --- Recording: append new coordinate, update distance, calculate speed ---
             if (isRecordingRef.current) {
+              const now = Date.now();
               setRecordedPath((prev) => {
                 const next = [...prev, newCoord];
                 if (lastCoordRef.current) {
@@ -419,6 +428,45 @@ export default function MapScreen() {
                 lastCoordRef.current = newCoord;
                 return next;
               });
+
+              // --- Current speed (km/h) ---
+              if (lastCoordRef.current && lastCoordTimeRef.current > 0) {
+                const timeDeltaSec = (now - lastCoordTimeRef.current) / 1000;
+                if (timeDeltaSec > 0.3) {
+                  const dist = haversineMeters(lastCoordRef.current, newCoord);
+                  const speedKmh = (dist / 1000) / (timeDeltaSec / 3600);
+                  if (speedKmh < 200) {
+                    setCurrentSpeed(speedKmh);
+                  }
+                }
+              }
+              lastCoordTimeRef.current = now;
+
+              // --- Auto-stop when near destination ---
+              const dest = destCoordsRef.current;
+              const rtInfo = routeInfoRef.current;
+              if (rtInfo && dest) {
+                const distToDest = haversineMeters(newCoord, dest);
+
+                // --- Compute route split index (yellow = traversed, red = remaining) ---
+                let closestIdx = 0;
+                let closestDist = Infinity;
+                for (let i = 0; i < rtInfo.coordinates.length; i++) {
+                  const d = haversineMeters(newCoord, rtInfo.coordinates[i]);
+                  if (d < closestDist) {
+                    closestDist = d;
+                    closestIdx = i;
+                  }
+                }
+                setRouteSplitIdx(closestIdx > 0 ? closestIdx : null);
+
+                if (distToDest < 50) {
+                  // Auto-stop — dispatch with a small delay to let state settle
+                  setTimeout(() => {
+                    setIsRecording(false);
+                  }, 500);
+                }
+              }
             }
           }
         );
@@ -519,6 +567,9 @@ export default function MapScreen() {
     return { latitude: selectedDestination.lat, longitude: selectedDestination.lng };
   }, [selectedDestination]);
 
+  // Sync destCoordsRef for use inside the GPS watcher (stale closure)
+  useEffect(() => { destCoordsRef.current = destCoords(); }, [destCoords]);
+
   const handleNavigate = useCallback(() => {
     const coords = destCoords();
     if (!userLocation || !coords) return;
@@ -568,15 +619,27 @@ export default function MapScreen() {
     setXpEarned(null);
     setWasFaster(false);
     setLeveledUp(false);
+    setCurrentSpeed(0);
+    setRouteSplitIdx(null);
     lastCoordRef.current = userLocation;
+    lastCoordTimeRef.current = now;
     if (userLocation) {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
     }
-  }, [userLocation]);
+    // Animate camera to user location with tight zoom
+    if (userLocation && mapRef.current) {
+      mapRef.current.animateCamera(
+        { center: userLocation, zoom: 18, pitch: 60, heading },
+        { duration: 600 }
+      );
+    }
+  }, [userLocation, heading]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
+    setCurrentSpeed(0);
+    setRouteSplitIdx(null);
     const now = Date.now();
     const actualDurationMs = tripStartMs ? now - tripStartMs : 0;
     const actualDurationSec = actualDurationMs / 1000;
@@ -702,25 +765,75 @@ export default function MapScreen() {
           </>
         )}
 
-        {/* Route Polyline (navigation to cafe) */}
-        {routeInfo && (
-          <>
-            <Polyline
-              coordinates={routeInfo.coordinates}
-              strokeWidth={7}
-              strokeColor={`${ROUTE_GLOW}40`}
-              lineCap="round"
-              lineJoin="round"
-            />
-            <Polyline
-              coordinates={routeInfo.coordinates}
-              strokeWidth={4}
-              strokeColor={ROUTE_RED}
-              lineCap="round"
-              lineJoin="round"
-            />
-          </>
-        )}
+        {/* Route Polyline — split into yellow (traversed) + red (remaining) during recording */}
+        {routeInfo && (() => {
+          const splitIdx = isRecording ? routeSplitIdx : null;
+          if (splitIdx != null && splitIdx > 0 && splitIdx < routeInfo.coordinates.length - 1) {
+            const traversed = routeInfo.coordinates.slice(0, splitIdx + 1);
+            const remaining = routeInfo.coordinates.slice(splitIdx);
+            return (
+              <>
+                {/* Traversed — yellow glow + core */}
+                {traversed.length > 1 && (
+                  <>
+                    <Polyline
+                      coordinates={traversed}
+                      strokeWidth={8}
+                      strokeColor="rgba(250, 204, 21, 0.25)"
+                      lineCap="round"
+                      lineJoin="round"
+                    />
+                    <Polyline
+                      coordinates={traversed}
+                      strokeWidth={4}
+                      strokeColor="#FACC15"
+                      lineCap="round"
+                      lineJoin="round"
+                    />
+                  </>
+                )}
+                {/* Remaining — red glow + core */}
+                {remaining.length > 1 && (
+                  <>
+                    <Polyline
+                      coordinates={remaining}
+                      strokeWidth={7}
+                      strokeColor={`${ROUTE_GLOW}40`}
+                      lineCap="round"
+                      lineJoin="round"
+                    />
+                    <Polyline
+                      coordinates={remaining}
+                      strokeWidth={4}
+                      strokeColor={ROUTE_RED}
+                      lineCap="round"
+                      lineJoin="round"
+                    />
+                  </>
+                )}
+              </>
+            );
+          }
+          // No split yet — show full red route
+          return (
+            <>
+              <Polyline
+                coordinates={routeInfo.coordinates}
+                strokeWidth={7}
+                strokeColor={`${ROUTE_GLOW}40`}
+                lineCap="round"
+                lineJoin="round"
+              />
+              <Polyline
+                coordinates={routeInfo.coordinates}
+                strokeWidth={4}
+                strokeColor={ROUTE_RED}
+                lineCap="round"
+                lineJoin="round"
+              />
+            </>
+          );
+        })()}
 
         {/* Destination marker (when navigating) */}
         {selectedDestination && routeInfo && destCoords() && (
@@ -820,7 +933,7 @@ export default function MapScreen() {
             {/* Distance */}
             <View style={styles.recordingStat}>
               <View style={styles.recordingStatIcon}>
-                <Route size={20} color={RECORD_RED} />
+                <Route size={18} color={RECORD_RED} />
               </View>
               <View>
                 <Text style={styles.recordingStatLabel}>Distance</Text>
@@ -833,11 +946,27 @@ export default function MapScreen() {
             {/* Time */}
             <View style={styles.recordingStat}>
               <View style={styles.recordingStatIcon}>
-                <Timer size={20} color="#F59E0B" />
+                <Timer size={18} color="#F59E0B" />
               </View>
               <View>
                 <Text style={styles.recordingStatLabel}>Time</Text>
                 <Text style={styles.recordingStatValue}>{fmtTimer(elapsedMs)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.recordingDivider} />
+
+            {/* Current Speed */}
+            <View style={styles.recordingStat}>
+              <View style={styles.recordingStatSpeedIcon}>
+                <TrendingUp size={18} color="#3B82F6" />
+              </View>
+              <View>
+                <Text style={styles.recordingStatLabel}>Speed</Text>
+                <View style={styles.speedRow}>
+                  <Text style={styles.recordingStatValue}>{currentSpeed.toFixed(0)}</Text>
+                  <Text style={styles.speedUnit}>km/h</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -1330,8 +1459,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(255, 45, 85, 0.2)",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.5,
@@ -1346,12 +1475,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recordingStatIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     backgroundColor: "rgba(255, 45, 85, 0.08)",
     justifyContent: "center",
     alignItems: "center",
+  },
+  recordingStatSpeedIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(59, 130, 246, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  speedRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 3,
+    marginTop: 2,
+  },
+  speedUnit: {
+    fontSize: 11,
+    color: "#6A6A7E",
+    fontWeight: "600",
   },
   recordingStatLabel: {
     fontSize: 11,
@@ -1361,16 +1509,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   recordingStatValue: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#FFFFFF",
     fontWeight: "800",
-    marginTop: 2,
   },
   recordingDivider: {
     width: 1,
-    height: 50,
+    height: 40,
     backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginHorizontal: 12,
+    marginHorizontal: 8,
   },
   stopBtn: {
     flexDirection: "row",
