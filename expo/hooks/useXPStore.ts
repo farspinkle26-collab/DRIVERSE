@@ -1,6 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
 import { useEffect, useState, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+
+const STORAGE_KEY = "driveverse_xp";
 
 // XP required per level: L1=100, L2=250, L3=500, L4=1000, L5=1800, L6=3000...
 function xpForLevel(level: number): number {
@@ -26,32 +29,113 @@ const INITIAL_STATE: XPState = { level: 1, xp: 0, totalXp: 0 };
 export const [XPProvider, useXP] = createContextHook(() => {
   const [state, setState] = useState<XPState>(INITIAL_STATE);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // Load from storage on mount
+  // Check for session to sync with Supabase
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load XP from Supabase (or AsyncStorage fallback) when userId changes
+  useEffect(() => {
+    if (!userId) {
+      // No auth — load from local storage
+      (async () => {
+        try {
+          const raw = await AsyncStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as XPState;
+            setState(parsed);
+          }
+        } catch {
+          // Use defaults
+        } finally {
+          setLoading(false);
+        }
+      })();
+      return;
+    }
+
+    // Load from Supabase
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem("driveverse_xp");
-        if (raw) {
-          const parsed = JSON.parse(raw) as XPState;
-          setState(parsed);
+        const { data, error } = await supabase
+          .from("user_xp")
+          .select("*")
+          .eq("user_id", userId)
+          .single();
+
+        if (error || !data) {
+          // Create XP row if missing
+          await supabase.from("user_xp").upsert({
+            user_id: userId,
+            level: 1,
+            xp: 0,
+            total_xp: 0,
+            xp_required_for_level: xpForLevel(1),
+          });
+          setState(INITIAL_STATE);
+        } else {
+          setState({
+            level: data.level,
+            xp: data.xp,
+            totalXp: data.total_xp,
+          });
         }
       } catch {
-        // Use defaults
+        // Fallback to local
+        try {
+          const raw = await AsyncStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw) as XPState;
+            setState(parsed);
+          }
+        } catch {
+          // Use defaults
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [userId]);
 
-  // Persist on change
-  const persist = useCallback(async (s: XPState) => {
-    try {
-      await AsyncStorage.setItem("driveverse_xp", JSON.stringify(s));
-    } catch {
-      // Silent
-    }
-  }, []);
+  // Persist — to Supabase if authenticated, otherwise AsyncStorage
+  const persist = useCallback(
+    async (s: XPState) => {
+      // Always save locally as fallback
+      try {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+      } catch {
+        // Silent
+      }
+
+      // Sync to Supabase if authenticated
+      if (userId) {
+        try {
+          await supabase.from("user_xp").upsert({
+            user_id: userId,
+            level: s.level,
+            xp: s.xp,
+            total_xp: s.totalXp,
+            xp_required_for_level: xpForLevel(s.level),
+          });
+        } catch {
+          // Silent
+        }
+      }
+    },
+    [userId]
+  );
 
   const addXP = useCallback(
     (amount: number): number => {

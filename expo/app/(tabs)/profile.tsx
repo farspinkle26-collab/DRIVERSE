@@ -1,16 +1,21 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   StyleSheet,
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  Switch,
+  TextInput,
   Alert,
   Dimensions,
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import {
   Car,
   Trophy,
@@ -28,50 +33,379 @@ import {
   Moon,
   Sun,
   HelpCircle,
-  Share2,
   Headphones,
+  MessageCircle,
+  UserPlus,
+  Users,
+  Search,
+  X,
+  Send,
+  ArrowLeft,
+  TrendingUp,
+  Zap,
+  Route,
+  Timer,
+  CheckCircle2,
+  Circle,
+  Plus,
+  Trash2,
 } from "lucide-react-native";
-import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useTheme } from "@/hooks/useThemeStore";
+import { useXP } from "@/hooks/useXPStore";
 import { useTabNavigation } from "./_layout";
+import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-const MOCK_GARAGE = [
-  { id: "g1", name: "Porsche 911 GT3", year: "2024", color: "#FF3B6F", hp: 502, mileage: "2,340 km" },
-  { id: "g2", name: "BMW M4 CSL", year: "2023", color: "#3B82F6", hp: 543, mileage: "8,120 km" },
-  { id: "g3", name: "Toyota GR Supra", year: "2024", color: "#F59E0B", hp: 382, mileage: "15,400 km" },
-];
+// ─── Types ─────────────────────────────────────────────────
+interface CarItem {
+  id: string;
+  name: string;
+  make: string;
+  model: string;
+  year: string;
+  color: string;
+  color_name: string;
+  hp: number;
+  mileage_km: number;
+  license_plate: string;
+  is_primary: boolean;
+}
 
-const MOCK_ACHIEVEMENTS = [
-  { id: "a1", title: "Night Rider", desc: "Drive 100 km at night", icon: Flame, color: "#FF6B35", earned: true },
-  { id: "a2", title: "Speed Demon", desc: "Reach 200 km/h on highway", icon: Gauge, color: "#FF3B6F", earned: true },
-  { id: "a3", title: "Explorer", desc: "Visit 10 scenic routes", icon: MapPin, color: "#00D4AA", earned: true },
-  { id: "a4", title: "Collector", desc: "Own 5 cars in garage", icon: Car, color: "#8B5CF6", earned: false },
-  { id: "a5", title: "Legend", desc: "Earn 10,000 XP total", icon: Award, color: "#FFD700", earned: false },
-  { id: "a6", title: "Social", desc: "Join 5 community events", icon: Share2, color: "#EC4899", earned: false },
-];
+interface TripItem {
+  id: string;
+  destination_name: string;
+  origin_name: string;
+  distance_km: number;
+  duration_seconds: number;
+  avg_speed_kmh: number;
+  xp_earned: number;
+  was_faster_than_estimation: boolean;
+  completed_at: string;
+}
 
-const MOCK_STATS = {
-  totalKm: 12340,
-  topSpeed: 245,
-  avgSpeed: 67,
-  hoursDriven: 184,
-  questsCompleted: 27,
-  eventsAttended: 8,
-  carsCollected: 3,
-  xpEarned: 3450,
-};
+interface FriendItem {
+  id: string;
+  user_id: string;
+  friend_id: string;
+  status: "pending" | "accepted" | "blocked";
+  friend_profile?: {
+    name: string;
+    level: number;
+    avatar?: string;
+  };
+}
 
+interface MessageItem {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+  sender_name?: string;
+}
+
+type ProfileTab = "garage" | "trips" | "friends" | "messages";
+
+// ─── Main Component ─────────────────────────────────────────
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuth();
-  const { isDark, toggleTheme } = useTheme();
-  const { setActiveTab: switchTab } = useTabNavigation();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<"garage" | "achievements" | "stats">("garage");
+  const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
+  const { level, xp, xpProgress, xpCurrentLevel, xpRequired, totalXp, addXP } = useXP();
+  const { setActiveTab: switchTab } = useTabNavigation();
 
+  const [activeTab, setActiveTab] = useState<ProfileTab>("garage");
+
+  // ─── Car Collections state ─────────────────────────────
+  const [cars, setCars] = useState<CarItem[]>([]);
+  const [carsLoading, setCarsLoading] = useState(false);
+  const [showAddCar, setShowAddCar] = useState(false);
+  const [newCarName, setNewCarName] = useState("");
+  const [newCarMake, setNewCarMake] = useState("");
+  const [newCarYear, setNewCarYear] = useState("2024");
+  const [newCarColor, setNewCarColor] = useState("#FF6B35");
+  const [newCarHP, setNewCarHP] = useState("300");
+
+  // ─── Trips state ───────────────────────────────────────
+  const [trips, setTrips] = useState<TripItem[]>([]);
+  const [tripsLoading, setTripsLoading] = useState(false);
+
+  // ─── Friends state ─────────────────────────────────────
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendSearchQuery, setFriendSearchQuery] = useState("");
+  const [friendSearchResults, setFriendSearchResults] = useState<Array<{ id: string; name: string; level: number }>>([]);
+  const [friendSearchLoading, setFriendSearchLoading] = useState(false);
+
+  // ─── Messages state ────────────────────────────────────
+  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageInput, setMessageInput] = useState("");
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<MessageItem[]>([]);
+
+  // ─── Refresh state ─────────────────────────────────────
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ─── Load cars from Supabase ───────────────────────────────
+  const loadCars = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+    setCarsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("car_collections")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("is_primary", { ascending: false });
+
+      if (!error && data) {
+        setCars(data as CarItem[]);
+      }
+    } catch (err) {
+      console.error("Failed to load cars:", err);
+    } finally {
+      setCarsLoading(false);
+    }
+  }, [isAuthenticated, user]);
+
+  // ─── Load trips from Supabase ──────────────────────────────
+  const loadTrips = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+    setTripsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("trips")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("completed_at", { ascending: false })
+        .limit(20);
+
+      if (!error && data) {
+        setTrips(data as TripItem[]);
+      }
+    } catch (err) {
+      console.error("Failed to load trips:", err);
+    } finally {
+      setTripsLoading(false);
+    }
+  }, [isAuthenticated, user]);
+
+  // ─── Load friends from Supabase ────────────────────────────
+  const loadFriends = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+    setFriendsLoading(true);
+    try {
+      // Get friendships where user is user_id or friend_id
+      const { data: sentData } = await supabase
+        .from("friends")
+        .select("*, profiles!friends_friend_id_fkey(name)")
+        .eq("user_id", user.id);
+
+      const { data: receivedData } = await supabase
+        .from("friends")
+        .select("*, profiles!friends_user_id_fkey(name)")
+        .eq("friend_id", user.id);
+
+      const all = [...(sentData ?? []), ...(receivedData ?? [])].filter(
+        (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i
+      );
+
+      setFriends(all as FriendItem[]);
+    } catch (err) {
+      console.error("Failed to load friends:", err);
+    } finally {
+      setFriendsLoading(false);
+    }
+  }, [isAuthenticated, user]);
+
+  // ─── Load messages from Supabase ───────────────────────────
+  const loadMessages = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+    setMessagesLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("direct_messages")
+        .select("*")
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (!error && data) {
+        setMessages(data as MessageItem[]);
+      }
+    } catch (err) {
+      console.error("Failed to load messages:", err);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [isAuthenticated, user]);
+
+  // ─── Initial load ──────────────────────────────────────────
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadCars();
+      loadTrips();
+      loadFriends();
+      loadMessages();
+    }
+  }, [isAuthenticated, loadCars, loadTrips, loadFriends, loadMessages]);
+
+  // ─── Pull to refresh ───────────────────────────────────────
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadCars(), loadTrips(), loadFriends(), loadMessages()]);
+    setRefreshing(false);
+  }, [loadCars, loadTrips, loadFriends, loadMessages]);
+
+  // ─── Add car ───────────────────────────────────────────────
+  const handleAddCar = async () => {
+    if (!user || !newCarName.trim()) return;
+    try {
+      const { error } = await supabase.from("car_collections").insert({
+        user_id: user.id,
+        name: newCarName.trim(),
+        make: newCarMake.trim() || "Custom",
+        model: "",
+        year: newCarYear || "2024",
+        color: newCarColor,
+        color_name: "Custom",
+        hp: parseInt(newCarHP) || 300,
+        mileage_km: 0,
+      });
+      if (!error) {
+        setNewCarName("");
+        setNewCarMake("");
+        setShowAddCar(false);
+        loadCars();
+      }
+    } catch (err) {
+      console.error("Failed to add car:", err);
+    }
+  };
+
+  // ─── Delete car ────────────────────────────────────────────
+  const handleDeleteCar = (carId: string) => {
+    Alert.alert("Remove Car", "Are you sure you want to remove this car?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          await supabase.from("car_collections").delete().eq("id", carId);
+          loadCars();
+        },
+      },
+    ]);
+  };
+
+  // ─── Set primary car ───────────────────────────────────────
+  const handleSetPrimary = async (carId: string) => {
+    if (!user) return;
+    // Unset all primary
+    await supabase.from("car_collections").update({ is_primary: false }).eq("user_id", user.id);
+    // Set this one
+    await supabase.from("car_collections").update({ is_primary: true }).eq("id", carId);
+    loadCars();
+  };
+
+  // ─── Search friends ────────────────────────────────────────
+  const handleSearchFriends = async () => {
+    if (!friendSearchQuery.trim() || !user) return;
+    setFriendSearchLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, name")
+        .ilike("name", `%${friendSearchQuery.trim()}%`)
+        .neq("id", user.id)
+        .limit(10);
+
+      if (!error && data) {
+        setFriendSearchResults(
+          data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name, level: 1 }))
+        );
+      }
+    } catch (err) {
+      console.error("Friend search error:", err);
+    } finally {
+      setFriendSearchLoading(false);
+    }
+  };
+
+  // ─── Send friend request ───────────────────────────────────
+  const handleAddFriend = async (friendId: string, friendName: string) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from("friends").insert({
+        user_id: user.id,
+        friend_id: friendId,
+        status: "pending",
+      });
+      if (error) {
+        Alert.alert("Error", error.message);
+      } else {
+        Alert.alert("Sent!", `Friend request sent to ${friendName}`);
+        loadFriends();
+      }
+    } catch (err) {
+      console.error("Add friend error:", err);
+    }
+  };
+
+  // ─── Accept/reject friend request ──────────────────────────
+  const handleAcceptFriend = async (friendshipId: string) => {
+    await supabase.from("friends").update({ status: "accepted" }).eq("id", friendshipId);
+    loadFriends();
+  };
+
+  const handleRejectFriend = async (friendshipId: string) => {
+    await supabase.from("friends").delete().eq("id", friendshipId);
+    loadFriends();
+  };
+
+  // ─── Open conversation ─────────────────────────────────────
+  const handleOpenConversation = async (friendId: string) => {
+    if (!user) return;
+    setSelectedConversation(friendId);
+    try {
+      const { data, error } = await supabase
+        .from("direct_messages")
+        .select("*")
+        .or(
+          `and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`
+        )
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        setConversationMessages(data as MessageItem[]);
+      }
+    } catch (err) {
+      console.error("Load conversation error:", err);
+    }
+  };
+
+  // ─── Send message ──────────────────────────────────────────
+  const handleSendMessage = async () => {
+    if (!user || !selectedConversation || !messageInput.trim()) return;
+    try {
+      const { error } = await supabase.from("direct_messages").insert({
+        sender_id: user.id,
+        receiver_id: selectedConversation,
+        content: messageInput.trim(),
+      });
+      if (!error) {
+        setMessageInput("");
+        handleOpenConversation(selectedConversation);
+        loadMessages();
+      }
+    } catch (err) {
+      console.error("Send message error:", err);
+    }
+  };
+
+  // ─── Logout ────────────────────────────────────────────────
   const handleLogout = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
@@ -86,26 +420,86 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const handleTopUp = () => router.push("/top-up" as any);
-  const handleTransactionHistory = () => router.push("/transaction-history" as any);
-  const handlePaymentHistory = () => router.push("/payment-history" as any);
+  // ─── Helpers ───────────────────────────────────────────────
+  const formatDuration = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
 
+  const formatDate = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const levelTitle = (lvl: number): string => {
+    if (lvl >= 50) return "G.O.A.T.";
+    if (lvl >= 40) return "Hall of Fame";
+    if (lvl >= 30) return "Racing Legend";
+    if (lvl >= 25) return "Track Master";
+    if (lvl >= 20) return "Speed Demon";
+    if (lvl >= 15) return "Elite Driver";
+    if (lvl >= 10) return "Pro Drifter";
+    if (lvl >= 5) return "Street Racer";
+    return "Rookie Driver";
+  };
+
+  // ─── Not logged in view ────────────────────────────────────
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
+        <View style={[styles.loginPrompt, { paddingTop: insets.top + 100 }]}>
+          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.loginPromptIcon}>
+            <Car size={40} color="#FFFFFF" />
+          </LinearGradient>
+          <Text style={styles.loginPromptTitle}>Join the Drive</Text>
+          <Text style={styles.loginPromptDesc}>
+            Sign up to track your rides, collect cars, earn XP, and connect with fellow drivers.
+          </Text>
+          <TouchableOpacity
+            style={styles.loginPromptBtn}
+            onPress={() => router.push("/login" as any)}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={["#FF6B35", "#FF3B6F"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.loginPromptBtnGradient}
+            >
+              <Text style={styles.loginPromptBtnText}>Sign In</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.loginPromptBtnSecondary}
+            onPress={() => router.push("/signup" as any)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.loginPromptBtnSecondaryText}>Create Account</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ─── Authenticated UI ──────────────────────────────────────
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.background} />
+      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40, paddingTop: insets.top + 70 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40, paddingTop: insets.top + 10 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
       >
-        {/* Profile Header */}
+        {/* ═══ PROFILE HEADER ═══ */}
         <View style={styles.profileHeader}>
-          {/* Avatar + badge */}
           <View style={styles.avatarSection}>
-            <LinearGradient
-              colors={["#FF6B35", "#FF8A50"]}
-              style={styles.avatarRing}
-            >
+            <LinearGradient colors={["#FF6B35", "#FF8A50"]} style={styles.avatarRing}>
               <View style={styles.avatarInner}>
                 <Text style={styles.avatarLetter}>
                   {(user?.name ?? "D")[0].toUpperCase()}
@@ -113,184 +507,475 @@ export default function ProfileScreen() {
               </View>
             </LinearGradient>
             <View style={styles.levelBadge}>
-              <Text style={styles.levelText}>12</Text>
+              <Text style={styles.levelBadgeText}>{level}</Text>
             </View>
           </View>
 
           <Text style={styles.userName}>{user?.name ?? "Driver"}</Text>
-          <Text style={styles.userTitle}>Legendary Driver</Text>
+          <Text style={styles.userTitle}>{levelTitle(level)}</Text>
 
-          {/* Quick stats row */}
+          {/* XP Progress bar */}
+          <View style={styles.xpSection}>
+            <View style={styles.xpBarRow}>
+              <Text style={styles.xpLabel}>Level {level}</Text>
+              <Text style={styles.xpValue}>{xpCurrentLevel} / {xpRequired} XP</Text>
+            </View>
+            <View style={styles.xpTrack}>
+              <LinearGradient
+                colors={["#FF6B35", "#FFD700"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.xpFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]}
+              />
+            </View>
+          </View>
+
+          {/* Quick stats */}
           <View style={styles.quickStats}>
             <View style={styles.quickStat}>
-              <Text style={styles.quickStatValue}>{MOCK_STATS.carsCollected}</Text>
+              <Text style={styles.quickStatValue}>{cars.length}</Text>
               <Text style={styles.quickStatLabel}>Cars</Text>
             </View>
             <View style={styles.quickStatDiv} />
             <View style={styles.quickStat}>
-              <Text style={styles.quickStatValue}>{MOCK_STATS.questsCompleted}</Text>
-              <Text style={styles.quickStatLabel}>Quests</Text>
+              <Text style={styles.quickStatValue}>{friends.filter((f) => f.status === "accepted").length}</Text>
+              <Text style={styles.quickStatLabel}>Friends</Text>
             </View>
             <View style={styles.quickStatDiv} />
             <View style={styles.quickStat}>
-              <Text style={styles.quickStatValue}>{MOCK_STATS.xpEarned.toLocaleString()}</Text>
-              <Text style={styles.quickStatLabel}>XP</Text>
+              <Text style={styles.quickStatValue}>{trips.length}</Text>
+              <Text style={styles.quickStatLabel}>Trips</Text>
             </View>
           </View>
         </View>
 
-        {/* Wallet Card */}
-        <View style={[styles.walletCard, { marginHorizontal: 20 }]}>
-          <LinearGradient
-            colors={["#1A1A2E", "#121220"]}
-            style={styles.walletGradient}
-          >
-            <View style={styles.walletRow}>
-              <View style={styles.walletLeft}>
-                <Wallet size={16} color="#8A8A9A" />
-                <Text style={styles.walletLabel}>DRIVEVERSE BALANCE</Text>
-              </View>
-              <Text style={styles.walletAmount}>Rp 2,450,000</Text>
-            </View>
-            <View style={styles.walletActions}>
-              <TouchableOpacity
-                style={[styles.walletBtn, { backgroundColor: "#FF6B35" }]}
-                onPress={handleTopUp}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.walletBtnText}>Top Up</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.walletBtn, { backgroundColor: "rgba(255,255,255,0.06)" }]}
-                onPress={handleTransactionHistory}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.walletBtnText}>History</Text>
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
-        </View>
-
-        {/* Content Tabs */}
+        {/* ═══ CONTENT TABS ═══ */}
         <View style={styles.contentTabs}>
-          {(["garage", "achievements", "stats"] as const).map((tab) => (
+          {(
+            [
+              { key: "garage" as ProfileTab, label: "Garage", icon: Car },
+              { key: "trips" as ProfileTab, label: "Trips", icon: Route },
+              { key: "friends" as ProfileTab, label: "Friends", icon: Users },
+              { key: "messages" as ProfileTab, label: "Messages", icon: MessageCircle },
+            ] as const
+          ).map((tab) => (
             <TouchableOpacity
-              key={tab}
-              style={[styles.contentTab, activeTab === tab && styles.contentTabActive]}
-              onPress={() => setActiveTab(tab)}
+              key={tab.key}
+              style={[styles.contentTab, activeTab === tab.key && styles.contentTabActive]}
+              onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.contentTabText, activeTab === tab && styles.contentTabTextActive]}>
-                {tab === "garage" ? "Garage" : tab === "achievements" ? "Achievements" : "Stats"}
+              <tab.icon size={16} color={activeTab === tab.key ? "#FF6B35" : "#5A5A6E"} />
+              <Text style={[styles.contentTabText, activeTab === tab.key && styles.contentTabTextActive]}>
+                {tab.label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Garage */}
+        {/* ═══ GARAGE ═══ */}
         {activeTab === "garage" && (
           <View style={styles.section}>
-            {MOCK_GARAGE.map((car) => (
-              <TouchableOpacity key={car.id} style={styles.garageCard} activeOpacity={0.7}>
-                <View style={styles.garageCardContent}>
-                  <View style={[styles.carColorBar, { backgroundColor: car.color }]} />
-                  <View style={styles.carInfo}>
-                    <Text style={styles.carName}>{car.name}</Text>
-                    <View style={styles.carMeta}>
-                      <Text style={styles.carMetaText}>{car.year}</Text>
-                      <Text style={styles.carMetaDot}>•</Text>
-                      <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
-                      <Text style={styles.carMetaDot}>•</Text>
-                      <Text style={styles.carMetaText}>{car.mileage}</Text>
+            {carsLoading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : cars.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Car size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No cars yet</Text>
+                <Text style={styles.emptySubtext}>Add your first ride to the garage</Text>
+              </View>
+            ) : (
+              cars.map((car) => (
+                <TouchableOpacity
+                  key={car.id}
+                  style={[styles.garageCard, car.is_primary && styles.garageCardPrimary]}
+                  activeOpacity={0.7}
+                  onLongPress={() => handleDeleteCar(car.id)}
+                >
+                  <View style={styles.garageCardContent}>
+                    <View style={[styles.carColorBar, { backgroundColor: car.color }]} />
+                    <View style={styles.carInfo}>
+                      <View style={styles.carNameRow}>
+                        <Text style={styles.carName}>{car.name}</Text>
+                        {car.is_primary && (
+                          <View style={styles.primaryBadge}>
+                            <Text style={styles.primaryBadgeText}>PRIMARY</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.carMeta}>
+                        <Text style={styles.carMetaText}>{car.make}</Text>
+                        <Text style={styles.carMetaDot}>•</Text>
+                        <Text style={styles.carMetaText}>{car.year}</Text>
+                        <Text style={styles.carMetaDot}>•</Text>
+                        <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
+                      </View>
+                      {car.license_plate ? (
+                        <Text style={styles.carPlate}>{car.license_plate}</Text>
+                      ) : null}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.carSetPrimaryBtn}
+                      onPress={() => handleSetPrimary(car.id)}
+                      activeOpacity={0.7}
+                    >
+                      {car.is_primary ? (
+                        <CheckCircle2 size={18} color="#FF6B35" />
+                      ) : (
+                        <Circle size={18} color="#5A5A6E" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+
+            {/* Add car */}
+            {showAddCar ? (
+              <View style={styles.addCarForm}>
+                <View style={styles.addCarFormRow}>
+                  <TextInput
+                    style={styles.addCarInput}
+                    placeholder="Car name (e.g. Night Fury)"
+                    placeholderTextColor="#5A5A6E"
+                    value={newCarName}
+                    onChangeText={setNewCarName}
+                  />
+                </View>
+                <View style={styles.addCarFormRow}>
+                  <TextInput
+                    style={[styles.addCarInput, { flex: 1 }]}
+                    placeholder="Make (e.g. BMW)"
+                    placeholderTextColor="#5A5A6E"
+                    value={newCarMake}
+                    onChangeText={setNewCarMake}
+                  />
+                  <TextInput
+                    style={[styles.addCarInput, { flex: 1, marginLeft: 8 }]}
+                    placeholder="Year"
+                    placeholderTextColor="#5A5A6E"
+                    value={newCarYear}
+                    onChangeText={setNewCarYear}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.addCarFormRow}>
+                  <TextInput
+                    style={[styles.addCarInput, { flex: 1 }]}
+                    placeholder="HP"
+                    placeholderTextColor="#5A5A6E"
+                    value={newCarHP}
+                    onChangeText={setNewCarHP}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.addCarFormActions}>
+                  <TouchableOpacity style={styles.addCarCancel} onPress={() => setShowAddCar(false)}>
+                    <Text style={styles.addCarCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.addCarSubmit} onPress={handleAddCar}>
+                    <Text style={styles.addCarSubmitText}>Add Car</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addCarButton} onPress={() => setShowAddCar(true)} activeOpacity={0.7}>
+                <View style={styles.addCarIcon}>
+                  <Plus size={20} color="#FF6B35" />
+                </View>
+                <Text style={styles.addCarText}>Add a car to your garage</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* ═══ TRIPS ═══ */}
+        {activeTab === "trips" && (
+          <View style={styles.section}>
+            {tripsLoading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : trips.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Route size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No trips recorded</Text>
+                <Text style={styles.emptySubtext}>Start recording a drive to see it here</Text>
+              </View>
+            ) : (
+              trips.map((trip) => (
+                <View key={trip.id} style={styles.tripCard}>
+                  <View style={styles.tripCardHeader}>
+                    <View style={styles.tripRoute}>
+                      <MapPin size={14} color="#8A8A9A" />
+                      <Text style={styles.tripDestination} numberOfLines={1}>
+                        {trip.destination_name || trip.origin_name || "Unknown"}
+                      </Text>
+                    </View>
+                    {trip.was_faster_than_estimation && (
+                      <View style={styles.tripFastBadge}>
+                        <Zap size={12} color="#FFD700" />
+                        <Text style={styles.tripFastBadgeText}>FAST</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.tripStats}>
+                    <View style={styles.tripStat}>
+                      <Route size={14} color="#FF6B35" />
+                      <Text style={styles.tripStatValue}>{trip.distance_km.toFixed(1)} km</Text>
+                    </View>
+                    <View style={styles.tripStat}>
+                      <Timer size={14} color="#FF6B35" />
+                      <Text style={styles.tripStatValue}>{formatDuration(trip.duration_seconds)}</Text>
+                    </View>
+                    <View style={styles.tripStat}>
+                      <Gauge size={14} color="#FF6B35" />
+                      <Text style={styles.tripStatValue}>{trip.avg_speed_kmh.toFixed(0)} km/h</Text>
+                    </View>
+                    <View style={styles.tripStat}>
+                      <Trophy size={14} color="#FFD700" />
+                      <Text style={styles.tripStatValue}>+{trip.xp_earned} XP</Text>
                     </View>
                   </View>
-                  <ChevronRight size={18} color="#5A5A6E" />
+                  <Text style={styles.tripDate}>{formatDate(trip.completed_at)}</Text>
                 </View>
-              </TouchableOpacity>
-            ))}
-
-            {/* Add car button */}
-            <TouchableOpacity style={styles.addCarButton} activeOpacity={0.7}>
-              <View style={styles.addCarIcon}>
-                <Car size={20} color="#FF6B35" />
-              </View>
-              <Text style={styles.addCarText}>Add a car to your garage</Text>
-            </TouchableOpacity>
+              ))
+            )}
           </View>
         )}
 
-        {/* Achievements */}
-        {activeTab === "achievements" && (
+        {/* ═══ FRIENDS ═══ */}
+        {activeTab === "friends" && (
           <View style={styles.section}>
-            {MOCK_ACHIEVEMENTS.map((ach) => (
-              <View
-                key={ach.id}
-                style={[styles.achievementCard, !ach.earned && styles.achievementLocked]}
-              >
-                <View
-                  style={[
-                    styles.achievementIcon,
-                    {
-                      backgroundColor: ach.earned ? ach.color + "20" : "rgba(255,255,255,0.03)",
-                    },
-                  ]}
-                >
-                  <ach.icon size={22} color={ach.earned ? ach.color : "#3A3A4E"} />
-                  {ach.earned && (
-                    <View style={[styles.achievementCheck, { backgroundColor: ach.color }]}>
-                      <Star size={8} color="#FFFFFF" fill="#FFFFFF" />
+            {/* Search */}
+            <View style={styles.friendSearchRow}>
+              <View style={styles.friendSearchInputWrapper}>
+                <Search size={16} color="#5A5A6E" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.friendSearchInput}
+                  placeholder="Search users by name..."
+                  placeholderTextColor="#5A5A6E"
+                  value={friendSearchQuery}
+                  onChangeText={setFriendSearchQuery}
+                  onSubmitEditing={handleSearchFriends}
+                  returnKeyType="search"
+                />
+                {friendSearchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => { setFriendSearchQuery(""); setFriendSearchResults([]); }}>
+                    <X size={16} color="#5A5A6E" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity style={styles.friendSearchBtn} onPress={handleSearchFriends} activeOpacity={0.7}>
+                <Text style={styles.friendSearchBtnText}>Find</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Search results */}
+            {friendSearchResults.length > 0 && (
+              <View style={styles.friendResults}>
+                {friendSearchResults.map((r) => (
+                  <View key={r.id} style={styles.friendResultRow}>
+                    <View style={styles.friendResultAvatar}>
+                      <Text style={styles.friendResultAvatarText}>{r.name[0].toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendResultName}>{r.name}</Text>
+                      <Text style={styles.friendResultLevel}>Level {r.level}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.friendAddBtn}
+                      onPress={() => handleAddFriend(r.id, r.name)}
+                      activeOpacity={0.7}
+                    >
+                      <UserPlus size={16} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Friends list */}
+            {friendsLoading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : friends.length === 0 ? (
+              <View style={[styles.emptyState, { marginTop: 20 }]}>
+                <Users size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No friends yet</Text>
+                <Text style={styles.emptySubtext}>Search for drivers and add them</Text>
+              </View>
+            ) : (
+              friends.map((f) => (
+                <View key={f.id} style={styles.friendCard}>
+                  <TouchableOpacity
+                    style={styles.friendInfo}
+                    onPress={() => handleOpenConversation(f.user_id === user?.id ? f.friend_id : f.user_id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>
+                        {(f.friend_profile?.name ?? "?")[0]?.toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>
+                        {f.friend_profile?.name ?? "Unknown"}
+                      </Text>
+                      <Text style={styles.friendStatus}>
+                        {f.status === "pending"
+                          ? f.user_id === user?.id
+                            ? "Request sent"
+                            : "Wants to be friends"
+                          : f.status === "accepted"
+                          ? "Friend"
+                          : "Blocked"}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {f.status === "pending" && f.friend_id === user?.id && (
+                    <View style={styles.friendActions}>
+                      <TouchableOpacity
+                        style={styles.friendAcceptBtn}
+                        onPress={() => handleAcceptFriend(f.id)}
+                      >
+                        <CheckCircle2 size={20} color="#22C55E" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.friendRejectBtn}
+                        onPress={() => handleRejectFriend(f.id)}
+                      >
+                        <X size={20} color="#EF4444" />
+                      </TouchableOpacity>
                     </View>
                   )}
+
+                  {f.status === "accepted" && (
+                    <TouchableOpacity
+                      style={styles.friendMsgBtn}
+                      onPress={() => handleOpenConversation(f.user_id === user?.id ? f.friend_id : f.user_id)}
+                    >
+                      <MessageCircle size={18} color="#FF6B35" />
+                    </TouchableOpacity>
+                  )}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.achievementTitle, !ach.earned && { color: "#5A5A6E" }]}>
-                    {ach.title}
-                  </Text>
-                  <Text style={styles.achievementDesc}>{ach.desc}</Text>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ═══ MESSAGES ═══ */}
+        {activeTab === "messages" && (
+          <View style={styles.section}>
+            {selectedConversation ? (
+              <View style={styles.conversationWrap}>
+                {/* Back button */}
+                <TouchableOpacity
+                  style={styles.conversationBack}
+                  onPress={() => { setSelectedConversation(null); setConversationMessages([]); }}
+                >
+                  <ArrowLeft size={20} color="#FFFFFF" />
+                  <Text style={styles.conversationBackText}>Back</Text>
+                </TouchableOpacity>
+
+                {/* Messages */}
+                <View style={styles.conversationMessages}>
+                  {conversationMessages.map((msg) => (
+                    <View
+                      key={msg.id}
+                      style={[
+                        styles.msgBubble,
+                        msg.sender_id === user?.id ? styles.msgSent : styles.msgReceived,
+                      ]}
+                    >
+                      <Text style={styles.msgText}>{msg.content}</Text>
+                      <Text style={styles.msgTime}>
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </Text>
+                    </View>
+                  ))}
+                  {conversationMessages.length === 0 && (
+                    <Text style={styles.msgEmpty}>No messages yet. Say hello!</Text>
+                  )}
+                </View>
+
+                {/* Input */}
+                <View style={styles.msgInputRow}>
+                  <TextInput
+                    style={styles.msgInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor="#5A5A6E"
+                    value={messageInput}
+                    onChangeText={setMessageInput}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={[styles.msgSendBtn, !messageInput.trim() && { opacity: 0.4 }]}
+                    onPress={handleSendMessage}
+                    disabled={!messageInput.trim()}
+                  >
+                    <Send size={18} color="#FFFFFF" />
+                  </TouchableOpacity>
                 </View>
               </View>
-            ))}
+            ) : (
+              <>
+                {messagesLoading ? (
+                  <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+                ) : messages.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <MessageCircle size={40} color="#3A3A4E" />
+                    <Text style={styles.emptyText}>No messages</Text>
+                    <Text style={styles.emptySubtext}>Chat with your friends here</Text>
+                  </View>
+                ) : (
+                  // Group messages by conversation partner
+                  (() => {
+                    const convos = new Map<string, MessageItem>();
+                    messages.forEach((m) => {
+                      const partnerId = m.sender_id === user?.id ? m.receiver_id : m.sender_id;
+                      if (!convos.has(partnerId) || new Date(m.created_at) > new Date(convos.get(partnerId)!.created_at)) {
+                        convos.set(partnerId, m);
+                      }
+                    });
+                    return Array.from(convos.entries()).map(([partnerId, lastMsg]) => (
+                      <TouchableOpacity
+                        key={partnerId}
+                        style={styles.msgConvoRow}
+                        onPress={() => handleOpenConversation(partnerId)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.msgConvoAvatar}>
+                          <Text style={styles.msgConvoAvatarText}>
+                            {(partnerId.slice(0, 1)).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.msgConvoName}>
+                            {lastMsg.sender_id === user?.id ? "You" : "Friend"}
+                          </Text>
+                          <Text style={styles.msgConvoPreview} numberOfLines={1}>
+                            {lastMsg.content}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={styles.msgConvoTime}>
+                            {new Date(lastMsg.created_at).toLocaleDateString()}
+                          </Text>
+                          {!lastMsg.is_read && lastMsg.receiver_id === user?.id && (
+                            <View style={styles.msgUnreadDot} />
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    ));
+                  })()
+                )}
+              </>
+            )}
           </View>
         )}
 
-        {/* Stats */}
-        {activeTab === "stats" && (
-          <View style={styles.section}>
-            <View style={styles.statsGrid}>
-              {[
-                { label: "Total Distance", value: `${(MOCK_STATS.totalKm / 1000).toFixed(1)}k km`, icon: MapPin },
-                { label: "Top Speed", value: `${MOCK_STATS.topSpeed} km/h`, icon: Gauge },
-                { label: "Avg Speed", value: `${MOCK_STATS.avgSpeed} km/h`, icon: Clock },
-                { label: "Hours Driven", value: `${MOCK_STATS.hoursDriven}h`, icon: Flame },
-                { label: "Quests Done", value: String(MOCK_STATS.questsCompleted), icon: Trophy },
-                { label: "Events Joined", value: String(MOCK_STATS.eventsAttended), icon: Star },
-              ].map((stat, i) => (
-                <View key={i} style={styles.statCard}>
-                  <stat.icon size={18} color="#FF6B35" />
-                  <Text style={styles.statValue}>{stat.value}</Text>
-                  <Text style={styles.statLabel}>{stat.label}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Settings Section */}
-        <View style={[styles.settingsSection, { marginHorizontal: 20 }]}>
+        {/* ═══ SETTINGS ═══ */}
+        <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>Settings</Text>
-
-          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
-            <View style={styles.settingLeft}>
-              {isDark ? <Moon size={18} color="#8A8A9A" /> : <Sun size={18} color="#FFD700" />}
-              <Text style={styles.settingText}>Dark Mode</Text>
-            </View>
-            <Switch
-              value={isDark}
-              onValueChange={toggleTheme}
-              trackColor={{ false: "#2A2A3A", true: "#FF6B3530" }}
-              thumbColor={isDark ? "#FF6B35" : "#5A5A6E"}
-            />
-          </TouchableOpacity>
 
           <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/terms-and-conditions" as any)}>
             <View style={styles.settingLeft}>
@@ -332,19 +1017,78 @@ export default function ProfileScreen() {
   );
 }
 
+// ─── Styles ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#060609",
   },
-  background: {
+  bg: {
     ...StyleSheet.absoluteFillObject,
   },
-  // Profile header
+  // ─── Not logged in ──────────────────────────────────────
+  loginPrompt: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  loginPromptIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  loginPromptTitle: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 8,
+  },
+  loginPromptDesc: {
+    fontSize: 15,
+    color: "#8A8A9A",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 32,
+  },
+  loginPromptBtn: {
+    width: "100%",
+    borderRadius: 14,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  loginPromptBtnGradient: {
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loginPromptBtnText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  loginPromptBtnSecondary: {
+    width: "100%",
+    height: 52,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  loginPromptBtnSecondaryText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  // ─── Profile header ─────────────────────────────────────
   profileHeader: {
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingBottom: 16,
   },
   avatarSection: {
     marginBottom: 12,
@@ -384,7 +1128,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#0A0A0F",
   },
-  levelText: {
+  levelBadgeText: {
     fontSize: 13,
     fontWeight: "800",
     color: "#000",
@@ -399,7 +1143,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#FF6B35",
     fontWeight: "600",
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+  xpSection: {
+    width: "100%",
+    marginBottom: 18,
+  },
+  xpBarRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  xpLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#5A5A6E",
+    letterSpacing: 1,
+    textTransform: "uppercase" as const,
+  },
+  xpValue: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#8A8A9A",
+  },
+  xpTrack: {
+    height: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  xpFill: {
+    height: "100%",
+    borderRadius: 3,
   },
   quickStats: {
     flexDirection: "row",
@@ -429,60 +1204,11 @@ const styles = StyleSheet.create({
     color: "#8A8A9A",
     marginTop: 2,
   },
-  // Wallet
-  walletCard: {
-    marginTop: 24,
-    marginBottom: 8,
-    borderRadius: 16,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  walletGradient: {
-    padding: 20,
-  },
-  walletRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  walletLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  walletLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#5A5A6E",
-    letterSpacing: 1,
-  },
-  walletAmount: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  walletActions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 16,
-  },
-  walletBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  walletBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  // Content tabs
+  // ─── Content tabs ───────────────────────────────────────
   contentTabs: {
     flexDirection: "row",
     marginHorizontal: 20,
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 4,
     backgroundColor: "rgba(255, 255, 255, 0.03)",
     borderRadius: 12,
@@ -490,27 +1216,30 @@ const styles = StyleSheet.create({
   },
   contentTab: {
     flex: 1,
+    flexDirection: "row",
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   contentTabActive: {
     backgroundColor: "rgba(255, 107, 53, 0.12)",
   },
   contentTabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
     color: "#5A5A6E",
   },
   contentTabTextActive: {
     color: "#FF6B35",
   },
-  // Content section
+  // ─── Section ────────────────────────────────────────────
   section: {
     paddingHorizontal: 20,
     paddingTop: 16,
   },
-  // Garage
+  // ─── Garage ─────────────────────────────────────────────
   garageCard: {
     backgroundColor: "rgba(255, 255, 255, 0.03)",
     borderRadius: 14,
@@ -519,25 +1248,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.05)",
   },
+  garageCardPrimary: {
+    borderColor: "#FF6B3540",
+    backgroundColor: "rgba(255, 107, 53, 0.04)",
+  },
   garageCardContent: {
     flexDirection: "row",
     alignItems: "center",
   },
   carColorBar: {
     width: 4,
-    height: 72,
+    height: 80,
     borderTopLeftRadius: 14,
     borderBottomLeftRadius: 14,
   },
   carInfo: {
     flex: 1,
-    padding: 16,
+    padding: 14,
+  },
+  carNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
   },
   carName: {
     fontSize: 16,
     fontWeight: "700",
     color: "#FFFFFF",
-    marginBottom: 4,
+  },
+  primaryBadge: {
+    backgroundColor: "rgba(255, 107, 53, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  primaryBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#FF6B35",
+    letterSpacing: 0.5,
   },
   carMeta: {
     flexDirection: "row",
@@ -551,6 +1301,15 @@ const styles = StyleSheet.create({
   carMetaDot: {
     color: "#3A3A4E",
     fontSize: 10,
+  },
+  carPlate: {
+    fontSize: 11,
+    color: "#5A5A6E",
+    marginTop: 4,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  carSetPrimaryBtn: {
+    padding: 12,
   },
   addCarButton: {
     flexDirection: "row",
@@ -575,11 +1334,58 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#8A8A9A",
   },
-  // Achievements
-  achievementCard: {
+  addCarForm: {
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.15)",
+    gap: 8,
+  },
+  addCarFormRow: {
     flexDirection: "row",
+  },
+  addCarInput: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    height: 44,
+    fontSize: 14,
+    color: "#FFFFFF",
+  },
+  addCarFormActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  addCarCancel: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    justifyContent: "center",
     alignItems: "center",
-    gap: 14,
+  },
+  addCarCancelText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#8A8A9A",
+  },
+  addCarSubmit: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addCarSubmitText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  // ─── Trips ──────────────────────────────────────────────
+  tripCard: {
     backgroundColor: "rgba(255, 255, 255, 0.03)",
     borderRadius: 14,
     padding: 16,
@@ -587,67 +1393,330 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.05)",
   },
-  achievementLocked: {
-    opacity: 0.5,
-  },
-  achievementIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    justifyContent: "center",
+  tripCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    position: "relative",
+    marginBottom: 10,
   },
-  achievementCheck: {
-    position: "absolute",
-    bottom: -2,
-    right: -2,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: "center",
+  tripRoute: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 6,
+    flex: 1,
   },
-  achievementTitle: {
-    fontSize: 15,
-    fontWeight: "700",
+  tripDestination: {
+    fontSize: 14,
+    fontWeight: "600",
     color: "#FFFFFF",
-    marginBottom: 2,
+    flex: 1,
   },
-  achievementDesc: {
+  tripFastBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 215, 0, 0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  tripFastBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#FFD700",
+    letterSpacing: 0.5,
+  },
+  tripStats: {
+    flexDirection: "row",
+    gap: 14,
+    marginBottom: 8,
+  },
+  tripStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  tripStatValue: {
     fontSize: 12,
+    fontWeight: "600",
     color: "#8A8A9A",
   },
-  // Stats
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+  tripDate: {
+    fontSize: 11,
+    color: "#5A5A6E",
   },
-  statCard: {
-    width: "30%",
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderRadius: 14,
-    padding: 16,
+  // ─── Friends ────────────────────────────────────────────
+  friendSearchRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  friendSearchInputWrapper: {
+    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  friendSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#FFFFFF",
+  },
+  friendSearchBtn: {
+    backgroundColor: "#FF6B35",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  friendSearchBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  friendResults: {
+    marginBottom: 16,
+  },
+  friendResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.05)",
   },
-  statValue: {
-    fontSize: 18,
-    fontWeight: "800",
+  friendResultAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 107, 53, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  friendResultAvatarText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FF6B35",
+  },
+  friendResultName: {
+    fontSize: 15,
+    fontWeight: "600",
     color: "#FFFFFF",
-    marginTop: 8,
   },
-  statLabel: {
-    fontSize: 10,
+  friendResultLevel: {
+    fontSize: 12,
     color: "#8A8A9A",
-    marginTop: 4,
-    textAlign: "center",
   },
-  // Settings
+  friendAddBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  friendCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  friendInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  friendAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 107, 53, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  friendAvatarText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FF6B35",
+  },
+  friendName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  friendStatus: {
+    fontSize: 12,
+    color: "#8A8A9A",
+  },
+  friendActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  friendAcceptBtn: {
+    padding: 4,
+  },
+  friendRejectBtn: {
+    padding: 4,
+  },
+  friendMsgBtn: {
+    padding: 4,
+  },
+  // ─── Messages ───────────────────────────────────────────
+  msgConvoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  msgConvoAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  msgConvoAvatarText: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#FF6B35",
+  },
+  msgConvoName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    marginBottom: 2,
+  },
+  msgConvoPreview: {
+    fontSize: 13,
+    color: "#5A5A6E",
+  },
+  msgConvoTime: {
+    fontSize: 11,
+    color: "#5A5A6E",
+    marginBottom: 4,
+  },
+  msgUnreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FF6B35",
+  },
+  conversationWrap: {
+    flex: 1,
+  },
+  conversationBack: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 16,
+  },
+  conversationBackText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  conversationMessages: {
+    minHeight: 200,
+  },
+  msgBubble: {
+    maxWidth: "80%",
+    padding: 12,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  msgSent: {
+    alignSelf: "flex-end",
+    backgroundColor: "#FF6B35",
+    borderBottomRightRadius: 4,
+  },
+  msgReceived: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderBottomLeftRadius: 4,
+  },
+  msgText: {
+    fontSize: 14,
+    color: "#FFFFFF",
+    fontWeight: "500",
+  },
+  msgTime: {
+    fontSize: 10,
+    color: "rgba(255, 255, 255, 0.5)",
+    marginTop: 4,
+    alignSelf: "flex-end",
+  },
+  msgEmpty: {
+    fontSize: 14,
+    color: "#5A5A6E",
+    textAlign: "center",
+    marginTop: 40,
+  },
+  msgInputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.05)",
+  },
+  msgInput: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#FFFFFF",
+    maxHeight: 100,
+  },
+  msgSendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // ─── Empty state ─────────────────────────────────────────
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#5A5A6E",
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: "#3A3A4E",
+    marginTop: 4,
+  },
+  // ─── Settings ───────────────────────────────────────────
   settingsSection: {
     marginTop: 24,
+    marginHorizontal: 20,
     marginBottom: 4,
   },
   settingsTitle: {

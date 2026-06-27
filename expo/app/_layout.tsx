@@ -44,6 +44,8 @@ function RootLayoutNav() {
       <Stack.Screen name="top-up-history" options={{ headerShown: false }} />
       <Stack.Screen name="payment-checkout" options={{ headerShown: false }} />
       <Stack.Screen name="chat" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
     </Stack>
   );
 }
