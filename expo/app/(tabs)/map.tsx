@@ -640,7 +640,7 @@ export default function MapScreen() {
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        showsUserLocation={!isRecording}
+        showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
         zoomEnabled
@@ -746,8 +746,8 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker (only when not recording, since recording uses native location dot) */}
-        {userLocation && !isRecording && (
+        {/* User car marker — always visible, recording or not */}
+        {userLocation && (
           <Marker
             coordinate={userLocation}
             anchor={{ x: 0.5, y: 0.5 }}
@@ -756,7 +756,7 @@ export default function MapScreen() {
           >
             <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
               <View style={styles.carGlow} />
-              <View style={styles.carRing}>
+              <View style={[styles.carRing, isRecording && styles.carRingRecording]}>
                 <Navigation size={16} color="#FF6B35" fill="#FF6B3525" strokeWidth={2.5} />
               </View>
             </Animated.View>
@@ -1224,6 +1224,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.45,
     shadowRadius: 14,
     elevation: 10,
+  },
+  carRingRecording: {
+    borderColor: "#FF2D55",
+    shadowColor: "#FF2D55",
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
   },
   // Destination pin
   destPin: {
