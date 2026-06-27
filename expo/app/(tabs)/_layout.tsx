@@ -49,6 +49,7 @@ export default function TabLayout() {
     <View style={styles.container}>
       <View style={styles.content}>{renderContent()}</View>
 
+      {/* Floating tab pill — sits above map content */}
       <TabBarBg {...tabBarBgProps}>
         <View style={styles.tabPill}>
           {TABS.map((tab) => {
