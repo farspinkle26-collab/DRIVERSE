@@ -63,6 +63,10 @@ interface CafePOI {
   types: string[];
 }
 
+type SelectedDestination =
+  | { type: "cafe"; data: CafePOI }
+  | { type: "location"; lat: number; lng: number };
+
 interface RouteInfo {
   coordinates: { latitude: number; longitude: number }[];
   distanceKm: string;
@@ -198,7 +202,9 @@ export default function MapScreen() {
   // Cafe state
   const [cafes, setCafes] = useState<CafePOI[]>([]);
   const [loadingCafes, setLoadingCafes] = useState(false);
-  const [selectedCafe, setSelectedCafe] = useState<CafePOI | null>(null);
+
+  // Selected destination (cafe or custom tapped location)
+  const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
 
   // Navigation / routing state
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
@@ -283,13 +289,13 @@ export default function MapScreen() {
     setLoadingCafes(false);
   }, [fetchCityCafes]);
 
-  // --- Fetch directions from user location to cafe ---
-  const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: CafePOI) => {
+  // --- Fetch directions from user location to destination ---
+  const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
     if (!GOOGLE_API_KEY) return;
     setLoadingRoute(true);
     try {
       const url =
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.lat},${dest.lng}&key=${GOOGLE_API_KEY}&mode=driving`;
+        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&key=${GOOGLE_API_KEY}&mode=driving`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -382,7 +388,6 @@ export default function MapScreen() {
                 if (lastCoordRef.current) {
                   const dist = haversineMeters(lastCoordRef.current, newCoord);
                   if (dist > 0.1) {
-                    // Ignore sub-meter noise
                     setTripDistance((d) => d + dist);
                   }
                 }
@@ -476,7 +481,7 @@ export default function MapScreen() {
   }, [userLocation, heading]);
 
   const handleCafePress = (cafe: CafePOI) => {
-    setSelectedCafe(cafe);
+    setSelectedDestination({ type: "cafe", data: cafe });
     setRouteInfo(null);
     mapRef.current?.animateCamera(
       { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 16, pitch: 40 },
@@ -484,19 +489,31 @@ export default function MapScreen() {
     );
   };
 
+  const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
+    if (!selectedDestination) return null;
+    if (selectedDestination.type === "cafe") {
+      return { latitude: selectedDestination.data.lat, longitude: selectedDestination.data.lng };
+    }
+    return { latitude: selectedDestination.lat, longitude: selectedDestination.lng };
+  }, [selectedDestination]);
+
   const handleNavigate = useCallback(() => {
-    if (!userLocation || !selectedCafe) return;
+    const coords = destCoords();
+    if (!userLocation || !coords) return;
     setNavigating(true);
-    fetchDirections(userLocation, selectedCafe);
-  }, [userLocation, selectedCafe, fetchDirections]);
+    fetchDirections(userLocation, coords);
+  }, [userLocation, destCoords, fetchDirections]);
 
   const clearRoute = useCallback(() => {
     setRouteInfo(null);
     setNavigating(false);
   }, []);
 
-  const handleMapPress = useCallback(() => {
-    setSelectedCafe(null);
+  // --- Map press: drop a pin at tapped location ---
+  const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
+    setRouteInfo(null);
   }, []);
 
   // --- Recording handlers ---
@@ -561,7 +578,7 @@ export default function MapScreen() {
       >
         {/* Cafe & Restaurant Markers */}
         {!isRecording && cafes.map((cafe) => {
-          const isSelected = selectedCafe?.id === cafe.id;
+          const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === cafe.id;
           return (
             <Marker
               key={cafe.id}
@@ -631,13 +648,25 @@ export default function MapScreen() {
         )}
 
         {/* Destination marker (when navigating) */}
-        {selectedCafe && routeInfo && (
+        {selectedDestination && routeInfo && destCoords() && (
           <Marker
-            coordinate={{ latitude: selectedCafe.lat, longitude: selectedCafe.lng }}
+            coordinate={destCoords()!}
             anchor={{ x: 0.5, y: 1 }}
           >
             <View style={styles.destPin}>
               <MapPin size={28} color={ROUTE_RED} fill={ROUTE_RED} />
+            </View>
+          </Marker>
+        )}
+
+        {/* Custom location marker (tapped, no route yet) */}
+        {selectedDestination && selectedDestination.type === "location" && !routeInfo && (
+          <Marker
+            coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <View style={styles.customPin}>
+              <MapPin size={28} color="#FF6B35" fill="#FF6B35" />
             </View>
           </Marker>
         )}
@@ -769,7 +798,9 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   POST-RECORDING TRIP SUMMARY                         */}
       {/* ===================================================== */}
-      {!isRecording && recordedPath.length > 1 && tripDistance > 0 && (
+      {!isRecording && recordedPath.length > 1 && tripDistance > 0 && (() => {
+        const avgSpeed = elapsedMs > 0 ? ((tripDistance / 1000) / (elapsedMs / 3600000)) : 0;
+        return (
         <View style={[styles.tripSummaryCard, { paddingBottom: insets.bottom + 90 }]}>
           <View style={styles.tripSummaryHeader}>
             <Text style={styles.tripSummaryTitle}>Trip Recorded</Text>
@@ -789,13 +820,22 @@ export default function MapScreen() {
               <Route size={16} color={RECORD_RED} />
               <Text style={styles.tripStatValue}>{fmtMeters(tripDistance)}</Text>
             </View>
+            <View style={styles.tripSummaryDivider} />
             <View style={styles.tripStat}>
               <Clock size={16} color="#F59E0B" />
               <Text style={styles.tripStatValue}>{fmtTimer(elapsedMs)}</Text>
             </View>
+            <View style={styles.tripSummaryDivider} />
+            <View style={styles.tripStat}>
+              <View style={styles.tripSpeedIcon}>
+                <Text style={styles.tripSpeedLabel}>km/h</Text>
+              </View>
+              <Text style={styles.tripStatValue}>{avgSpeed.toFixed(1)}</Text>
+            </View>
           </View>
         </View>
-      )}
+        );
+      })()}
 
       {/* --- Right-side buttons --- */}
       {!isRecording && (
@@ -811,25 +851,41 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* --- Selected cafe card --- */}
-      {selectedCafe && !routeInfo && !isRecording && (
+      {/* --- Selected destination card (cafe or custom location) --- */}
+      {selectedDestination && !routeInfo && !isRecording && (() => {
+        const isCafe = selectedDestination.type === "cafe";
+        const destName = isCafe
+          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+          : "Selected Location";
+        const destVicinity = isCafe
+          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.vicinity
+          : undefined;
+        const destRating = isCafe
+          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.rating
+          : undefined;
+        const coordsStr = !isCafe
+          ? `Lat: ${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(5)}, Lng: ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(5)}`
+          : undefined;
+        return (
         <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 90 }]}>
           <TouchableOpacity
             style={styles.cafeCardClose}
-            onPress={() => setSelectedCafe(null)}
+            onPress={() => setSelectedDestination(null)}
           >
             <View style={styles.cafeCardCloseBar} />
           </TouchableOpacity>
           <View style={styles.cafeCardContent}>
             <View style={styles.cafeCardInfo}>
-              <Text style={styles.cafeCardName} numberOfLines={2}>{selectedCafe.name}</Text>
-              {selectedCafe.vicinity ? (
-                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{selectedCafe.vicinity}</Text>
+              <Text style={styles.cafeCardName} numberOfLines={2}>{destName}</Text>
+              {destVicinity ? (
+                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{destVicinity}</Text>
+              ) : coordsStr ? (
+                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{coordsStr}</Text>
               ) : null}
-              {selectedCafe.rating ? (
+              {destRating ? (
                 <View style={styles.ratingRow}>
                   <Text style={styles.ratingStar}>★</Text>
-                  <Text style={styles.ratingText}>{selectedCafe.rating.toFixed(1)}</Text>
+                  <Text style={styles.ratingText}>{destRating.toFixed(1)}</Text>
                 </View>
               ) : null}
             </View>
@@ -843,7 +899,8 @@ export default function MapScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+        );
+      })()}
 
       {/* --- Navigation route card (distance + ETA) --- */}
       {routeInfo && (
@@ -891,12 +948,17 @@ export default function MapScreen() {
               </View>
             )}
 
-            {selectedCafe && !loadingRoute && (
-              <View style={styles.routeDest}>
-                <MapPin size={14} color={ROUTE_RED} />
-                <Text style={styles.routeDestText} numberOfLines={1}>{selectedCafe.name}</Text>
-              </View>
-            )}
+            {(() => {
+              const destName = selectedDestination?.type === "cafe"
+                ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+                : "Selected Location";
+              return selectedDestination && !loadingRoute ? (
+                <View style={styles.routeDest}>
+                  <MapPin size={14} color={ROUTE_RED} />
+                  <Text style={styles.routeDestText} numberOfLines={1}>{destName}</Text>
+                </View>
+              ) : null;
+            })()}
           </View>
         </Animated.View>
       )}
@@ -1042,6 +1104,14 @@ const styles = StyleSheet.create({
   destPin: {
     alignItems: "center",
     shadowColor: ROUTE_RED,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+  },
+  // Custom location pin (orange, tapped on map)
+  customPin: {
+    alignItems: "center",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
@@ -1250,6 +1320,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#FFFFFF",
     fontWeight: "700",
+  },
+  tripSummaryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginHorizontal: 4,
+  },
+  tripSpeedIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tripSpeedLabel: {
+    fontSize: 9,
+    color: "#3B82F6",
+    fontWeight: "800",
   },
   // Cafe card
   cafeCard: {
