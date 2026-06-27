@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -13,54 +13,27 @@ import MapView, { Marker, Callout, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
-  Wrench,
-  Coffee,
-  Fuel,
-  Zap,
-  Calendar,
-  Mountain,
-  Users,
-  AlertTriangle,
   Navigation,
-  Compass,
-  MapPin,
   Crosshair,
+  UtensilsCrossed,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// --- Realistic Jakarta-area POIs ---
-const POIS = [
-  { id: "1", type: "workshop" as const, name: "Garage 75 Racing", lat: -6.2010, lng: 106.8435 },
-  { id: "2", type: "workshop" as const, name: "AutoPro Performance", lat: -6.1935, lng: 106.8380 },
-  { id: "3", type: "cafe" as const, name: "Pit Stop Café Garage", lat: -6.1953, lng: 106.8405 },
-  { id: "4", type: "cafe" as const, name: "Drive Thru Brew", lat: -6.2080, lng: 106.8340 },
-  { id: "5", type: "fuel" as const, name: "Shell V-Power Senayan", lat: -6.2095, lng: 106.8485 },
-  { id: "6", type: "fuel" as const, name: "Pertamina Turbo", lat: -6.1920, lng: 106.8440 },
-  { id: "7", type: "ev" as const, name: "Tesla Supercharger SCBD", lat: -6.1975, lng: 106.8505 },
-  { id: "8", type: "ev" as const, name: "ION Charge Station", lat: -6.2140, lng: 106.8420 },
-  { id: "9", type: "event" as const, name: "Night Rally @ Kemang", lat: -6.2045, lng: 106.8355 },
-  { id: "10", type: "event" as const, name: "Cars & Coffee Jakarta", lat: -6.1910, lng: 106.8560 },
-  { id: "11", type: "scenic" as const, name: "Puncak Pass Drive", lat: -6.1880, lng: 106.8555 },
-  { id: "12", type: "scenic" as const, name: "Ancol Coastal Road", lat: -6.2110, lng: 106.8580 },
-  { id: "13", type: "community" as const, name: "Jakarta Car Club HQ", lat: -6.2155, lng: 106.8415 },
-  { id: "14", type: "community" as const, name: "IDM Garage Community", lat: -6.1905, lng: 106.8390 },
-  { id: "15", type: "emergency" as const, name: "24H Towing Station", lat: -6.2060, lng: 106.8370 },
-];
+// --- Google Places nearby search ---
+const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLEMAPS ?? "";
+const PLACES_SEARCH_RADIUS = 3000; // 3km radius
 
-type POIType = "workshop" | "cafe" | "fuel" | "ev" | "event" | "scenic" | "community" | "emergency";
-
-const POI_CONFIG: Record<POIType, { color: string; glow: string; icon: React.FC<{ size: number; color: string }>; label: string }> = {
-  workshop:  { color: "#FF6B35", glow: "#FF6B3525", icon: Wrench,       label: "Workshop" },
-  cafe:      { color: "#8B5CF6", glow: "#8B5CF625", icon: Coffee,       label: "Café" },
-  fuel:      { color: "#F59E0B", glow: "#F59E0B25", icon: Fuel,         label: "Fuel" },
-  ev:        { color: "#22C55E", glow: "#22C55E25", icon: Zap,          label: "EV Charger" },
-  event:     { color: "#FF3B6F", glow: "#FF3B6F25", icon: Calendar,     label: "Event" },
-  scenic:    { color: "#00D4AA", glow: "#00D4AA25", icon: Mountain,     label: "Scenic" },
-  community: { color: "#3B82F6", glow: "#3B82F625", icon: Users,        label: "Community" },
-  emergency: { color: "#EF4444", glow: "#EF444425", icon: AlertTriangle, label: "Emergency" },
-};
+interface CafePOI {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  rating?: number;
+  vicinity?: string;
+  types: string[];
+}
 
 // --- Warm Glow Map Style (Forza Horizon inspired) ---
 const MAP_GLOW = [
@@ -96,14 +69,52 @@ export default function MapScreen() {
   const [heading, setHeading] = useState(0);
   const [locating, setLocating] = useState(true);
   const [locError, setLocError] = useState<string | null>(null);
-  const [selectedPOI, setSelectedPOI] = useState<typeof POIS[0] | null>(null);
-  const [activeFilters, setActiveFilters] = useState<Set<POIType>>(new Set());
+  const [cafes, setCafes] = useState<CafePOI[]>([]);
+  const [loadingCafes, setLoadingCafes] = useState(false);
+  const [selectedCafe, setSelectedCafe] = useState<CafePOI | null>(null);
 
   // Animations
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   const carFloat = useRef(new Animated.Value(0)).current;
-  const cardSlide = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
+
+  // --- Fetch nearby cafes & restaurants from Google Places ---
+  const fetchNearbyCafes = useCallback(async (lat: number, lng: number) => {
+    if (!GOOGLE_API_KEY) return;
+    setLoadingCafes(true);
+    try {
+      const types = ["cafe", "restaurant"];
+      const allResults: CafePOI[] = [];
+      const seen = new Set<string>();
+
+      for (const type of types) {
+        const url =
+          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${PLACES_SEARCH_RADIUS}&type=${type}&key=${GOOGLE_API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status === "OK" && data.results) {
+          for (const place of data.results) {
+            if (seen.has(place.place_id)) continue;
+            seen.add(place.place_id);
+            allResults.push({
+              id: place.place_id,
+              name: place.name,
+              lat: place.geometry.location.lat,
+              lng: place.geometry.location.lng,
+              rating: place.rating,
+              vicinity: place.vicinity,
+              types: place.types ?? [],
+            });
+          }
+        }
+      }
+
+      setCafes(allResults.slice(0, 60)); // Cap at 60 markers
+    } catch {
+      // Silently fail — map still works without POIs
+    } finally {
+      setLoadingCafes(false);
+    }
+  }, []);
 
   // --- GPS detection ---
   useEffect(() => {
@@ -121,7 +132,6 @@ export default function MapScreen() {
           return;
         }
 
-        // Get initial position with high accuracy
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.BestForNavigation,
           timeInterval: 3000,
@@ -145,8 +155,9 @@ export default function MapScreen() {
           );
         }, 300);
 
-        // Fade in POIs
+        // Fade in and load cafes
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+        fetchNearbyCafes(coords.latitude, coords.longitude);
 
         // Watch position
         sub = await Location.watchPositionAsync(
@@ -172,7 +183,7 @@ export default function MapScreen() {
       mounted = false;
       sub?.remove();
     };
-  }, [fadeIn]);
+  }, [fetchNearbyCafes, fadeIn]);
 
   // --- Animations ---
   useEffect(() => {
@@ -184,31 +195,6 @@ export default function MapScreen() {
     ).start();
   }, [carFloat]);
 
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.3, duration: 1800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1800, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [pulseAnim]);
-
-  // Selected card animation
-  useEffect(() => {
-    Animated.spring(cardSlide, {
-      toValue: selectedPOI ? 1 : 0,
-      useNativeDriver: true,
-      tension: 80,
-      friction: 12,
-    }).start();
-  }, [selectedPOI, cardSlide]);
-
-  // --- Filtered POIs ---
-  const visiblePOIs = useMemo(() => {
-    if (activeFilters.size === 0) return POIS;
-    return POIS.filter((p) => activeFilters.has(p.type));
-  }, [activeFilters]);
-
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
     if (!userLocation || !mapRef.current) return;
@@ -218,25 +204,12 @@ export default function MapScreen() {
     );
   }, [userLocation, heading]);
 
-  const toggleFilter = (type: POIType) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  };
-
-  const handlePOIPress = (poi: typeof POIS[0]) => {
-    setSelectedPOI(poi);
+  const handleCafePress = (cafe: CafePOI) => {
+    setSelectedCafe(cafe);
     mapRef.current?.animateCamera(
-      { center: { latitude: poi.lat, longitude: poi.lng }, zoom: 17, pitch: 40 },
+      { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
       { duration: 600 }
     );
-  };
-
-  const handleEmergency = () => {
-    router.push("/request-tow" as any);
   };
 
   // --- Map region ---
@@ -260,39 +233,25 @@ export default function MapScreen() {
         pitchEnabled
         rotateEnabled
         customMapStyle={MAP_GLOW}
-        onPress={() => setSelectedPOI(null)}
+        onPress={() => setSelectedCafe(null)}
       >
-        {/* POI Markers */}
-        {visiblePOIs.map((poi) => {
-          const cfg = POI_CONFIG[poi.type];
-          const isSelected = selectedPOI?.id === poi.id;
-          const IconComponent = cfg.icon;
+        {/* Cafe & Restaurant Markers */}
+        {cafes.map((cafe) => {
+          const isSelected = selectedCafe?.id === cafe.id;
           return (
             <Marker
-              key={poi.id}
-              coordinate={{ latitude: poi.lat, longitude: poi.lng }}
-              onPress={() => handlePOIPress(poi)}
+              key={cafe.id}
+              coordinate={{ latitude: cafe.lat, longitude: cafe.lng }}
+              onPress={() => handleCafePress(cafe)}
               tracksViewChanges={isSelected}
             >
-              <Animated.View
-                style={[
-                  styles.poiOuter,
-                  {
-                    borderColor: cfg.color + "40",
-                    backgroundColor: cfg.color + "10",
-                    transform: [
-                      { scale: isSelected ? Animated.multiply(pulseAnim, 1.15) : 1 },
-                    ],
-                  },
-                ]}
-              >
-                <View style={[styles.poiInner, { backgroundColor: cfg.color + "25", borderColor: cfg.color + "80" }]}>
-                  <IconComponent size={isSelected ? 15 : 13} color={cfg.color} />
-                </View>
-                {isSelected && (
-                  <Animated.View style={[styles.poiPulse, { borderColor: cfg.color }]} />
-                )}
-              </Animated.View>
+              <View style={[styles.cafeMarker, isSelected && styles.cafeMarkerSelected]}>
+                <UtensilsCrossed
+                  size={isSelected ? 16 : 14}
+                  color={isSelected ? CAFE_COLOR_SELECTED : CAFE_COLOR}
+                  strokeWidth={2}
+                />
+              </View>
             </Marker>
           );
         })}
@@ -340,84 +299,59 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* --- Filter chips at top --- */}
-      <Animated.View style={[styles.filterBar, { top: insets.top + 10, opacity: fadeIn }]}>
-        <Animated.ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-        >
-          {Object.entries(POI_CONFIG).map(([type, cfg]) => {
-            const isActive = activeFilters.has(type as POIType);
-            return (
-              <TouchableOpacity
-                key={type}
-                style={[
-                  styles.filterChip,
-                  isActive && { backgroundColor: cfg.color + "30", borderColor: cfg.color },
-                ]}
-                onPress={() => toggleFilter(type as POIType)}
-                activeOpacity={0.7}
-              >
-                <cfg.icon size={12} color={isActive ? cfg.color : "#6A6A7E"} />
-                <Text style={[styles.filterLabel, isActive && { color: cfg.color }]}>
-                  {cfg.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </Animated.ScrollView>
-      </Animated.View>
+      {/* --- Loading cafes indicator --- */}
+      {loadingCafes && !locating && (
+        <Animated.View style={[styles.cafeLoading, { top: insets.top + 16, opacity: fadeIn }]}>
+          <ActivityIndicator size="small" color="#8B5CF6" />
+          <Text style={styles.cafeLoadingText}>Finding cafés nearby...</Text>
+        </Animated.View>
+      )}
 
       {/* --- Right-side action buttons --- */}
       <Animated.View style={[styles.rightButtons, { top: insets.top + 60, opacity: fadeIn }]}>
         <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
           <Crosshair size={20} color="#FFFFFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionBtn, styles.sosBtn]} onPress={handleEmergency} activeOpacity={0.7}>
-          <AlertTriangle size={18} color="#EF4444" />
-        </TouchableOpacity>
       </Animated.View>
 
-      {/* --- Selected POI card — positioned above bottom nav --- */}
-      {selectedPOI && (
-        <Animated.View
-          style={[
-            styles.poiCard,
-            {
-              paddingBottom: insets.bottom + 70,
-              transform: [{ translateY: cardSlide.interpolate({ inputRange: [0, 1], outputRange: [120, 0] }) }],
-              opacity: cardSlide,
-            },
-          ]}
-        >
-          <View style={[styles.poiCardDot, { backgroundColor: POI_CONFIG[selectedPOI.type].color }]} />
-          <View style={styles.poiCardContent}>
-            <View style={styles.poiCardInfo}>
-              <Text style={styles.poiCardName}>{selectedPOI.name}</Text>
-              <Text style={styles.poiCardType}>{POI_CONFIG[selectedPOI.type].label}</Text>
+      {/* --- Selected cafe card --- */}
+      {selectedCafe && (
+        <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 70 }]}>
+          <TouchableOpacity
+            style={styles.cafeCardClose}
+            onPress={() => setSelectedCafe(null)}
+          >
+            <View style={styles.cafeCardCloseBar} />
+          </TouchableOpacity>
+          <View style={styles.cafeCardContent}>
+            <View style={styles.cafeCardInfo}>
+              <Text style={styles.cafeCardName} numberOfLines={2}>{selectedCafe.name}</Text>
+              {selectedCafe.vicinity ? (
+                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{selectedCafe.vicinity}</Text>
+              ) : null}
+              {selectedCafe.rating ? (
+                <View style={styles.ratingRow}>
+                  <Text style={styles.ratingStar}>★</Text>
+                  <Text style={styles.ratingText}>{selectedCafe.rating.toFixed(1)}</Text>
+                </View>
+              ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.poiCardGo}
-              onPress={() => {
-                setSelectedPOI(null);
-              }}
-              activeOpacity={0.7}
-            >
-              <Compass size={17} color="#FF6B35" />
-              <Text style={styles.poiGoText}>Navigate</Text>
-            </TouchableOpacity>
+            <View style={styles.cafeCardCuisine}>
+              <Text style={styles.cafeCardCuisineText}>
+                {selectedCafe.types.includes("cafe") ? "Café" : "Restaurant"}
+              </Text>
+            </View>
           </View>
-        </Animated.View>
+        </View>
       )}
-
-      {/* --- Bottom fade gradient --- */}
-      <View style={styles.bottomFade} pointerEvents="none" />
     </View>
   );
 }
 
 // --- Styles ---
+const CAFE_COLOR = "#8B5CF6";
+const CAFE_COLOR_SELECTED = "#A78BFA";
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -449,6 +383,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
   },
+  // Cafe loading
+  cafeLoading: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    alignItems: "center",
+    zIndex: 100,
+  },
+  cafeLoadingText: {
+    color: "#A78BFA",
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 6,
+    backgroundColor: "rgba(139, 92, 246, 0.1)",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
   // Error banner
   errorBanner: {
     position: "absolute",
@@ -475,31 +428,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
-  // POI markers
-  poiOuter: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  // Cafe marker (clean fork+knife symbol)
+  cafeMarker: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(18, 18, 30, 0.92)",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1.5,
+    borderColor: CAFE_COLOR + "50",
   },
-  poiInner: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
+  cafeMarkerSelected: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderColor: CAFE_COLOR_SELECTED,
+    backgroundColor: "rgba(139, 92, 246, 0.15)",
+    shadowColor: CAFE_COLOR,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  poiPulse: {
-    position: "absolute",
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1.5,
-    opacity: 0,
-  },
+
   // Car marker
   carMarker: {
     alignItems: "center",
@@ -527,33 +479,6 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 10,
   },
-  // Filter bar
-  filterBar: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    zIndex: 100,
-  },
-  filterScroll: {
-    paddingHorizontal: 12,
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(18, 18, 30, 0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  filterLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#6A6A7E",
-  },
   // Right buttons
   rightButtons: {
     position: "absolute",
@@ -571,27 +496,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
   },
-  sosBtn: {
-    backgroundColor: "rgba(239, 68, 68, 0.12)",
-    borderColor: "rgba(239, 68, 68, 0.3)",
-  },
-  // POI card
-  poiCard: {
+  // Cafe card
+  cafeCard: {
     position: "absolute",
     bottom: 0,
     left: 12,
     right: 12,
     zIndex: 150,
   },
-  poiCardDot: {
-    position: "absolute",
-    top: -6,
-    left: 24,
-    width: 24,
+  cafeCardClose: {
+    alignItems: "center",
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  cafeCardCloseBar: {
+    width: 36,
     height: 4,
     borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
   },
-  poiCardContent: {
+  cafeCardContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -600,48 +524,56 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.07)",
+    borderColor: "rgba(139, 92, 246, 0.15)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.5,
     shadowRadius: 20,
     elevation: 20,
   },
-  poiCardInfo: {
+  cafeCardInfo: {
     flex: 1,
+    marginRight: 12,
   },
-  poiCardName: {
+  cafeCardName: {
     fontSize: 16,
     fontWeight: "700",
     color: "#FFFFFF",
   },
-  poiCardType: {
+  cafeCardVicinity: {
     fontSize: 12,
     color: "#6A6A7E",
-    marginTop: 3,
+    marginTop: 4,
     fontWeight: "500",
   },
-  poiCardGo: {
+  ratingRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(255, 107, 53, 0.12)",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 14,
+    gap: 4,
+    marginTop: 6,
   },
-  poiGoText: {
+  ratingStar: {
+    color: "#F59E0B",
     fontSize: 13,
-    fontWeight: "700",
-    color: "#FF6B35",
   },
-  // Bottom fade
-  bottomFade: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 200,
-    zIndex: 1,
+  ratingText: {
+    color: "#8A8A9A",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  cafeCardCuisine: {
+    backgroundColor: "rgba(139, 92, 246, 0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(139, 92, 246, 0.2)",
+  },
+  cafeCardCuisineText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#A78BFA",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 });
