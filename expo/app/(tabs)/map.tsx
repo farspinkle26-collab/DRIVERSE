@@ -23,7 +23,11 @@ import {
   Circle,
   Square,
   Timer,
+  Zap,
+  TrendingUp,
+  Trophy,
 } from "lucide-react-native";
+import { useXP } from "@/hooks/useXPStore";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -223,6 +227,17 @@ export default function MapScreen() {
   const isRecordingRef = useRef(false);
   const userLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
+  // Estimated route duration (seconds) — saved when route is fetched, used for XP comparison
+  const estimatedDurationRef = useRef<number | null>(null);
+
+  // XP reward display state
+  const [xpEarned, setXpEarned] = useState<number | null>(null);
+  const [wasFaster, setWasFaster] = useState(false);
+  const [leveledUp, setLeveledUp] = useState(false);
+
+  // XP system
+  const { level, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
+
   // Animations
   const carFloat = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
@@ -307,12 +322,14 @@ export default function MapScreen() {
         const polyline = route.overview_polyline?.points;
         if (polyline) {
           const coords = decodePolyline(polyline);
+          const estSecs = leg.duration.value;
+          estimatedDurationRef.current = estSecs;
           setRouteInfo({
             coordinates: coords,
             distanceKm: fmtKm(leg.distance.value),
             distanceMeters: leg.distance.value,
-            durationMin: fmtDuration(leg.duration.value),
-            durationSeconds: leg.duration.value,
+            durationMin: fmtDuration(estSecs),
+            durationSeconds: estSecs,
           });
           mapRef.current?.fitToCoordinates(coords, {
             edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
@@ -513,6 +530,8 @@ export default function MapScreen() {
   const clearRoute = useCallback(() => {
     setRouteInfo(null);
     setNavigating(false);
+    setSelectedDestination(null);
+    estimatedDurationRef.current = null;
   }, []);
 
   // --- Map press: drop a pin at tapped location (single tap) ---
@@ -535,8 +554,10 @@ export default function MapScreen() {
     setElapsedMs(0);
     setTripDistance(0);
     setRecordedPath([]);
+    setXpEarned(null);
+    setWasFaster(false);
+    setLeveledUp(false);
     lastCoordRef.current = userLocation;
-    // Reset the last coordinate reference
     if (userLocation) {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
@@ -546,16 +567,48 @@ export default function MapScreen() {
   const stopRecording = useCallback(() => {
     setIsRecording(false);
     const now = Date.now();
+    const actualDurationMs = tripStartMs ? now - tripStartMs : 0;
+    const actualDurationSec = actualDurationMs / 1000;
+    const avgSpeed = tripDistance > 0 ? (tripDistance / 1000) / (actualDurationSec / 3600) : 0;
+
     const trip: TripRecord = {
       coordinates: recordedPath,
       distanceMeters: tripDistance,
-      durationMs: tripStartMs ? now - tripStartMs : 0,
+      durationMs: actualDurationMs,
       startedAt: tripStartMs ?? now,
       endedAt: now,
     };
     setTripHistory((prev) => [trip, ...prev]);
-    // Keep the path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs]);
+
+    // --- XP calculation ---
+    const estimatedSec = estimatedDurationRef.current;
+    const oldLevel = level;
+    if (estimatedSec && estimatedSec > 0 && tripDistance > 0) {
+      const faster = actualDurationSec < estimatedSec;
+      setWasFaster(faster);
+
+      let earned: number;
+      if (faster) {
+        const timeDiff = estimatedSec - actualDurationSec;
+        const ratio = Math.min(timeDiff / estimatedSec, 1);
+        const bonus = Math.round(ratio * 200);
+        earned = 50 + bonus;
+      } else {
+        earned = 25;
+      }
+      setXpEarned(earned);
+      const newLvl = addXP(earned);
+      setLeveledUp(newLvl > oldLevel);
+    } else {
+      const earned = 10;
+      setXpEarned(earned);
+      setWasFaster(false);
+      const newLvl = addXP(earned);
+      setLeveledUp(newLvl > oldLevel);
+    }
+
+    // Keep path visible after stopping
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP]);
 
   // --- Map region ---
   const initialRegion = userLocation
@@ -736,7 +789,8 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   RECORD BUTTON (visible when not recording)          */}
       {/* ===================================================== */}
-      {!isRecording && !locating && !locError && (
+      {/* Only show REC when destination is chosen and route is visible */}
+      {!isRecording && !locating && !locError && routeInfo && (
         <Animated.View
           style={[styles.recordBtnContainer, { bottom: insets.bottom + 90, opacity: fadeIn }]}
         >
@@ -806,42 +860,73 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* ===================================================== */}
-      {/*   POST-RECORDING TRIP SUMMARY                         */}
-      {/* ===================================================== */}
+      {/* Trip Summary */}
       {!isRecording && recordedPath.length > 1 && tripDistance > 0 && (() => {
-        const avgSpeed = elapsedMs > 0 ? ((tripDistance / 1000) / (elapsedMs / 3600000)) : 0;
+        const actualSec = elapsedMs / 1000;
+        const avgSpeed = actualSec > 0 ? (tripDistance / 1000) / (actualSec / 3600) : 0;
         return (
         <View style={[styles.tripSummaryCard, { paddingBottom: insets.bottom + 90 }]}>
           <View style={styles.tripSummaryHeader}>
-            <Text style={styles.tripSummaryTitle}>Trip Recorded</Text>
+            <Text style={styles.tripSummaryTitle}>
+              {wasFaster ? "Great Drive!" : "Trip Recorded"}
+            </Text>
             <TouchableOpacity
               onPress={() => {
                 setRecordedPath([]);
                 setTripDistance(0);
                 setElapsedMs(0);
+                setXpEarned(null);
+                clearRoute();
               }}
               activeOpacity={0.7}
             >
               <X size={18} color="#5A5A6E" />
             </TouchableOpacity>
           </View>
-          <View style={styles.tripSummaryRow}>
-            <View style={styles.tripStat}>
-              <Route size={16} color={RECORD_RED} />
-              <Text style={styles.tripStatValue}>{fmtMeters(tripDistance)}</Text>
-            </View>
-            <View style={styles.tripSummaryDivider} />
-            <View style={styles.tripStat}>
-              <Clock size={16} color="#F59E0B" />
-              <Text style={styles.tripStatValue}>{fmtTimer(elapsedMs)}</Text>
-            </View>
-            <View style={styles.tripSummaryDivider} />
-            <View style={styles.tripStat}>
-              <View style={styles.tripSpeedIcon}>
-                <Text style={styles.tripSpeedLabel}>km/h</Text>
+          <View style={styles.tripStatsGrid}>
+            <View style={styles.tripStatItem}>
+              <Text style={styles.tripStatLabel}>Distance</Text>
+              <View style={styles.tripStatRow}>
+                <Route size={14} color={RECORD_RED} />
+                <Text style={styles.tripStatValue}>{fmtMeters(tripDistance)}</Text>
               </View>
-              <Text style={styles.tripStatValue}>{avgSpeed.toFixed(1)}</Text>
+            </View>
+            <View style={styles.tripStatItem}>
+              <Text style={styles.tripStatLabel}>Time</Text>
+              <View style={styles.tripStatRow}>
+                <Clock size={14} color="#F59E0B" />
+                <Text style={styles.tripStatValue}>{fmtTimer(elapsedMs)}</Text>
+              </View>
+            </View>
+            <View style={styles.tripStatItem}>
+              <Text style={styles.tripStatLabel}>Avg Speed</Text>
+              <View style={styles.tripStatRow}>
+                <TrendingUp size={14} color="#3B82F6" />
+                <Text style={styles.tripStatValue}>{avgSpeed.toFixed(1)}</Text>
+                <Text style={styles.tripStatUnit}>km/h</Text>
+              </View>
+            </View>
+          </View>
+          {xpEarned != null && (
+            <View style={styles.xpRewardRow}>
+              <View style={styles.xpRewardLeft}>
+                <Zap size={18} color="#FFD700" />
+                <Text style={styles.xpRewardLabel}>
+                  {wasFaster ? "Faster than estimate!" : "Trip complete"}
+                </Text>
+              </View>
+              <View style={styles.xpBadge}>
+                <Text style={styles.xpBadgeText}>+{xpEarned} XP</Text>
+              </View>
+            </View>
+          )}
+          <View style={styles.levelBarContainer}>
+            <View style={styles.levelBarHeader}>
+              <Text style={styles.levelBarLabel}>Level {level}</Text>
+              <Text style={styles.levelBarXp}>{xpCurrentLevel} / {xpRequired} XP</Text>
+            </View>
+            <View style={styles.levelBarTrack}>
+              <View style={[styles.levelBarFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]} />
             </View>
           </View>
         </View>
@@ -1310,12 +1395,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  tripSummaryHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  tripSummaryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#22C55E",
   },
   tripSummaryTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#22C55E",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
   tripSummaryRow: {
     flexDirection: "row",
@@ -1328,9 +1424,37 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tripStatValue: {
-    fontSize: 15,
+    fontSize: 17,
     color: "#FFFFFF",
-    fontWeight: "700",
+    fontWeight: "800",
+  },
+  tripStatUnit: {
+    fontSize: 11,
+    color: "#6A6A7E",
+    fontWeight: "600",
+    marginLeft: 2,
+  },
+  tripStatItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  tripStatLabel: {
+    fontSize: 10,
+    color: "#6A6A7E",
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  tripStatRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  tripStatsGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
   },
   tripSummaryDivider: {
     width: 1,
@@ -1350,6 +1474,109 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: "#3B82F6",
     fontWeight: "800",
+  },
+  // XP reward
+  xpRewardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255, 215, 0, 0.06)",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 215, 0, 0.12)",
+  },
+  xpRewardLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  xpRewardLabel: {
+    fontSize: 13,
+    color: "#CCCCCC",
+    fontWeight: "600",
+  },
+  xpBadge: {
+    backgroundColor: "rgba(255, 215, 0, 0.15)",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 215, 0, 0.25)",
+  },
+  xpBadgeText: {
+    fontSize: 13,
+    color: "#FFD700",
+    fontWeight: "800",
+  },
+  // Level bar
+  levelBarContainer: {
+    marginBottom: 10,
+  },
+  levelBarHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  levelBarLabel: {
+    fontSize: 12,
+    color: "#FF6B35",
+    fontWeight: "700",
+  },
+  levelBarXp: {
+    fontSize: 11,
+    color: "#5A5A6E",
+    fontWeight: "600",
+  },
+  levelBarTrack: {
+    height: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  levelBarFill: {
+    height: 6,
+    backgroundColor: "#FF6B35",
+    borderRadius: 3,
+  },
+  levelUpText: {
+    fontSize: 13,
+    color: "#FFD700",
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  // Comparison row
+  comparisonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.06)",
+  },
+  comparisonText: {
+    fontSize: 12,
+    color: "#6A6A7E",
+    fontWeight: "500",
+  },
+  comparisonDiff: {
+    fontSize: 12,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  comparisonFaster: {
+    color: "#22C55E",
+    backgroundColor: "rgba(34, 197, 94, 0.1)",
+  },
+  comparisonSlower: {
+    color: "#F59E0B",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
   },
   // Cafe card
   cafeCard: {

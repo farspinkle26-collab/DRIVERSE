@@ -13,6 +13,7 @@ import { PaymentContext } from "@/hooks/usePaymentStore";
 import { ChatContext } from "@/hooks/useChatStore";
 import { NotificationContext } from "@/hooks/useNotificationStore";
 import { RealtimeContext } from "@/hooks/useRealtimeStore";
+import { XPProvider } from "@/hooks/useXPStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 
@@ -79,9 +80,11 @@ export default function RootLayout() {
                     <RealtimeContext>
                       <NotificationContext>
                         <ChatContext>
+                        <XPProvider>
                           <RootLayoutNav />
                           <NotificationBanner />
-                        </ChatContext>
+                        </XPProvider>
+                      </ChatContext>
                       </NotificationContext>
                     </RealtimeContext>
                   </TowingContext>
