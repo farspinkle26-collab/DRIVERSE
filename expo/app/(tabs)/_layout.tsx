@@ -1,106 +1,76 @@
 import { Tabs } from "expo-router";
 import React from "react";
-import { useTheme } from "@/hooks/useThemeStore";
-import { HomeIcon, OrdersIcon, ProfileIcon, TowingPlusIcon, InsuranceIcon, AtpmIcon } from "@/components/TabIcons";
-import { Activity } from "lucide-react-native";
+import { StyleSheet, View, Text } from "react-native";
+import { BlurView } from "expo-blur";
+import { MapIcon, DriveIcon, ProfileIcon } from "@/components/TabIcons";
+
+const TAB_BAR_HEIGHT = 72;
 
 export default function TabLayout() {
-  const { theme } = useTheme();
-
   return (
     <Tabs
-      initialRouteName="home"
+      initialRouteName="map"
       screenOptions={{
-        tabBarActiveTintColor: '#FF3B30',
-        tabBarInactiveTintColor: '#A0A0A0',
+        headerShown: false,
+        tabBarActiveTintColor: "#FF6B35",
+        tabBarInactiveTintColor: "#5A5A6E",
         tabBarStyle: {
-          backgroundColor: theme.card,
-          borderTopWidth: 1,
-          borderTopColor: theme.border,
+          position: "absolute",
+          bottom: 24,
+          left: 20,
+          right: 20,
+          height: TAB_BAR_HEIGHT,
+          backgroundColor: "rgba(18, 18, 26, 0.92)",
+          borderTopWidth: 0,
+          borderRadius: 36,
+          elevation: 0,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.4,
+          shadowRadius: 24,
+          paddingBottom: 0,
+          paddingTop: 8,
+          borderWidth: 1,
+          borderColor: "rgba(255, 255, 255, 0.06)",
         },
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: "600",
           marginTop: 2,
+          letterSpacing: 0.3,
         },
         tabBarIconStyle: {
           marginBottom: 0,
         },
-        headerStyle: {
-          backgroundColor: theme.card,
-          elevation: 0,
-          shadowOpacity: 0,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.border,
-        },
-        headerTitleStyle: {
-          fontWeight: "600",
-          fontSize: 18,
-          color: theme.textDark,
-        },
-        headerTintColor: theme.textDark,
       }}
     >
-      {/* Home Tab */}
       <Tabs.Screen
-        name="home"
+        name="map"
         options={{
-          title: "Beranda",
-          tabBarIcon: ({ color, focused }) => <HomeIcon color={color} size={24} filled={focused} />,
+          title: "Map",
+          tabBarIcon: ({ color, focused }) => (
+            <MapIcon color={color} size={22} filled={focused} />
+          ),
         }}
       />
-      
-      {/* Orders Tab */}
+
       <Tabs.Screen
-        name="orders"
+        name="drive"
         options={{
-          title: "Pesanan",
-          tabBarIcon: ({ color, focused }) => <OrdersIcon color={color} size={24} />,
+          title: "Drive",
+          tabBarIcon: ({ color, focused }) => (
+            <DriveIcon color={color} size={22} filled={focused} />
+          ),
         }}
       />
-      
-      {/* Transactions Tab */}
-      <Tabs.Screen
-        name="transactions"
-        options={{
-          title: "Transaksi",
-          tabBarIcon: ({ color, focused }) => <Activity color={color} size={24} />,
-        }}
-      />
-      
-      {/* Towing+ Tab */}
-      <Tabs.Screen
-        name="towing-plus"
-        options={{
-          title: "Towing+",
-          tabBarIcon: ({ color, focused }) => <TowingPlusIcon color={color} size={24} />,
-        }}
-      />
-      
-      {/* Insurance Tab */}
-      <Tabs.Screen
-        name="member-asuransi"
-        options={{
-          title: "Asuransi",
-          tabBarIcon: ({ color, focused }) => <InsuranceIcon color={color} size={24} />,
-        }}
-      />
-      
-      {/* ATPM Tab */}
-      <Tabs.Screen
-        name="atpm"
-        options={{
-          title: "ATPM",
-          tabBarIcon: ({ color, focused }) => <AtpmIcon color={color} size={24} />,
-        }}
-      />
-      
-      {/* Profile Tab */}
+
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profil",
-          tabBarIcon: ({ color, focused }) => <ProfileIcon color={color} size={24} />,
+          title: "Profile",
+          tabBarIcon: ({ color, focused }) => (
+            <ProfileIcon color={color} size={22} filled={focused} />
+          ),
         }}
       />
     </Tabs>

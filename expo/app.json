@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Towing Online Main App",
+    "name": "Driveverse",
     "slug": "towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -27,7 +27,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#060609"
       },
       "package": "app.rork.towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
       "permissions": [
@@ -58,7 +58,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#060609",
           "imageWidth": 200
         }
       ],

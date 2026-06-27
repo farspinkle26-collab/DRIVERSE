@@ -18,9 +18,16 @@ import NotificationBanner from "@/components/NotificationBanner";
 
 const queryClient = new QueryClient();
 
+const darkScreenOptions = {
+  headerStyle: { backgroundColor: "#0A0A0F" },
+  headerTintColor: "#FFFFFF",
+  headerTitleStyle: { color: "#FFFFFF", fontWeight: "600" as const },
+  contentStyle: { backgroundColor: "#0A0A0F" },
+};
+
 function RootLayoutNav() {
   return (
-    <Stack>
+    <Stack screenOptions={darkScreenOptions}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="request-tow" />

@@ -1,480 +1,683 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, View, Image, ScrollView, Alert, Switch, Platform, TouchableOpacity, Linking } from "react-native";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Switch,
+  Alert,
+  Dimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { 
-  Phone, 
-  Mail, 
-  Shield, 
-  Settings, 
-  HelpCircle, 
+import { LinearGradient } from "expo-linear-gradient";
+import {
+  Car,
+  Trophy,
+  Clock,
+  Gauge,
+  MapPin,
+  Settings,
+  Shield,
   LogOut,
+  ChevronRight,
+  Star,
+  Award,
+  Flame,
+  Wallet,
   Moon,
   Sun,
-  Camera,
-  User,
+  HelpCircle,
+  Share2,
   Headphones,
-  RefreshCw,
-  Truck,
-  UserCheck,
-  CreditCard
 } from "lucide-react-native";
-import Card from "@/components/Card";
-import Button from "@/components/Button";
-import ImagePicker from "@/components/ImagePicker";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useTheme } from "@/hooks/useThemeStore";
-import { useRouter } from "expo-router";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const MOCK_GARAGE = [
+  { id: "g1", name: "Porsche 911 GT3", year: "2024", color: "#FF3B6F", hp: 502, mileage: "2,340 km" },
+  { id: "g2", name: "BMW M4 CSL", year: "2023", color: "#3B82F6", hp: 543, mileage: "8,120 km" },
+  { id: "g3", name: "Toyota GR Supra", year: "2024", color: "#F59E0B", hp: 382, mileage: "15,400 km" },
+];
+
+const MOCK_ACHIEVEMENTS = [
+  { id: "a1", title: "Night Rider", desc: "Drive 100 km at night", icon: Flame, color: "#FF6B35", earned: true },
+  { id: "a2", title: "Speed Demon", desc: "Reach 200 km/h on highway", icon: Gauge, color: "#FF3B6F", earned: true },
+  { id: "a3", title: "Explorer", desc: "Visit 10 scenic routes", icon: MapPin, color: "#00D4AA", earned: true },
+  { id: "a4", title: "Collector", desc: "Own 5 cars in garage", icon: Car, color: "#8B5CF6", earned: false },
+  { id: "a5", title: "Legend", desc: "Earn 10,000 XP total", icon: Award, color: "#FFD700", earned: false },
+  { id: "a6", title: "Social", desc: "Join 5 community events", icon: Share2, color: "#EC4899", earned: false },
+];
+
+const MOCK_STATS = {
+  totalKm: 12340,
+  topSpeed: 245,
+  avgSpeed: 67,
+  hoursDriven: 184,
+  questsCompleted: 27,
+  eventsAttended: 8,
+  carsCollected: 3,
+  xpEarned: 3450,
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout, updateProfilePicture, switchAccountType, isCustomer, isDriver = false } = useAuth();
-  const { theme, isDark, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
-  const [showImagePicker, setShowImagePicker] = useState<boolean>(false);
-  const [switchingAccount, setSwitchingAccount] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<"garage" | "achievements" | "stats">("garage");
 
   const handleLogout = () => {
-    Alert.alert(
-      "Keluar",
-      "Apakah Anda yakin ingin keluar?",
-      [
-        {
-          text: "Batal",
-          style: "cancel",
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          const success = await logout();
+          if (success) router.replace("/(tabs)/map" as any);
         },
-        {
-          text: "Keluar",
-          onPress: async () => {
-            const success = await logout();
-            if (success) {
-              router.replace('/(tabs)/home' as any);
-            } else {
-              Alert.alert("Error", "Gagal keluar. Silakan coba lagi.");
-            }
-          },
-          style: "destructive",
-        },
-      ]
-    );
+      },
+    ]);
   };
 
-  const handleProfilePictureChange = async (imageUri: string | null) => {
-    if (imageUri) {
-      const success = await updateProfilePicture(imageUri);
-      if (success) {
-        Alert.alert("Berhasil", "Foto profil berhasil diperbarui");
-      } else {
-        Alert.alert("Gagal", "Gagal memperbarui foto profil");
-      }
-    }
-    setShowImagePicker(false);
-  };
-
-  const handleChangeProfilePicture = () => {
-    setShowImagePicker(true);
-  };
-
-  const handleCustomerService = () => {
-    const phoneNumber = "+021789000";
-    const url = `tel:${phoneNumber}`;
-    
-    Linking.canOpenURL(url)
-      .then((supported) => {
-        if (supported) {
-          return Linking.openURL(url);
-        } else {
-          Alert.alert(
-            "Tidak dapat membuka aplikasi telepon",
-            `Silakan hubungi Customer Service di: ${phoneNumber}`,
-            [{ text: "OK" }]
-          );
-        }
-      })
-      .catch((err) => {
-        console.error('Error opening phone app:', err);
-        Alert.alert(
-          "Error",
-          `Silakan hubungi Customer Service di: ${phoneNumber}`,
-          [{ text: "OK" }]
-        );
-      });
-  };
-
-  const handleSwitchAccountType = () => {
-    const currentType = isCustomer ? "Pelanggan" : "Driver";
-    const newType = isCustomer ? "Driver" : "Pelanggan";
-    
-    Alert.alert(
-      "Ganti Tipe Akun",
-      `Apakah Anda yakin ingin beralih dari ${currentType} ke ${newType}?\n\nAnda akan tetap menggunakan email yang sama, hanya tipe akun yang berubah.`,
-      [
-        {
-          text: "Batal",
-          style: "cancel",
-        },
-        {
-          text: "Ganti",
-          onPress: async () => {
-            setSwitchingAccount(true);
-            const success = await switchAccountType();
-            setSwitchingAccount(false);
-            
-            if (success) {
-              Alert.alert(
-                "Berhasil",
-                `Tipe akun berhasil diubah ke ${newType}. Selamat datang!`
-              );
-            } else {
-              Alert.alert(
-                "Gagal",
-                "Gagal mengubah tipe akun. Silakan coba lagi."
-              );
-            }
-          },
-          style: "default",
-        },
-      ]
-    );
-  };
-
-
+  const handleTopUp = () => router.push("/top-up" as any);
+  const handleTransactionHistory = () => router.push("/transaction-history" as any);
+  const handlePaymentHistory = () => router.push("/payment-history" as any);
 
   return (
-    <ScrollView 
-      style={[styles.container, { backgroundColor: theme.background }]} 
-      contentContainerStyle={{
-        paddingBottom: Platform.OS === 'android' ? 90 + insets.bottom + 20 : 110
-      }}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={[styles.avatarContainer, { borderColor: theme.primary }]}
-          onPress={handleChangeProfilePicture}
-          activeOpacity={0.7}
-        >
-          {user?.profilePicture ? (
-            <Image
-              source={{ uri: user.profilePicture }}
-              style={styles.avatar}
-            />
-          ) : (
-            <View style={[styles.avatarPlaceholder, { backgroundColor: '#E5E5E5' }]}>
-              <User size={40} color="#9CA3AF" />
+    <View style={styles.container}>
+      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.background} />
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140, paddingTop: insets.top + 20 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Profile Header */}
+        <View style={styles.profileHeader}>
+          {/* Avatar + badge */}
+          <View style={styles.avatarSection}>
+            <LinearGradient
+              colors={["#FF6B35", "#FF8A50"]}
+              style={styles.avatarRing}
+            >
+              <View style={styles.avatarInner}>
+                <Text style={styles.avatarLetter}>
+                  {(user?.name ?? "D")[0].toUpperCase()}
+                </Text>
+              </View>
+            </LinearGradient>
+            <View style={styles.levelBadge}>
+              <Text style={styles.levelText}>12</Text>
             </View>
-          )}
-          <View style={[styles.cameraIcon, { backgroundColor: theme.primary }]}>
-            <Camera size={16} color={theme.white} />
           </View>
-        </TouchableOpacity>
-        <Text style={[styles.name, { color: theme.textDark }]}>{user?.name || "User"}</Text>
-        <View style={[styles.roleContainer, { backgroundColor: theme.primary + "20" }]}>
-          <View style={styles.roleContent}>
-            {isCustomer ? (
-              <UserCheck size={16} color={theme.primary} />
-            ) : (
-              <Truck size={16} color={theme.primary} />
-            )}
-            <Text style={[styles.role, { color: theme.primary }]}>
-              {isCustomer ? "Pelanggan" : "Driver"}
-            </Text>
+
+          <Text style={styles.userName}>{user?.name ?? "Driver"}</Text>
+          <Text style={styles.userTitle}>Legendary Driver</Text>
+
+          {/* Quick stats row */}
+          <View style={styles.quickStats}>
+            <View style={styles.quickStat}>
+              <Text style={styles.quickStatValue}>{MOCK_STATS.carsCollected}</Text>
+              <Text style={styles.quickStatLabel}>Cars</Text>
+            </View>
+            <View style={styles.quickStatDiv} />
+            <View style={styles.quickStat}>
+              <Text style={styles.quickStatValue}>{MOCK_STATS.questsCompleted}</Text>
+              <Text style={styles.quickStatLabel}>Quests</Text>
+            </View>
+            <View style={styles.quickStatDiv} />
+            <View style={styles.quickStat}>
+              <Text style={styles.quickStatValue}>{MOCK_STATS.xpEarned.toLocaleString()}</Text>
+              <Text style={styles.quickStatLabel}>XP</Text>
+            </View>
           </View>
         </View>
-        <Button
-          title={`Ganti ke ${isCustomer ? "Driver" : "Pelanggan"}`}
-          onPress={handleSwitchAccountType}
-          variant="outline"
-          size="small"
-          style={[styles.switchButton, { borderColor: theme.primary }]}
-          textStyle={{ color: theme.primary, fontSize: 12 }}
-          icon={<RefreshCw size={14} color={theme.primary} />}
-          loading={switchingAccount}
-          disabled={switchingAccount}
-        />
-      </View>
 
-      {showImagePicker && (
-        <View style={styles.imagePickerContainer}>
-          <ImagePicker
-            label="Foto Profil"
-            placeholder="Pilih foto profil"
-            value={null}
-            onChange={handleProfilePictureChange}
-          />
-          <Button
-            title="Batal"
-            onPress={() => setShowImagePicker(false)}
-            variant="outline"
-            size="small"
-            style={styles.cancelButton}
-          />
+        {/* Wallet Card */}
+        <View style={[styles.walletCard, { marginHorizontal: 20 }]}>
+          <LinearGradient
+            colors={["#1A1A2E", "#121220"]}
+            style={styles.walletGradient}
+          >
+            <View style={styles.walletRow}>
+              <View style={styles.walletLeft}>
+                <Wallet size={16} color="#8A8A9A" />
+                <Text style={styles.walletLabel}>DRIVEVERSE BALANCE</Text>
+              </View>
+              <Text style={styles.walletAmount}>Rp 2,450,000</Text>
+            </View>
+            <View style={styles.walletActions}>
+              <TouchableOpacity
+                style={[styles.walletBtn, { backgroundColor: "#FF6B35" }]}
+                onPress={handleTopUp}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.walletBtnText}>Top Up</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.walletBtn, { backgroundColor: "rgba(255,255,255,0.06)" }]}
+                onPress={handleTransactionHistory}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.walletBtnText}>History</Text>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
         </View>
-      )}
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.textDark }]}>Informasi Pribadi</Text>
-        <Card style={[styles.infoCard, { backgroundColor: theme.card }]}>
-          <View style={styles.infoItem}>
-            <View style={[styles.infoIcon, { backgroundColor: theme.primary + "20" }]}>
-              <Phone size={20} color={theme.primary} />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: theme.textLight }]}>Nomor Telepon</Text>
-              <Text style={[styles.infoValue, { color: theme.textDark }]}>{user?.phone || "+62812345678"}</Text>
+        {/* Content Tabs */}
+        <View style={styles.contentTabs}>
+          {(["garage", "achievements", "stats"] as const).map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.contentTab, activeTab === tab && styles.contentTabActive]}
+              onPress={() => setActiveTab(tab)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.contentTabText, activeTab === tab && styles.contentTabTextActive]}>
+                {tab === "garage" ? "Garage" : tab === "achievements" ? "Achievements" : "Stats"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Garage */}
+        {activeTab === "garage" && (
+          <View style={styles.section}>
+            {MOCK_GARAGE.map((car) => (
+              <TouchableOpacity key={car.id} style={styles.garageCard} activeOpacity={0.7}>
+                <View style={styles.garageCardContent}>
+                  <View style={[styles.carColorBar, { backgroundColor: car.color }]} />
+                  <View style={styles.carInfo}>
+                    <Text style={styles.carName}>{car.name}</Text>
+                    <View style={styles.carMeta}>
+                      <Text style={styles.carMetaText}>{car.year}</Text>
+                      <Text style={styles.carMetaDot}>•</Text>
+                      <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
+                      <Text style={styles.carMetaDot}>•</Text>
+                      <Text style={styles.carMetaText}>{car.mileage}</Text>
+                    </View>
+                  </View>
+                  <ChevronRight size={18} color="#5A5A6E" />
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            {/* Add car button */}
+            <TouchableOpacity style={styles.addCarButton} activeOpacity={0.7}>
+              <View style={styles.addCarIcon}>
+                <Car size={20} color="#FF6B35" />
+              </View>
+              <Text style={styles.addCarText}>Add a car to your garage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Achievements */}
+        {activeTab === "achievements" && (
+          <View style={styles.section}>
+            {MOCK_ACHIEVEMENTS.map((ach) => (
+              <View
+                key={ach.id}
+                style={[styles.achievementCard, !ach.earned && styles.achievementLocked]}
+              >
+                <View
+                  style={[
+                    styles.achievementIcon,
+                    {
+                      backgroundColor: ach.earned ? ach.color + "20" : "rgba(255,255,255,0.03)",
+                    },
+                  ]}
+                >
+                  <ach.icon size={22} color={ach.earned ? ach.color : "#3A3A4E"} />
+                  {ach.earned && (
+                    <View style={[styles.achievementCheck, { backgroundColor: ach.color }]}>
+                      <Star size={8} color="#FFFFFF" fill="#FFFFFF" />
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.achievementTitle, !ach.earned && { color: "#5A5A6E" }]}>
+                    {ach.title}
+                  </Text>
+                  <Text style={styles.achievementDesc}>{ach.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Stats */}
+        {activeTab === "stats" && (
+          <View style={styles.section}>
+            <View style={styles.statsGrid}>
+              {[
+                { label: "Total Distance", value: `${(MOCK_STATS.totalKm / 1000).toFixed(1)}k km`, icon: MapPin },
+                { label: "Top Speed", value: `${MOCK_STATS.topSpeed} km/h`, icon: Gauge },
+                { label: "Avg Speed", value: `${MOCK_STATS.avgSpeed} km/h`, icon: Clock },
+                { label: "Hours Driven", value: `${MOCK_STATS.hoursDriven}h`, icon: Flame },
+                { label: "Quests Done", value: String(MOCK_STATS.questsCompleted), icon: Trophy },
+                { label: "Events Joined", value: String(MOCK_STATS.eventsAttended), icon: Star },
+              ].map((stat, i) => (
+                <View key={i} style={styles.statCard}>
+                  <stat.icon size={18} color="#FF6B35" />
+                  <Text style={styles.statValue}>{stat.value}</Text>
+                  <Text style={styles.statLabel}>{stat.label}</Text>
+                </View>
+              ))}
             </View>
           </View>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <View style={styles.infoItem}>
-            <View style={[styles.infoIcon, { backgroundColor: theme.primary + "20" }]}>
-              <Mail size={20} color={theme.primary} />
-            </View>
-            <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: theme.textLight }]}>Email</Text>
-              <Text style={[styles.infoValue, { color: theme.textDark }]}>{user?.email || "user@example.com"}</Text>
-            </View>
-          </View>
-        </Card>
-      </View>
+        )}
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.textDark }]}>Pengaturan</Text>
-        <Card style={[styles.settingsCard, { backgroundColor: theme.card }]}>
-          <View style={styles.settingItem}>
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              {isDark ? <Moon size={20} color={theme.primary} /> : <Sun size={20} color={theme.primary} />}
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Mode Gelap</Text>
-              <Text style={[styles.settingSubtitle, { color: theme.textLight }]}>Beralih antara tema terang dan gelap</Text>
+        {/* Settings Section */}
+        <View style={[styles.settingsSection, { marginHorizontal: 20 }]}>
+          <Text style={styles.settingsTitle}>Settings</Text>
+
+          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
+            <View style={styles.settingLeft}>
+              {isDark ? <Moon size={18} color="#8A8A9A" /> : <Sun size={18} color="#FFD700" />}
+              <Text style={styles.settingText}>Dark Mode</Text>
             </View>
             <Switch
               value={isDark}
               onValueChange={toggleTheme}
-              trackColor={{ false: theme.inactive, true: theme.primary }}
-              thumbColor={theme.white}
+              trackColor={{ false: "#2A2A3A", true: "#FF6B3530" }}
+              thumbColor={isDark ? "#FF6B35" : "#5A5A6E"}
             />
-          </View>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <View style={styles.settingItem}>
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              <Shield size={20} color={theme.primary} />
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Privasi & Keamanan</Text>
-            </View>
-          </View>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <View style={styles.settingItem}>
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              <Settings size={20} color={theme.primary} />
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Pengaturan Aplikasi</Text>
-            </View>
-          </View>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <TouchableOpacity style={styles.settingItem} onPress={handleCustomerService}>
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              <Headphones size={20} color={theme.primary} />
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Customer Service</Text>
-              <Text style={[styles.settingSubtitle, { color: theme.textLight }]}>Hubungi +021 789000</Text>
-            </View>
           </TouchableOpacity>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <TouchableOpacity 
-            style={styles.settingItem} 
-            onPress={() => router.push('/xendit-integration-demo' as any)}
-          >
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              <CreditCard size={20} color={theme.primary} />
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Xendit Payment Demo</Text>
-              <Text style={[styles.settingSubtitle, { color: theme.textLight }]}>Test payment integration</Text>
-            </View>
-          </TouchableOpacity>
-          
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          
-          <View style={styles.settingItem}>
-            <View style={[styles.settingIcon, { backgroundColor: theme.primary + "20" }]}>
-              <HelpCircle size={20} color={theme.primary} />
-            </View>
-            <View style={styles.settingContent}>
-              <Text style={[styles.settingTitle, { color: theme.textDark }]}>Bantuan & Dukungan</Text>
-            </View>
-          </View>
-        </Card>
-      </View>
 
-      <Button
-        title="Keluar"
-        onPress={handleLogout}
-        variant="outline"
-        size="medium"
-        style={[styles.logoutButton, { borderColor: theme.danger }]}
-        textStyle={[styles.logoutButtonText, { color: theme.danger }]}
-        icon={<LogOut size={20} color={theme.danger} />}
-      />
-    </ScrollView>
+          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/terms-and-conditions" as any)}>
+            <View style={styles.settingLeft}>
+              <Shield size={18} color="#8A8A9A" />
+              <Text style={styles.settingText}>Privacy & Terms</Text>
+            </View>
+            <ChevronRight size={16} color="#5A5A6E" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
+            <View style={styles.settingLeft}>
+              <HelpCircle size={18} color="#8A8A9A" />
+              <Text style={styles.settingText}>Help & Support</Text>
+            </View>
+            <ChevronRight size={16} color="#5A5A6E" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
+            <View style={styles.settingLeft}>
+              <Headphones size={18} color="#8A8A9A" />
+              <Text style={styles.settingText}>Contact Us</Text>
+            </View>
+            <ChevronRight size={16} color="#5A5A6E" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.settingRow, styles.logoutRow]}
+            onPress={handleLogout}
+            activeOpacity={0.7}
+          >
+            <View style={styles.settingLeft}>
+              <LogOut size={18} color="#EF4444" />
+              <Text style={styles.logoutText}>Sign Out</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
+    backgroundColor: "#060609",
   },
-  header: {
+  background: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  // Profile header
+  profileHeader: {
     alignItems: "center",
-    marginVertical: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
   },
-  avatarContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 16,
-    borderWidth: 3,
+  avatarSection: {
+    marginBottom: 12,
     position: "relative",
   },
-  avatar: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 50,
+  avatarRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 3,
   },
-  avatarPlaceholder: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 50,
+  avatarInner: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: "#0A0A0F",
     justifyContent: "center",
     alignItems: "center",
   },
-  cameraIcon: {
+  avatarLetter: {
+    fontSize: 30,
+    fontWeight: "800",
+    color: "#FF6B35",
+  },
+  levelBadge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    bottom: -2,
+    right: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#FFD700",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "white",
+    borderColor: "#0A0A0F",
   },
-  imagePickerContainer: {
-    marginBottom: 24,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.05)",
+  levelText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#000",
   },
-  cancelButton: {
-    marginTop: 8,
-  },
-  name: {
+  userName: {
     fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 8,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 2,
   },
-  roleContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  userTitle: {
+    fontSize: 14,
+    color: "#FF6B35",
+    fontWeight: "600",
+    marginBottom: 20,
+  },
+  quickStats: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
     borderRadius: 16,
-    marginBottom: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    gap: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
   },
-  roleContent: {
+  quickStat: {
+    alignItems: "center",
+    flex: 1,
+  },
+  quickStatDiv: {
+    width: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+  },
+  quickStatValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  quickStatLabel: {
+    fontSize: 11,
+    color: "#8A8A9A",
+    marginTop: 2,
+  },
+  // Wallet
+  walletCard: {
+    marginTop: 24,
+    marginBottom: 8,
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  walletGradient: {
+    padding: 20,
+  },
+  walletRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  walletLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  walletLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#5A5A6E",
+    letterSpacing: 1,
+  },
+  walletAmount: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  walletActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+  },
+  walletBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  walletBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  // Content tabs
+  contentTabs: {
+    flexDirection: "row",
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 12,
+    padding: 4,
+  },
+  contentTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  contentTabActive: {
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+  },
+  contentTabText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#5A5A6E",
+  },
+  contentTabTextActive: {
+    color: "#FF6B35",
+  },
+  // Content section
+  section: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  // Garage
+  garageCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    marginBottom: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  garageCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  carColorBar: {
+    width: 4,
+    height: 72,
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+  },
+  carInfo: {
+    flex: 1,
+    padding: 16,
+  },
+  carName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 4,
+  },
+  carMeta: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  role: {
-    fontSize: 14,
-    fontWeight: "500",
+  carMetaText: {
+    fontSize: 12,
+    color: "#8A8A9A",
   },
-  switchButton: {
-    marginTop: 8,
+  carMetaDot: {
+    color: "#3A3A4E",
+    fontSize: 10,
   },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  infoCard: {
-    padding: 0,
-  },
-  infoItem: {
+  addCarButton: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
+    gap: 12,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 14,
+    borderStyle: "dashed",
   },
-  infoIcon: {
+  addCarIcon: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 107, 53, 0.1)",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 16,
   },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
+  addCarText: {
     fontSize: 14,
+    fontWeight: "600",
+    color: "#8A8A9A",
+  },
+  // Achievements
+  achievementCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  achievementLocked: {
+    opacity: 0.5,
+  },
+  achievementIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+  },
+  achievementCheck: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  achievementTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 2,
+  },
+  achievementDesc: {
+    fontSize: 12,
+    color: "#8A8A9A",
+  },
+  // Stats
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  statCard: {
+    width: "30%",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 14,
+    padding: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginTop: 8,
+  },
+  statLabel: {
+    fontSize: 10,
+    color: "#8A8A9A",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  // Settings
+  settingsSection: {
+    marginTop: 24,
     marginBottom: 4,
   },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: "500",
+  settingsTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#5A5A6E",
+    letterSpacing: 1,
+    marginBottom: 14,
+    textTransform: "uppercase" as const,
   },
-  divider: {
-    height: 1,
+  settingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
   },
-  settingsCard: {
-    padding: 0,
-  },
-  settingItem: {
+  settingLeft: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
+    gap: 12,
   },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 16,
-  },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: 16,
+  settingText: {
+    fontSize: 15,
     fontWeight: "500",
+    color: "#FFFFFF",
   },
-  settingSubtitle: {
-    fontSize: 14,
-    marginTop: 2,
+  logoutRow: {
+    paddingTop: 20,
   },
-  logoutButton: {
-    marginTop: 8,
-    marginBottom: 32,
-  },
-  logoutButtonText: {
-    // Color will be set dynamically
+  logoutText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#EF4444",
   },
 });
