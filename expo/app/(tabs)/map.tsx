@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -8,7 +8,6 @@ import {
   Animated,
   ActivityIndicator,
   Dimensions,
-  ScrollView,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +20,9 @@ import {
   X,
   Clock,
   Route,
+  Circle,
+  Square,
+  Timer,
 } from "lucide-react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -69,29 +71,13 @@ interface RouteInfo {
   durationSeconds: number;
 }
 
-// --- Warm Glow Map Style ---
-const MAP_GLOW = [
-  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.icon", stylers: [{ saturation: 30, lightness: 20 }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#2A2A45" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2E2E4A" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#353550" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#222238" }] },
-  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#1E1E34" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
-  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
-  { featureType: "poi", stylers: [{ visibility: "simplified" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#1E2E24" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6A8A6A" }] },
-  { featureType: "transit", stylers: [{ visibility: "simplified" }] },
-  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
-  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
-];
+interface TripRecord {
+  coordinates: { latitude: number; longitude: number }[];
+  distanceMeters: number;
+  durationMs: number;
+  startedAt: number;
+  endedAt?: number;
+}
 
 // --- Google Polyline Decoder ---
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
@@ -128,8 +114,31 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
   return points;
 }
 
+// --- Haversine distance (meters) ---
+function haversineMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+): number {
+  const R = 6371000;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+  return 2 * R * Math.asin(Math.sqrt(Math.min(1, h)));
+}
+
 // --- Format helpers ---
 function fmtKm(meters: number): string {
+  if (meters < 1000) return `${meters} m`;
+  return `${(meters / 1000).toFixed(2)} km`;
+}
+
+function fmtMeters(meters: number): string {
   if (meters < 1000) return `${meters} m`;
   return `${(meters / 1000).toFixed(1)} km`;
 }
@@ -141,6 +150,40 @@ function fmtDuration(seconds: number): string {
   if (h > 0) return `${h} hr ${m} min`;
   return `${m} min`;
 }
+
+/** Live timer format: "02:34:15" */
+function fmtTimer(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+// --- Warm Glow Map Style ---
+const MAP_GLOW = [
+  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
+  { elementType: "labels.icon", stylers: [{ saturation: 30, lightness: 20 }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#2A2A45" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2E2E4A" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#353550" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#222238" }] },
+  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#1E1E34" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
+  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
+  { featureType: "poi", stylers: [{ visibility: "simplified" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#1E2E24" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6A8A6A" }] },
+  { featureType: "transit", stylers: [{ visibility: "simplified" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
+  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
+];
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -162,10 +205,22 @@ export default function MapScreen() {
   const [navigating, setNavigating] = useState(false);
   const [loadingRoute, setLoadingRoute] = useState(false);
 
+  // --- Recording state ---
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedPath, setRecordedPath] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [tripDistance, setTripDistance] = useState(0); // meters
+  const [tripStartMs, setTripStartMs] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [tripHistory, setTripHistory] = useState<TripRecord[]>([]); // past trips
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
+
   // Animations
   const carFloat = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const cardSlide = useRef(new Animated.Value(200)).current;
+  const recPulse = useRef(new Animated.Value(1)).current;
+  const recSlide = useRef(new Animated.Value(200)).current;
 
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
@@ -210,7 +265,6 @@ export default function MapScreen() {
     const seen = new Set<string>();
     const allResults: CafePOI[] = [];
 
-    // Fan out to all cities in parallel batches of 5
     const BATCH_SIZE = 5;
     for (let i = 0; i < INDONESIAN_CITIES.length; i += BATCH_SIZE) {
       const batch = INDONESIAN_CITIES.slice(i, i + BATCH_SIZE);
@@ -225,7 +279,7 @@ export default function MapScreen() {
       }
     }
 
-    setCafes(allResults.slice(0, 200)); // Cap at 200 markers for performance
+    setCafes(allResults.slice(0, 200));
     setLoadingCafes(false);
   }, [fetchCityCafes]);
 
@@ -252,7 +306,6 @@ export default function MapScreen() {
             durationMin: fmtDuration(leg.duration.value),
             durationSeconds: leg.duration.value,
           });
-          // Fit map to show the entire route
           mapRef.current?.fitToCoordinates(coords, {
             edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
             animated: true,
@@ -309,15 +362,34 @@ export default function MapScreen() {
         // Load ALL Indonesia cafes
         fetchAllIndonesiaCafes();
 
+        // Watch GPS position for real-time tracking
         sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 5, timeInterval: 2000 },
+          { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 3, timeInterval: 1000 },
           (pos) => {
             if (!mounted) return;
-            setUserLocation({
+            const newCoord = {
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
-            });
+            };
+            setUserLocation(newCoord);
             if (pos.coords.heading != null) setHeading(pos.coords.heading);
+
+            // --- Recording: append new coordinate and update distance ---
+            if (isRecording) {
+              setRecordedPath((prev) => {
+                const next = [...prev, newCoord];
+                // Calculate distance from the last recorded point
+                if (lastCoordRef.current) {
+                  const dist = haversineMeters(lastCoordRef.current, newCoord);
+                  if (dist > 0.1) {
+                    // Ignore sub-meter noise
+                    setTripDistance((d) => d + dist);
+                  }
+                }
+                lastCoordRef.current = newCoord;
+                return next;
+              });
+            }
           }
         );
       } catch {
@@ -332,9 +404,39 @@ export default function MapScreen() {
       mounted = false;
       sub?.remove();
     };
-  }, [fetchAllIndonesiaCafes, fadeIn]);
+  }, [fetchAllIndonesiaCafes, fadeIn, isRecording]);
 
-  // --- Animations ---
+  // --- Recording timer ---
+  useEffect(() => {
+    if (isRecording && tripStartMs != null) {
+      recordTimerRef.current = setInterval(() => {
+        setElapsedMs(Date.now() - tripStartMs);
+      }, 200);
+    } else {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    }
+    return () => {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    };
+  }, [isRecording, tripStartMs]);
+
+  // --- Pulse animation for record button ---
+  useEffect(() => {
+    if (isRecording) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(recPulse, { toValue: 1.4, duration: 500, useNativeDriver: true }),
+          Animated.timing(recPulse, { toValue: 1, duration: 500, useNativeDriver: true }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    } else {
+      recPulse.setValue(1);
+    }
+  }, [isRecording, recPulse]);
+
+  // --- Car float ---
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -354,6 +456,16 @@ export default function MapScreen() {
     }).start();
   }, [routeInfo, cardSlide]);
 
+  // Slide recording card
+  useEffect(() => {
+    Animated.spring(recSlide, {
+      toValue: isRecording ? 0 : 200,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 12,
+    }).start();
+  }, [isRecording, recSlide]);
+
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
     if (!userLocation || !mapRef.current) return;
@@ -365,7 +477,7 @@ export default function MapScreen() {
 
   const handleCafePress = (cafe: CafePOI) => {
     setSelectedCafe(cafe);
-    setRouteInfo(null); // Clear previous route
+    setRouteInfo(null);
     mapRef.current?.animateCamera(
       { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 16, pitch: 40 },
       { duration: 600 }
@@ -387,13 +499,46 @@ export default function MapScreen() {
     setSelectedCafe(null);
   }, []);
 
+  // --- Recording handlers ---
+  const startRecording = useCallback(() => {
+    const now = Date.now();
+    setIsRecording(true);
+    setTripStartMs(now);
+    setElapsedMs(0);
+    setTripDistance(0);
+    setRecordedPath([]);
+    lastCoordRef.current = userLocation;
+    // Reset the last coordinate reference
+    if (userLocation) {
+      setRecordedPath([userLocation]);
+      lastCoordRef.current = userLocation;
+    }
+  }, [userLocation]);
+
+  const stopRecording = useCallback(() => {
+    setIsRecording(false);
+    const now = Date.now();
+    const trip: TripRecord = {
+      coordinates: recordedPath,
+      distanceMeters: tripDistance,
+      durationMs: tripStartMs ? now - tripStartMs : 0,
+      startedAt: tripStartMs ?? now,
+      endedAt: now,
+    };
+    setTripHistory((prev) => [trip, ...prev]);
+    // Keep the path visible after stopping
+  }, [recordedPath, tripDistance, tripStartMs]);
+
   // --- Map region ---
   const initialRegion = userLocation
     ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
     : { latitude: -6.2088, longitude: 106.8456, latitudeDelta: 0.05, longitudeDelta: 0.05 };
 
+  const RECORD_RED = "#FF2D55";
+  const RECORD_GLOW = "#FF6482";
   const ROUTE_RED = "#E53935";
   const ROUTE_GLOW = "#FF5252";
+  const RECORDED_PATH_COLOR = "#FF2D55";
 
   return (
     <View style={styles.container}>
@@ -403,7 +548,7 @@ export default function MapScreen() {
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        showsUserLocation={true}
+        showsUserLocation={!isRecording}
         showsMyLocationButton={false}
         showsCompass={false}
         zoomEnabled
@@ -412,9 +557,10 @@ export default function MapScreen() {
         rotateEnabled
         customMapStyle={MAP_GLOW}
         onPress={handleMapPress}
+        followsUserLocation={isRecording}
       >
         {/* Cafe & Restaurant Markers */}
-        {cafes.map((cafe) => {
+        {!isRecording && cafes.map((cafe) => {
           const isSelected = selectedCafe?.id === cafe.id;
           return (
             <Marker
@@ -434,10 +580,39 @@ export default function MapScreen() {
           );
         })}
 
-        {/* Route Polyline */}
+        {/* Recorded path polyline (during and after recording) */}
+        {recordedPath.length > 1 && (
+          <>
+            {/* Glow layer */}
+            <Polyline
+              coordinates={recordedPath}
+              strokeWidth={8}
+              strokeColor={`${RECORDED_PATH_COLOR}30`}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* Outer glow */}
+            <Polyline
+              coordinates={recordedPath}
+              strokeWidth={5}
+              strokeColor={`${RECORDED_PATH_COLOR}50`}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* Core line */}
+            <Polyline
+              coordinates={recordedPath}
+              strokeWidth={3}
+              strokeColor={RECORDED_PATH_COLOR}
+              lineCap="round"
+              lineJoin="round"
+            />
+          </>
+        )}
+
+        {/* Route Polyline (navigation to cafe) */}
         {routeInfo && (
           <>
-            {/* Glow line */}
             <Polyline
               coordinates={routeInfo.coordinates}
               strokeWidth={7}
@@ -445,7 +620,6 @@ export default function MapScreen() {
               lineCap="round"
               lineJoin="round"
             />
-            {/* Main red line */}
             <Polyline
               coordinates={routeInfo.coordinates}
               strokeWidth={4}
@@ -468,8 +642,8 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker */}
-        {userLocation && (
+        {/* User car marker (only when not recording, since recording uses native location dot) */}
+        {userLocation && !isRecording && (
           <Marker
             coordinate={userLocation}
             anchor={{ x: 0.5, y: 0.5 }}
@@ -512,28 +686,134 @@ export default function MapScreen() {
       )}
 
       {/* --- Loading cafes indicator --- */}
-      {loadingCafes && !locating && (
+      {loadingCafes && !locating && !isRecording && (
         <Animated.View style={[styles.cafeLoading, { top: insets.top + 16, opacity: fadeIn }]}>
           <ActivityIndicator size="small" color="#8B5CF6" />
           <Text style={styles.cafeLoadingText}>Finding cafés across Indonesia...</Text>
         </Animated.View>
       )}
 
-      {/* --- Right-side buttons --- */}
-      <Animated.View style={[styles.rightButtons, { top: insets.top + 60, opacity: fadeIn }]}>
-        <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
-          <Crosshair size={20} color="#FFFFFF" />
-        </TouchableOpacity>
-        {routeInfo && (
-          <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
-            <X size={20} color="#EF4444" />
+      {/* ===================================================== */}
+      {/*   RECORD BUTTON (visible when not recording)          */}
+      {/* ===================================================== */}
+      {!isRecording && !locating && !locError && (
+        <Animated.View
+          style={[styles.recordBtnContainer, { bottom: insets.bottom + 90, opacity: fadeIn }]}
+        >
+          <TouchableOpacity
+            style={styles.recordBtnOuter}
+            onPress={startRecording}
+            activeOpacity={0.8}
+          >
+            <View style={styles.recordBtnInner}>
+              <Circle size={22} color="#FF2D55" fill="#FF2D55" />
+            </View>
           </TouchableOpacity>
-        )}
-      </Animated.View>
+          <Text style={styles.recordBtnLabel}>REC</Text>
+        </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   RECORDING HUD — Live stats card                     */}
+      {/* ===================================================== */}
+      {isRecording && (
+        <Animated.View
+          style={[
+            styles.recordingCard,
+            { paddingBottom: insets.bottom + 90, transform: [{ translateY: recSlide }] },
+          ]}
+        >
+          {/* Stop button */}
+          <TouchableOpacity style={styles.stopBtn} onPress={stopRecording} activeOpacity={0.7}>
+            <Square size={18} color="#FFFFFF" fill="#FFFFFF" />
+            <Text style={styles.stopBtnText}>STOP</Text>
+          </TouchableOpacity>
+
+          {/* Stats */}
+          <View style={styles.recordingStats}>
+            {/* Distance */}
+            <View style={styles.recordingStat}>
+              <View style={styles.recordingStatIcon}>
+                <Route size={20} color={RECORD_RED} />
+              </View>
+              <View>
+                <Text style={styles.recordingStatLabel}>Distance</Text>
+                <Text style={styles.recordingStatValue}>{fmtMeters(tripDistance)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.recordingDivider} />
+
+            {/* Time */}
+            <View style={styles.recordingStat}>
+              <View style={styles.recordingStatIcon}>
+                <Timer size={20} color="#F59E0B" />
+              </View>
+              <View>
+                <Text style={styles.recordingStatLabel}>Time</Text>
+                <Text style={styles.recordingStatValue}>{fmtTimer(elapsedMs)}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Recording indicator dot */}
+          <View style={styles.recordingIndicator}>
+            <Animated.View
+              style={[styles.recordingDot, { transform: [{ scale: recPulse }] }]}
+            />
+            <Text style={styles.recordingIndicatorText}>Recording</Text>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   POST-RECORDING TRIP SUMMARY                         */}
+      {/* ===================================================== */}
+      {!isRecording && recordedPath.length > 1 && tripDistance > 0 && (
+        <View style={[styles.tripSummaryCard, { paddingBottom: insets.bottom + 90 }]}>
+          <View style={styles.tripSummaryHeader}>
+            <Text style={styles.tripSummaryTitle}>Trip Recorded</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setRecordedPath([]);
+                setTripDistance(0);
+                setElapsedMs(0);
+              }}
+              activeOpacity={0.7}
+            >
+              <X size={18} color="#5A5A6E" />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.tripSummaryRow}>
+            <View style={styles.tripStat}>
+              <Route size={16} color={RECORD_RED} />
+              <Text style={styles.tripStatValue}>{fmtMeters(tripDistance)}</Text>
+            </View>
+            <View style={styles.tripStat}>
+              <Clock size={16} color="#F59E0B" />
+              <Text style={styles.tripStatValue}>{fmtTimer(elapsedMs)}</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* --- Right-side buttons --- */}
+      {!isRecording && (
+        <Animated.View style={[styles.rightButtons, { top: insets.top + 60, opacity: fadeIn }]}>
+          <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
+            <Crosshair size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          {routeInfo && (
+            <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
+              <X size={20} color="#EF4444" />
+            </TouchableOpacity>
+          )}
+        </Animated.View>
+      )}
 
       {/* --- Selected cafe card --- */}
-      {selectedCafe && !routeInfo && (
-        <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 70 }]}>
+      {selectedCafe && !routeInfo && !isRecording && (
+        <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 90 }]}>
           <TouchableOpacity
             style={styles.cafeCardClose}
             onPress={() => setSelectedCafe(null)}
@@ -570,11 +850,10 @@ export default function MapScreen() {
         <Animated.View
           style={[
             styles.routeCard,
-            { paddingBottom: insets.bottom + 70, transform: [{ translateY: cardSlide }] },
+            { paddingBottom: insets.bottom + 90, transform: [{ translateY: cardSlide }] },
           ]}
         >
           <View style={styles.routeCardContent}>
-            {/* Loading indicator */}
             {loadingRoute && (
               <View style={styles.routeLoader}>
                 <ActivityIndicator size="small" color={ROUTE_RED} />
@@ -584,7 +863,6 @@ export default function MapScreen() {
 
             {!loadingRoute && (
               <View style={styles.routeInfoRow}>
-                {/* Distance */}
                 <View style={styles.routeStat}>
                   <View style={styles.routeStatIcon}>
                     <Route size={20} color={ROUTE_RED} />
@@ -595,10 +873,8 @@ export default function MapScreen() {
                   </View>
                 </View>
 
-                {/* Divider */}
                 <View style={styles.routeDivider} />
 
-                {/* ETA */}
                 <View style={styles.routeStat}>
                   <View style={styles.routeStatIcon}>
                     <Clock size={20} color="#F59E0B" />
@@ -609,14 +885,12 @@ export default function MapScreen() {
                   </View>
                 </View>
 
-                {/* Cancel */}
                 <TouchableOpacity style={styles.routeCancel} onPress={clearRoute} activeOpacity={0.7}>
                   <X size={18} color="#8A8A9A" />
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Destination name */}
             {selectedCafe && !loadingRoute && (
               <View style={styles.routeDest}>
                 <MapPin size={14} color={ROUTE_RED} />
@@ -633,6 +907,7 @@ export default function MapScreen() {
 // --- Styles ---
 const CAFE_COLOR = "#8B5CF6";
 const CAFE_COLOR_SELECTED = "#A78BFA";
+const RECORD_RED = "#FF2D55";
 const ROUTE_RED = "#E53935";
 
 const styles = StyleSheet.create({
@@ -787,6 +1062,194 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  // ========================
+  //  RECORD BUTTON
+  // ========================
+  recordBtnContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 150,
+  },
+  recordBtnOuter: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(255, 45, 85, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255, 45, 85, 0.4)",
+    shadowColor: RECORD_RED,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  recordBtnInner: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 45, 85, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recordBtnLabel: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: "700",
+    color: RECORD_RED,
+    letterSpacing: 2,
+  },
+  // ========================
+  //  RECORDING HUD
+  // ========================
+  recordingCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    zIndex: 150,
+  },
+  recordingStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 45, 85, 0.2)",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+    marginBottom: 10,
+  },
+  recordingStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  recordingStatIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 45, 85, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recordingStatLabel: {
+    fontSize: 11,
+    color: "#6A6A7E",
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  recordingStatValue: {
+    fontSize: 18,
+    color: "#FFFFFF",
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  recordingDivider: {
+    width: 1,
+    height: 50,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginHorizontal: 12,
+  },
+  stopBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: RECORD_RED,
+    paddingHorizontal: 24,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignSelf: "center",
+    marginBottom: 10,
+    shadowColor: RECORD_RED,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  stopBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  recordingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: RECORD_RED,
+  },
+  recordingIndicatorText: {
+    color: RECORD_RED,
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 1,
+  },
+  // ========================
+  //  TRIP SUMMARY
+  // ========================
+  tripSummaryCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    zIndex: 150,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.2)",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  tripSummaryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  tripSummaryTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#22C55E",
+  },
+  tripSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 24,
+  },
+  tripStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  tripStatValue: {
+    fontSize: 15,
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
   // Cafe card
   cafeCard: {
