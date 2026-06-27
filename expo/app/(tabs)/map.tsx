@@ -215,6 +215,9 @@ export default function MapScreen() {
   const [navigating, setNavigating] = useState(false);
   const [loadingRoute, setLoadingRoute] = useState(false);
 
+  // --- Pick mode --- (toggle to allow dropping a custom pin on the map)
+  const [isPickMode, setIsPickMode] = useState(false);
+
   // --- Recording state ---
   const [isRecording, setIsRecording] = useState(false);
   const [recordedPath, setRecordedPath] = useState<{ latitude: number; longitude: number }[]>([]);
@@ -530,31 +533,33 @@ export default function MapScreen() {
     estimatedDurationRef.current = null;
   }, []);
 
-  // --- Map press: drop a pin at tapped location (single tap) ---
+  // --- Toggle pick mode ---
+  const togglePickMode = useCallback(() => {
+    setIsPickMode((prev) => !prev);
+    // Clear any pending destination when leaving pick mode
+    if (isPickMode) {
+      setSelectedDestination(null);
+      setRouteInfo(null);
+    }
+  }, [isPickMode]);
+
+  // --- Map press: drop a pin at tapped location (only when pick mode is ON) ---
   const mapPressCooldownRef = useRef(0);
   const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+    if (!isPickMode) return;
     const now = Date.now();
-    // Tiny 200ms cooldown to prevent accidental double-taps from map + marker conflicts
     if (now - mapPressCooldownRef.current < 200) return;
     mapPressCooldownRef.current = now;
     const { latitude, longitude } = event.nativeEvent.coordinate;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setRouteInfo(null);
-  }, []);
+    // Turn off pick mode after placing a pin (single-use)
+    setIsPickMode(false);
+  }, [isPickMode]);
 
   // --- Recording handlers ---
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(() => {
     const now = Date.now();
-    const coords = destCoords();
-
-    // If destination is chosen but no route yet, auto-fetch directions first
-    if (coords && userLocation && !routeInfo && !loadingRoute) {
-      setLoadingRoute(true);
-      await fetchDirections(userLocation, coords);
-      // Wait a tick for state to settle
-      await new Promise((r) => setTimeout(r, 100));
-    }
-
     setIsRecording(true);
     setTripStartMs(now);
     setElapsedMs(0);
@@ -568,7 +573,7 @@ export default function MapScreen() {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
     }
-  }, [userLocation, destCoords, routeInfo, loadingRoute, fetchDirections]);
+  }, [userLocation]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -792,23 +797,7 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* REC button floats center-bottom when destination selected, not recording */}
-      {!isRecording && !locating && !locError && selectedDestination && (
-        <Animated.View
-          style={[styles.recordBtnContainer, { bottom: insets.bottom + 140, opacity: fadeIn }]}
-        >
-          <TouchableOpacity
-            style={styles.recordBtnOuter}
-            onPress={startRecording}
-            activeOpacity={0.75}
-          >
-            <Animated.View style={{ transform: [{ scale: recPulse }] }}>
-              <Circle size={28} color={RECORD_RED} fill={RECORD_RED} />
-            </Animated.View>
-          </TouchableOpacity>
-          <Text style={styles.recordBtnLabel}>REC</Text>
-        </Animated.View>
-      )}
+
 
       {/* ===================================================== */}
       {/*   RECORDING HUD — Live stats card                     */}
@@ -958,6 +947,13 @@ export default function MapScreen() {
           <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
             <Crosshair size={20} color="#FFFFFF" />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, isPickMode && styles.actionBtnActive]}
+            onPress={togglePickMode}
+            activeOpacity={0.7}
+          >
+            <MapPin size={18} color={isPickMode ? "#FF6B35" : "#6A6A7E"} />
+          </TouchableOpacity>
           {routeInfo && (
             <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
               <X size={20} color="#EF4444" />
@@ -1004,24 +1000,14 @@ export default function MapScreen() {
                 </View>
               ) : null}
             </View>
-            <View style={styles.cafeCardActions}>
-              <TouchableOpacity
-                style={styles.navBtn}
-                onPress={handleNavigate}
-                activeOpacity={0.7}
-              >
-                <Route size={18} color="#FFFFFF" />
-                <Text style={styles.navBtnText}>Route</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.recNavBtn}
-                onPress={startRecording}
-                activeOpacity={0.7}
-              >
-                <Circle size={18} color="#FFFFFF" fill={RECORD_RED} />
-                <Text style={styles.recNavBtnText}>REC & Go</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.navBtn}
+              onPress={handleNavigate}
+              activeOpacity={0.7}
+            >
+              <Route size={18} color="#FFFFFF" />
+              <Text style={styles.navBtnText}>Route</Text>
+            </TouchableOpacity>
           </View>
         </View>
         );
@@ -1077,13 +1063,27 @@ export default function MapScreen() {
               const destName = selectedDestination?.type === "cafe"
                 ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
                 : "Selected Location";
-              return selectedDestination && !loadingRoute ? (
+              return selectedDestination ? (
                 <View style={styles.routeDest}>
                   <MapPin size={14} color={ROUTE_RED} />
                   <Text style={styles.routeDestText} numberOfLines={1}>{destName}</Text>
                 </View>
               ) : null;
             })()}
+
+            {/* --- Record button (only after route + ETA visible) --- */}
+            {!isRecording && (
+              <TouchableOpacity
+                style={styles.routeRecBtn}
+                onPress={startRecording}
+                activeOpacity={0.7}
+              >
+                <Animated.View style={{ transform: [{ scale: recPulse }] }}>
+                  <Circle size={22} color="#FFFFFF" fill={RECORD_RED} />
+                </Animated.View>
+                <Text style={styles.routeRecBtnText}>START RECORDING</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </Animated.View>
       )}
@@ -1257,6 +1257,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  actionBtnActive: {
+    borderColor: "rgba(255, 107, 53, 0.5)",
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
   },
   // ========================
   //  RECORD BUTTON
