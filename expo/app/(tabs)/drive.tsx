@@ -30,6 +30,7 @@ import {
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useTabNavigation } from "./_layout";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
@@ -164,6 +165,7 @@ const UPCOMING_EVENTS = [
 export default function DriveScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { setActiveTab: switchTab } = useTabNavigation();
   const insets = useSafeAreaInsets();
   const [activeView, setActiveView] = useState<"features" | "quests" | "events">("features");
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -179,8 +181,8 @@ export default function DriveScreen() {
     }
   };
 
-  const handleNavigateMap = (feature: DriveFeature) => {
-    router.push("/(tabs)/map" as any);
+  const handleNavigateMap = (_feature: DriveFeature) => {
+    switchTab("map");
   };
 
   const sheetTranslateY = scrollY.interpolate({
@@ -197,29 +199,12 @@ export default function DriveScreen() {
         style={styles.background}
       />
 
-      {/* Header area */}
-      <View style={[styles.headerArea, { paddingTop: insets.top + 20 }]}>
-        <View style={styles.headerBar}>
-          <Text style={styles.headerTitle}>Drive</Text>
-          <View style={styles.headerStats}>
-            <View style={styles.statPill}>
-              <Star size={14} color="#FFD700" fill="#FFD700" />
-              <Text style={styles.statText}>Level 12</Text>
-            </View>
-            <View style={styles.statPill}>
-              <Trophy size={14} color="#FF6B35" />
-              <Text style={styles.statText}>3,450 XP</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-
       {/* Content */}
       <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + 140,
-          paddingTop: 16,
+          paddingBottom: insets.bottom + 40,
+          paddingTop: insets.top + 70,
         }}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
@@ -377,42 +362,6 @@ const styles = StyleSheet.create({
   },
   background: {
     ...StyleSheet.absoluteFillObject,
-  },
-  // Header
-  headerArea: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  headerBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: -0.5,
-  },
-  headerStats: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  statPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  statText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#FFFFFF",
   },
   // Scroll content
   scrollContent: {

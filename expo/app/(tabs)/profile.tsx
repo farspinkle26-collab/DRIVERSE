@@ -34,6 +34,7 @@ import {
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useTheme } from "@/hooks/useThemeStore";
+import { useTabNavigation } from "./_layout";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -67,6 +68,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
+  const { setActiveTab: switchTab } = useTabNavigation();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<"garage" | "achievements" | "stats">("garage");
 
@@ -78,7 +80,7 @@ export default function ProfileScreen() {
         style: "destructive",
         onPress: async () => {
           const success = await logout();
-          if (success) router.replace("/(tabs)/map" as any);
+          if (success) switchTab("map");
         },
       },
     ]);
@@ -93,7 +95,7 @@ export default function ProfileScreen() {
       <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.background} />
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 140, paddingTop: insets.top + 20 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40, paddingTop: insets.top + 70 }}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Header */}

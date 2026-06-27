@@ -272,35 +272,14 @@ export default function MapScreen() {
         )}
       </MapView>
 
-      {/* Top bar — greeting + profile */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.topBarInner}>
-          <View>
-            <Text style={styles.greetingLabel}>{greeting}</Text>
-            <Text style={styles.greetingName}>{user?.name ?? "Driver"}</Text>
-          </View>
-          <View style={styles.topActions}>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={toggleFilterPanel}
-              activeOpacity={0.7}
-            >
-              <Menu size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => router.push("/(tabs)/profile" as any)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.avatarSmall}>
-                <Text style={styles.avatarText}>
-                  {(user?.name ?? "D")[0].toUpperCase()}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      {/* Filter toggle button */}
+      <TouchableOpacity
+        style={[styles.filterToggle, { top: insets.top + 64 }]}
+        onPress={toggleFilterPanel}
+        activeOpacity={0.7}
+      >
+        <Menu size={18} color="#FFFFFF" />
+      </TouchableOpacity>
 
       {/* POI filter panel */}
       <Animated.View
@@ -401,60 +380,18 @@ const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFillObject,
   },
-  // Top bar
-  topBar: {
+  filterToggle: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    backgroundColor: "rgba(6, 6, 9, 0.75)",
-  },
-  topBarInner: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-  greetingLabel: {
-    fontSize: 13,
-    color: "#8A8A9A",
-    fontWeight: "500",
-  },
-  greetingName: {
-    fontSize: 22,
-    color: "#FFFFFF",
-    fontWeight: "700",
-    marginTop: 2,
-  },
-  topActions: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(18, 18, 26, 0.9)",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
-  },
-  avatarSmall: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#FF6B3530",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FF6B35",
+    zIndex: 99,
   },
   // Filter panel
   filterPanel: {
@@ -521,7 +458,7 @@ const styles = StyleSheet.create({
   // POI info card
   poiInfoCard: {
     position: "absolute",
-    bottom: 120,
+    bottom: 40,
     left: 20,
     right: 20,
     zIndex: 100,
@@ -572,7 +509,7 @@ const styles = StyleSheet.create({
   // Action buttons
   compassButton: {
     position: "absolute",
-    top: 160,
+    top: 140,
     right: 20,
     width: 44,
     height: 44,
@@ -586,7 +523,7 @@ const styles = StyleSheet.create({
   },
   emergencyButton: {
     position: "absolute",
-    top: 214,
+    top: 194,
     right: 20,
     width: 44,
     height: 44,
