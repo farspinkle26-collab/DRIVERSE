@@ -1013,8 +1013,8 @@ export default function MapScreen() {
         );
       })()}
 
-      {/* --- Navigation route card (distance + ETA) --- */}
-      {routeInfo && (
+      {/* --- Navigation route card (distance + ETA) — hidden while recording --- */}
+      {routeInfo && !isRecording && (
         <Animated.View
           style={[
             styles.routeCard,
