@@ -448,20 +448,16 @@ export default function MapScreen() {
     };
   }, [isRecording, tripStartMs]);
 
-  // --- Pulse animation for record button ---
+  // --- Pulse animation for record button (always subtle, stronger during recording) ---
   useEffect(() => {
-    if (isRecording) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(recPulse, { toValue: 1.4, duration: 500, useNativeDriver: true }),
-          Animated.timing(recPulse, { toValue: 1, duration: 500, useNativeDriver: true }),
-        ])
-      );
-      pulse.start();
-      return () => pulse.stop();
-    } else {
-      recPulse.setValue(1);
-    }
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(recPulse, { toValue: isRecording ? 1.4 : 1.15, duration: 600, useNativeDriver: true }),
+        Animated.timing(recPulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
   }, [isRecording, recPulse]);
 
   // --- Car float ---
@@ -547,8 +543,18 @@ export default function MapScreen() {
   }, []);
 
   // --- Recording handlers ---
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
     const now = Date.now();
+    const coords = destCoords();
+
+    // If destination is chosen but no route yet, auto-fetch directions first
+    if (coords && userLocation && !routeInfo && !loadingRoute) {
+      setLoadingRoute(true);
+      await fetchDirections(userLocation, coords);
+      // Wait a tick for state to settle
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
     setIsRecording(true);
     setTripStartMs(now);
     setElapsedMs(0);
@@ -562,7 +568,7 @@ export default function MapScreen() {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
     }
-  }, [userLocation]);
+  }, [userLocation, destCoords, routeInfo, loadingRoute, fetchDirections]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -786,22 +792,19 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* ===================================================== */}
-      {/*   RECORD BUTTON (visible when not recording)          */}
-      {/* ===================================================== */}
-      {/* Only show REC when destination is chosen and route is visible */}
-      {!isRecording && !locating && !locError && routeInfo && (
+      {/* REC button floats center-bottom when destination selected, not recording */}
+      {!isRecording && !locating && !locError && selectedDestination && (
         <Animated.View
-          style={[styles.recordBtnContainer, { bottom: insets.bottom + 90, opacity: fadeIn }]}
+          style={[styles.recordBtnContainer, { bottom: insets.bottom + 140, opacity: fadeIn }]}
         >
           <TouchableOpacity
             style={styles.recordBtnOuter}
             onPress={startRecording}
-            activeOpacity={0.8}
+            activeOpacity={0.75}
           >
-            <View style={styles.recordBtnInner}>
-              <Circle size={22} color="#FF2D55" fill="#FF2D55" />
-            </View>
+            <Animated.View style={{ transform: [{ scale: recPulse }] }}>
+              <Circle size={28} color={RECORD_RED} fill={RECORD_RED} />
+            </Animated.View>
           </TouchableOpacity>
           <Text style={styles.recordBtnLabel}>REC</Text>
         </Animated.View>
@@ -908,17 +911,33 @@ export default function MapScreen() {
             </View>
           </View>
           {xpEarned != null && (
-            <View style={styles.xpRewardRow}>
-              <View style={styles.xpRewardLeft}>
-                <Zap size={18} color="#FFD700" />
-                <Text style={styles.xpRewardLabel}>
-                  {wasFaster ? "Faster than estimate!" : "Trip complete"}
-                </Text>
+            <>
+              <View style={styles.xpRewardRow}>
+                <View style={styles.xpRewardLeft}>
+                  <Zap size={18} color="#FFD700" />
+                  <Text style={styles.xpRewardLabel}>
+                    {wasFaster ? "Faster than estimate!" : "Trip complete"}
+                  </Text>
+                </View>
+                <View style={styles.xpBadge}>
+                  <Text style={styles.xpBadgeText}>+{xpEarned} XP</Text>
+                </View>
               </View>
-              <View style={styles.xpBadge}>
-                <Text style={styles.xpBadgeText}>+{xpEarned} XP</Text>
-              </View>
-            </View>
+              {routeInfo && (
+                <View style={styles.comparisonRow}>
+                  <Text style={styles.comparisonText}>Est. {routeInfo.durationMin}</Text>
+                  <Text style={[styles.comparisonDiff, wasFaster ? styles.comparisonFaster : styles.comparisonSlower]}>
+                    {wasFaster ? `-${fmtDuration(routeInfo.durationSeconds - (elapsedMs / 1000))}` : `+${fmtDuration((elapsedMs / 1000) - routeInfo.durationSeconds)}`}
+                  </Text>
+                </View>
+              )}
+              {leveledUp && (
+                <View style={styles.levelUpBanner}>
+                  <Trophy size={16} color="#FFD700" />
+                  <Text style={styles.levelUpText}>LEVEL UP! You reached Level {level}</Text>
+                </View>
+              )}
+            </>
           )}
           <View style={styles.levelBarContainer}>
             <View style={styles.levelBarHeader}>
@@ -985,14 +1004,24 @@ export default function MapScreen() {
                 </View>
               ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={handleNavigate}
-              activeOpacity={0.7}
-            >
-              <Route size={18} color="#FFFFFF" />
-              <Text style={styles.navBtnText}>Go</Text>
-            </TouchableOpacity>
+            <View style={styles.cafeCardActions}>
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={handleNavigate}
+                activeOpacity={0.7}
+              >
+                <Route size={18} color="#FFFFFF" />
+                <Text style={styles.navBtnText}>Route</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.recNavBtn}
+                onPress={startRecording}
+                activeOpacity={0.7}
+              >
+                <Circle size={18} color="#FFFFFF" fill={RECORD_RED} />
+                <Text style={styles.recNavBtnText}>REC & Go</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
         );
@@ -1546,7 +1575,19 @@ const styles = StyleSheet.create({
     color: "#FFD700",
     fontWeight: "800",
     textAlign: "center",
-    marginTop: 8,
+  },
+  levelUpBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255, 215, 0, 0.1)",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 215, 0, 0.2)",
   },
   // Comparison row
   comparisonRow: {
@@ -1661,6 +1702,54 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "700",
+  },
+  cafeCardActions: {
+    flexDirection: "column",
+    gap: 8,
+    alignItems: "flex-end",
+  },
+  recNavBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: RECORD_RED,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    shadowColor: RECORD_RED,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  recNavBtnText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  routeRecBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: RECORD_RED,
+    marginTop: 14,
+    paddingVertical: 13,
+    borderRadius: 14,
+    shadowColor: RECORD_RED,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  routeRecBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 1,
   },
   // Route card
   routeCard: {
