@@ -26,8 +26,16 @@ import {
   Zap,
   TrendingUp,
   Trophy,
+  Users,
+  UserPlus,
+  Wifi,
+  WifiOff,
 } from "lucide-react-native";
 import { useXP } from "@/hooks/useXPStore";
+import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
+import { useAuth } from "@/hooks/useAuthStore";
+import { supabase } from "@/lib/supabase";
+import { Alert } from "react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -247,6 +255,12 @@ export default function MapScreen() {
 
   // XP system
   const { level, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
+
+  // Online users system
+  const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
+  const { user } = useAuth();
+  const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
+  const [addingFriend, setAddingFriend] = useState(false);
 
   // Animations
   const carFloat = useRef(new Animated.Value(0)).current;
@@ -541,6 +555,32 @@ export default function MapScreen() {
     }).start();
   }, [isRecording, recSlide]);
 
+  // --- Add friend from map marker ---
+  const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
+    if (!user) return;
+    setAddingFriend(true);
+    try {
+      const { error } = await supabase.from("friends").insert({
+        user_id: user.id,
+        friend_id: friendId,
+        status: "pending",
+      });
+      if (error) {
+        if (error.code === "23505") {
+          Alert.alert("Already Connected", `You are already connected with ${friendName}`);
+        } else {
+          Alert.alert("Error", error.message);
+        }
+      } else {
+        Alert.alert("Request Sent!", `Friend request sent to ${friendName}`);
+      }
+    } catch {
+      // Silent
+    } finally {
+      setAddingFriend(false);
+    }
+  }, [user]);
+
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
     if (!userLocation || !mapRef.current) return;
@@ -681,8 +721,39 @@ export default function MapScreen() {
       setLeveledUp(newLvl > oldLevel);
     }
 
+    // Save trip to Supabase
+    if (user?.id) {
+      const destName = selectedDestination?.type === "cafe"
+        ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+        : selectedDestination
+        ? `${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(4)}, ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(4)}`
+        : "Unknown";
+      const dest = destCoords();
+      const estSec = estimatedDurationRef.current ?? 0;
+      supabase.from("trips").insert({
+        user_id: user.id,
+        origin_name: "Current Location",
+        origin_lat: recordedPath[0]?.latitude ?? 0,
+        origin_lng: recordedPath[0]?.longitude ?? 0,
+        destination_name: destName,
+        destination_lat: dest?.latitude ?? 0,
+        destination_lng: dest?.longitude ?? 0,
+        distance_km: tripDistance / 1000,
+        duration_seconds: Math.round(actualDurationSec),
+        avg_speed_kmh: avgSpeed,
+        top_speed_kmh: currentSpeed,
+        estimated_duration_seconds: Math.round(estSec),
+        xp_earned: xpEarned ?? 10,
+        was_faster_than_estimation: wasFaster,
+        started_at: new Date(tripStartMs ?? now).toISOString(),
+        completed_at: new Date(now).toISOString(),
+      }).then(({ error }) => {
+        if (error) console.error("Failed to save trip:", error);
+      });
+    }
+
     // Keep path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs, level, addXP]);
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, xpEarned, wasFaster]);
 
   // --- Map region ---
   const initialRegion = userLocation
@@ -858,6 +929,30 @@ export default function MapScreen() {
             </View>
           </Marker>
         )}
+
+        {/* Online user markers */}
+        {isUserOnline && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => (
+          <Marker
+            key={`online-${onlineUser.user_id}`}
+            coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
+            anchor={{ x: 0.5, y: 0.8 }}
+            onPress={() => setSelectedOnlineUser(onlineUser)}
+            tracksViewChanges={false}
+          >
+            <View style={styles.onlineUserMarker}>
+              <View style={styles.onlineUserAvatar}>
+                <Text style={styles.onlineUserAvatarText}>
+                  {onlineUser.name[0].toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.onlineUserLabel}>
+                <Text style={styles.onlineUserLabelText} numberOfLines={1}>
+                  {onlineUser.name}
+                </Text>
+              </View>
+            </View>
+          </Marker>
+        ))}
 
         {/* User car marker — always visible, recording or not */}
         {userLocation && (
@@ -1083,12 +1178,66 @@ export default function MapScreen() {
           >
             <MapPin size={18} color={isPickMode ? "#FF6B35" : "#6A6A7E"} />
           </TouchableOpacity>
+          {/* Online toggle */}
+          {user && (
+            <TouchableOpacity
+              style={[styles.actionBtn, isUserOnline && styles.actionBtnOnlineActive]}
+              onPress={isUserOnline ? goOffline : goOnline}
+              activeOpacity={0.7}
+            >
+              {isUserOnline ? (
+                <Wifi size={18} color="#22C55E" />
+              ) : (
+                <WifiOff size={18} color="#6A6A7E" />
+              )}
+            </TouchableOpacity>
+          )}
           {routeInfo && (
             <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
               <X size={20} color="#EF4444" />
             </TouchableOpacity>
           )}
         </Animated.View>
+      )}
+
+      {/* --- Online user profile card (tapped on map) --- */}
+      {selectedOnlineUser && !isRecording && (
+        <View style={[styles.onlineUserCard, { paddingBottom: insets.bottom + 90 }]}>
+          <TouchableOpacity
+            style={styles.cafeCardClose}
+            onPress={() => setSelectedOnlineUser(null)}
+          >
+            <View style={styles.cafeCardCloseBar} />
+          </TouchableOpacity>
+          <View style={styles.onlineUserCardContent}>
+            <View style={styles.onlineUserCardHeader}>
+              <View style={styles.onlineUserCardAvatar}>
+                <Text style={styles.onlineUserCardAvatarText}>
+                  {selectedOnlineUser.name[0].toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.onlineUserCardName} numberOfLines={1}>
+                  {selectedOnlineUser.name}
+                </Text>
+                <Text style={styles.onlineUserCardLevel}>
+                  Level {selectedOnlineUser.level}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.onlineUserAddBtn, addingFriend && { opacity: 0.5 }]}
+              onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+              disabled={addingFriend}
+              activeOpacity={0.7}
+            >
+              <UserPlus size={18} color="#FFFFFF" />
+              <Text style={styles.onlineUserAddBtnText}>
+                {addingFriend ? "Sending..." : "Add Friend"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
 
       {/* --- Selected destination card (cafe or custom location) --- */}
@@ -2006,5 +2155,117 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
     flex: 1,
+  },
+  // ─── Online users ────────────────────────────────────
+  actionBtnOnlineActive: {
+    borderColor: "rgba(34, 197, 94, 0.5)",
+    backgroundColor: "rgba(34, 197, 94, 0.1)",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  onlineUserMarker: {
+    alignItems: "center",
+  },
+  onlineUserAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#22C55E",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#0A0A0F",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  onlineUserAvatarText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  onlineUserLabel: {
+    marginTop: 3,
+    backgroundColor: "rgba(10, 10, 20, 0.88)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    maxWidth: 80,
+  },
+  onlineUserLabelText: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: "#CCCCCC",
+  },
+  // ─── Online user profile card ─────────────────────────
+  onlineUserCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    zIndex: 160,
+  },
+  onlineUserCardContent: {
+    backgroundColor: "rgba(18, 22, 32, 0.97)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.2)",
+    padding: 18,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  onlineUserCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 14,
+  },
+  onlineUserCardAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#22C55E",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  onlineUserCardAvatarText: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  onlineUserCardName: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  onlineUserCardLevel: {
+    fontSize: 13,
+    color: "#22C55E",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  onlineUserAddBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FF6B35",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignSelf: "stretch",
+  },
+  onlineUserAddBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 });
