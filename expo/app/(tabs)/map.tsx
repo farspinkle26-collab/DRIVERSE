@@ -62,25 +62,28 @@ const POI_CONFIG: Record<POIType, { color: string; glow: string; icon: React.FC<
   emergency: { color: "#EF4444", glow: "#EF444425", icon: AlertTriangle, label: "Emergency" },
 };
 
-// --- Google Maps Dark Style ---
-const MAP_DARK = [
-  { elementType: "geometry", stylers: [{ color: "#0D0D18" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#4A4A5E" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#0D0D18" }] },
-  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#16162A" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1A1A30" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#1C1C32" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#222240" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#141424" }] },
-  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#101020" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#060615" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#3A3A50" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#0A0A14" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#181828" }] },
-  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#5A5A6E" }] },
+// --- Warm Glow Map Style (Forza Horizon inspired) ---
+const MAP_GLOW = [
+  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
+  { elementType: "labels.icon", stylers: [{ saturation: 30, lightness: 20 }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#2A2A45" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2E2E4A" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#353550" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#222238" }] },
+  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#1E1E34" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
+  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
+  { featureType: "poi", stylers: [{ visibility: "simplified" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#1E2E24" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6A8A6A" }] },
+  { featureType: "transit", stylers: [{ visibility: "simplified" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
+  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
 ];
 
 export default function MapScreen() {
@@ -256,7 +259,7 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={MAP_DARK}
+        customMapStyle={MAP_GLOW}
         onPress={() => setSelectedPOI(null)}
       >
         {/* POI Markers */}
@@ -314,7 +317,7 @@ export default function MapScreen() {
 
       {/* --- Loading overlay while GPS is acquiring --- */}
       {locating && (
-        <View style={[styles.loadingOverlay, { paddingTop: insets.top + 60 }]} pointerEvents="none">
+        <View style={[styles.loadingOverlay, { paddingTop: insets.top + 20 }]} pointerEvents="none">
           <View style={styles.loadingCard}>
             <ActivityIndicator size="small" color="#FF6B35" />
             <Text style={styles.loadingText}>Detecting your location...</Text>
@@ -324,13 +327,12 @@ export default function MapScreen() {
 
       {/* --- Location error banner --- */}
       {locError && (
-        <View style={[styles.errorBanner, { top: insets.top + 60 }]}>
+        <View style={[styles.errorBanner, { top: insets.top + 16 }]}>
           <Text style={styles.errorText}>{locError}</Text>
           <TouchableOpacity
             onPress={() => {
               setLocError(null);
               setLocating(true);
-              // Retry GPS — reload effect by remounting key would work, just set locating
             }}
           >
             <Text style={styles.retryText}>Retry</Text>
@@ -338,8 +340,8 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* --- Filter chips (below tab bar) --- */}
-      <Animated.View style={[styles.filterBar, { top: insets.top + 68, opacity: fadeIn }]}>
+      {/* --- Filter chips at top --- */}
+      <Animated.View style={[styles.filterBar, { top: insets.top + 10, opacity: fadeIn }]}>
         <Animated.ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -367,8 +369,8 @@ export default function MapScreen() {
         </Animated.ScrollView>
       </Animated.View>
 
-      {/* --- Right-side action buttons (below filter bar) --- */}
-      <Animated.View style={[styles.rightButtons, { top: insets.top + 126, opacity: fadeIn }]}>
+      {/* --- Right-side action buttons --- */}
+      <Animated.View style={[styles.rightButtons, { top: insets.top + 60, opacity: fadeIn }]}>
         <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
           <Crosshair size={20} color="#FFFFFF" />
         </TouchableOpacity>
@@ -377,13 +379,13 @@ export default function MapScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* --- Selected POI card --- */}
+      {/* --- Selected POI card — positioned above bottom nav --- */}
       {selectedPOI && (
         <Animated.View
           style={[
             styles.poiCard,
             {
-              paddingBottom: insets.bottom + 12,
+              paddingBottom: insets.bottom + 70,
               transform: [{ translateY: cardSlide.interpolate({ inputRange: [0, 1], outputRange: [120, 0] }) }],
               opacity: cardSlide,
             },
@@ -398,7 +400,6 @@ export default function MapScreen() {
             <TouchableOpacity
               style={styles.poiCardGo}
               onPress={() => {
-                // Navigate to this POI (future: open Google Maps directions)
                 setSelectedPOI(null);
               }}
               activeOpacity={0.7}
@@ -420,7 +421,7 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#060609",
+    backgroundColor: "#161628",
   },
   map: {
     ...StyleSheet.absoluteFillObject,
