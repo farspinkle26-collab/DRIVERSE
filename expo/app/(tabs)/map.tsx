@@ -30,6 +30,9 @@ import {
   UserPlus,
   Wifi,
   WifiOff,
+  Coffee,
+  Fuel,
+  ShoppingBag,
 } from "lucide-react-native";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
@@ -65,6 +68,8 @@ const INDONESIAN_CITIES = [
   { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
 ];
 
+type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping";
+
 interface CafePOI {
   id: string;
   name: string;
@@ -73,6 +78,17 @@ interface CafePOI {
   rating?: number;
   vicinity?: string;
   types: string[];
+  category: LandmarkCategory;
+}
+
+/** Detect landmark category from Google Places types */
+function detectCategory(placeTypes: string[]): LandmarkCategory {
+  const t = placeTypes.map((s) => s.toLowerCase());
+  if (t.some((s) => s.includes("gas") || s === "gas_station")) return "spbu";
+  if (t.some((s) => s.includes("restaurant") || s.includes("food"))) return "restaurant";
+  if (t.some((s) => s.includes("cafe"))) return "cafe";
+  if (t.some((s) => s.includes("store") || s.includes("shop") || s.includes("mall") || s === "shopping_mall")) return "shopping";
+  return "restaurant";
 }
 
 type SelectedDestination =
@@ -272,7 +288,7 @@ export default function MapScreen() {
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
     if (!GOOGLE_API_KEY) return [];
-    const types = ["cafe", "restaurant"];
+    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store"];
     const allResults: CafePOI[] = [];
     const seen = new Set<string>();
 
@@ -294,6 +310,7 @@ export default function MapScreen() {
               rating: place.rating,
               vicinity: place.vicinity ?? cityName,
               types: place.types ?? [],
+              category: detectCategory(place.types ?? []),
             });
           }
         }
@@ -785,22 +802,38 @@ export default function MapScreen() {
         onPress={handleMapPress}
         followsUserLocation={isRecording}
       >
-        {/* Cafe & Restaurant Markers */}
-        {!isRecording && cafes.map((cafe) => {
-          const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === cafe.id;
+        {/* Landmark Markers — category-based custom icons */}
+        {!isRecording && cafes.map((poi) => {
+          const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
+          const cat = poi.category;
+          const catColors: Record<LandmarkCategory, string> = {
+            cafe: "#D4A574",
+            restaurant: "#E53935",
+            spbu: "#F59E0B",
+            shopping: "#00D4AA",
+          };
+          const catColor = catColors[cat];
+          const catIcon = (s: number, c: string) => {
+            switch (cat) {
+              case "cafe": return <Coffee size={s} color={c} strokeWidth={2} />;
+              case "spbu": return <Fuel size={s} color={c} strokeWidth={2} />;
+              case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2} />;
+              default: return <UtensilsCrossed size={s} color={c} strokeWidth={2} />;
+            }
+          };
           return (
             <Marker
-              key={cafe.id}
-              coordinate={{ latitude: cafe.lat, longitude: cafe.lng }}
-              onPress={() => handleCafePress(cafe)}
+              key={poi.id}
+              coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+              onPress={() => handleCafePress(poi)}
               tracksViewChanges={false}
             >
-              <View style={[styles.cafeMarker, isSelected && styles.cafeMarkerSelected]}>
-                <UtensilsCrossed
-                  size={isSelected ? 15 : 12}
-                  color={isSelected ? "#EAEAEA" : "#8B5CF6"}
-                  strokeWidth={2}
-                />
+              <View style={[
+                styles.landmarkMarker,
+                { borderColor: `${catColor}60` },
+                isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+              ]}>
+                {catIcon(isSelected ? 15 : 12, isSelected ? "#EAEAEA" : catColor)}
               </View>
             </Marker>
           );
@@ -1001,7 +1034,7 @@ export default function MapScreen() {
       {loadingCafes && !locating && !isRecording && (
         <Animated.View style={[styles.cafeLoading, { top: insets.top + 16, opacity: fadeIn }]}>
           <ActivityIndicator size="small" color="#8B5CF6" />
-          <Text style={styles.cafeLoadingText}>Finding cafés across Indonesia...</Text>
+          <Text style={styles.cafeLoadingText}>Finding landmarks across Indonesia...</Text>
         </Animated.View>
       )}
 
@@ -1265,7 +1298,19 @@ export default function MapScreen() {
           </TouchableOpacity>
           <View style={styles.cafeCardContent}>
             <View style={styles.cafeCardInfo}>
-              <Text style={styles.cafeCardName} numberOfLines={2}>{destName}</Text>
+              <View style={styles.destCardNameRow}>
+                {isCafe && (() => {
+                  const catData = (selectedDestination as { type: "cafe"; data: CafePOI }).data;
+                  const catColorMap: Record<LandmarkCategory, string> = {
+                    cafe: "#D4A574", restaurant: "#E53935", spbu: "#F59E0B", shopping: "#00D4AA",
+                  };
+                  const cc = catColorMap[catData.category];
+                  return (
+                    <View style={[styles.categoryDot, { backgroundColor: cc }]} />
+                  );
+                })()}
+                <Text style={styles.cafeCardName} numberOfLines={2}>{destName}</Text>
+              </View>
               {destVicinity ? (
                 <Text style={styles.cafeCardVicinity} numberOfLines={1}>{destVicinity}</Text>
               ) : coordsStr ? (
@@ -1406,7 +1451,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
   },
-  // Cafe loading
+  // Landmark loading
   cafeLoading: {
     position: "absolute",
     left: 20,
@@ -1453,8 +1498,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginLeft: 12,
   },
-  // Cafe marker
-  cafeMarker: {
+  // Landmark marker (generic base; per-category colors applied inline)
+  landmarkMarker: {
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -1462,15 +1507,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1.5,
-    borderColor: CAFE_COLOR + "50",
   },
-  cafeMarkerSelected: {
+  landmarkMarkerSelected: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    borderColor: CAFE_COLOR_SELECTED,
-    backgroundColor: "rgba(139, 92, 246, 0.18)",
-    shadowColor: CAFE_COLOR,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 12,
@@ -1973,6 +2014,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: "#FFFFFF",
+    flex: 1,
+  },
+  destCardNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  categoryDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   cafeCardVicinity: {
     fontSize: 12,
