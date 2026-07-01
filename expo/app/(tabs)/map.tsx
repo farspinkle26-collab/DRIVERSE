@@ -28,8 +28,6 @@ import {
   Trophy,
   Users,
   UserPlus,
-  Wifi,
-  WifiOff,
   Coffee,
   Fuel,
   ShoppingBag,
@@ -284,6 +282,8 @@ export default function MapScreen() {
   const cardSlide = useRef(new Animated.Value(200)).current;
   const recPulse = useRef(new Animated.Value(1)).current;
   const recSlide = useRef(new Animated.Value(200)).current;
+  const onlinePulse = useRef(new Animated.Value(1)).current;
+  const onlineSlide = useRef(new Animated.Value(200)).current;
 
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
@@ -571,6 +571,28 @@ export default function MapScreen() {
       friction: 12,
     }).start();
   }, [isRecording, recSlide]);
+
+  // Online pulse animation
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(onlinePulse, { toValue: 1.3, duration: 700, useNativeDriver: true }),
+        Animated.timing(onlinePulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [onlinePulse]);
+
+  // Slide online card when user toggles online
+  useEffect(() => {
+    Animated.spring(onlineSlide, {
+      toValue: isUserOnline ? 0 : 200,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 12,
+    }).start();
+  }, [isUserOnline, onlineSlide]);
 
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -1211,20 +1233,6 @@ export default function MapScreen() {
           >
             <MapPin size={18} color={isPickMode ? "#FF6B35" : "#6A6A7E"} />
           </TouchableOpacity>
-          {/* Online toggle */}
-          {user && (
-            <TouchableOpacity
-              style={[styles.actionBtn, isUserOnline && styles.actionBtnOnlineActive]}
-              onPress={isUserOnline ? goOffline : goOnline}
-              activeOpacity={0.7}
-            >
-              {isUserOnline ? (
-                <Wifi size={18} color="#22C55E" />
-              ) : (
-                <WifiOff size={18} color="#6A6A7E" />
-              )}
-            </TouchableOpacity>
-          )}
           {routeInfo && (
             <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
               <X size={20} color="#EF4444" />
@@ -1232,6 +1240,70 @@ export default function MapScreen() {
           )}
         </Animated.View>
       )}
+
+      {/* ===================================================== */}
+      {/*   GO ONLINE CARD — Large prominent button              */}
+      {/* ===================================================== */}
+      {user && !isRecording && (() => {
+        const onlineCount = onlineUsers.length;
+        return (
+          <Animated.View
+            style={[
+              styles.onlineBigCard,
+              { paddingBottom: insets.bottom + 90, transform: [{ translateY: onlineSlide }] },
+            ]}
+          >
+            {!isUserOnline ? (
+              /* OFFLINE — big green "GO ONLINE" button */
+              <TouchableOpacity
+                style={styles.goOnlineBtn}
+                onPress={goOnline}
+                activeOpacity={0.75}
+              >
+                <Animated.View style={[styles.goOnlineIconWrap, { transform: [{ scale: onlinePulse }] }]}>
+                  <View style={styles.goOnlineDot} />
+                </Animated.View>
+                <View style={styles.goOnlineTextWrap}>
+                  <Text style={styles.goOnlineTitle}>Go Online</Text>
+                  <Text style={styles.goOnlineSubtitle}>
+                    Show your location to others on the map
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              /* ONLINE — green glowing card with user count */
+              <View style={styles.onlineActiveCard}>
+                <View style={styles.onlineActiveRow}>
+                  <View style={styles.onlineActiveLeft}>
+                    <Animated.View style={[styles.onlineActiveDot, { transform: [{ scale: onlinePulse }] }]} />
+                    <Text style={styles.onlineActiveTitle}>You're Online</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.goOfflineBtn}
+                    onPress={goOffline}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.goOfflineBtnText}>Go Offline</Text>
+                  </TouchableOpacity>
+                </View>
+                {onlineCount > 0 && (
+                  <View style={styles.onlineCountBadge}>
+                    <Users size={14} color="#22C55E" />
+                    <Text style={styles.onlineCountText}>
+                      {onlineCount} driver{onlineCount !== 1 ? "s" : ""} on the map
+                    </Text>
+                  </View>
+                )}
+                {onlineCount === 0 && (
+                  <Text style={styles.onlineEmptyText}>
+                    Your location is visible to others. Waiting for drivers to come online...
+                  </Text>
+                )}
+              </View>
+            )}
+          </Animated.View>
+        );
+      })()}
 
       {/* --- Online user profile card (tapped on map) --- */}
       {selectedOnlineUser && !isRecording && (
@@ -2208,51 +2280,179 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
   },
-  // ─── Online users ────────────────────────────────────
-  actionBtnOnlineActive: {
-    borderColor: "rgba(34, 197, 94, 0.5)",
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
+  // ─── GO ONLINE CARD ──────────────────────────────────
+  onlineBigCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    zIndex: 155,
+  },
+  goOnlineBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    backgroundColor: "rgba(16, 24, 20, 0.97)",
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: "rgba(34, 197, 94, 0.35)",
+    paddingHorizontal: 22,
+    paddingVertical: 18,
     shadowColor: "#22C55E",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 12,
   },
+  goOnlineIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(34, 197, 94, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "rgba(34, 197, 94, 0.4)",
+  },
+  goOnlineDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#22C55E",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  goOnlineTextWrap: {
+    flex: 1,
+  },
+  goOnlineTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.5,
+  },
+  goOnlineSubtitle: {
+    fontSize: 12,
+    color: "#6A8A7A",
+    fontWeight: "500",
+    marginTop: 3,
+  },
+  // ─── ONLINE ACTIVE CARD ──────────────────────────────
+  onlineActiveCard: {
+    backgroundColor: "rgba(16, 24, 20, 0.97)",
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: "rgba(34, 197, 94, 0.3)",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  onlineActiveRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  onlineActiveLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  onlineActiveDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#22C55E",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  onlineActiveTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#22C55E",
+    letterSpacing: 0.3,
+  },
+  goOfflineBtn: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  goOfflineBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#A0A0B0",
+  },
+  onlineCountBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(34, 197, 94, 0.12)",
+  },
+  onlineCountText: {
+    fontSize: 13,
+    color: "#CCCCCC",
+    fontWeight: "600",
+  },
+  onlineEmptyText: {
+    fontSize: 11,
+    color: "#4A5A4E",
+    fontWeight: "500",
+    marginTop: 10,
+    textAlign: "center",
+  },
+  // ─── Online user markers on map ──────────────────────
   onlineUserMarker: {
     alignItems: "center",
   },
   onlineUserAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#22C55E",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#0A0A0F",
+    borderWidth: 2.5,
+    borderColor: "#0A0A14",
     shadowColor: "#22C55E",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
   },
   onlineUserAvatarText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "800",
     color: "#FFFFFF",
   },
   onlineUserLabel: {
     marginTop: 3,
-    backgroundColor: "rgba(10, 10, 20, 0.88)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: "rgba(10, 10, 20, 0.9)",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
     maxWidth: 80,
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.2)",
   },
   onlineUserLabelText: {
     fontSize: 9,
     fontWeight: "600",
-    color: "#CCCCCC",
+    color: "#DDDDDD",
   },
   // ─── Online user profile card ─────────────────────────
   onlineUserCard: {
