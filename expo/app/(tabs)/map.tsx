@@ -283,7 +283,7 @@ export default function MapScreen() {
   const recPulse = useRef(new Animated.Value(1)).current;
   const recSlide = useRef(new Animated.Value(200)).current;
   const onlinePulse = useRef(new Animated.Value(1)).current;
-  const onlineSlide = useRef(new Animated.Value(200)).current;
+  const onlineSlide = useRef(new Animated.Value(0)).current;
 
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
@@ -584,15 +584,15 @@ export default function MapScreen() {
     return () => pulse.stop();
   }, [onlinePulse]);
 
-  // Slide online card when user toggles online
+  // Online card always visible — content switches between offline/online
   useEffect(() => {
     Animated.spring(onlineSlide, {
-      toValue: isUserOnline ? 0 : 200,
+      toValue: 0,
       useNativeDriver: true,
       tension: 80,
       friction: 12,
     }).start();
-  }, [isUserOnline, onlineSlide]);
+  }, [onlineSlide]);
 
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -813,7 +813,7 @@ export default function MapScreen() {
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        showsUserLocation={true}
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}
         zoomEnabled
@@ -1244,7 +1244,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   GO ONLINE CARD — Large prominent button              */}
       {/* ===================================================== */}
-      {user && !isRecording && (() => {
+      {!isRecording && !routeInfo && !selectedDestination && recordedPath.length === 0 && (() => {
         const onlineCount = onlineUsers.length;
         return (
           <Animated.View
@@ -1253,7 +1253,20 @@ export default function MapScreen() {
               { paddingBottom: insets.bottom + 90, transform: [{ translateY: onlineSlide }] },
             ]}
           >
-            {!isUserOnline ? (
+            {!user ? (
+              /* NOT LOGGED IN — prompt to sign in */
+              <View style={styles.goOnlineBtn}>
+                <View style={styles.goOnlineIconWrap}>
+                  <Users size={22} color="#6A6A7E" />
+                </View>
+                <View style={styles.goOnlineTextWrap}>
+                  <Text style={styles.goOnlineTitle}>Sign In to Go Online</Text>
+                  <Text style={styles.goOnlineSubtitle}>
+                    Create an account to show your location and see other drivers
+                  </Text>
+                </View>
+              </View>
+            ) : !isUserOnline ? (
               /* OFFLINE — big green "GO ONLINE" button */
               <TouchableOpacity
                 style={styles.goOnlineBtn}
