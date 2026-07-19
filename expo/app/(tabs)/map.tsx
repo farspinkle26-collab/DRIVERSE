@@ -207,9 +207,10 @@ const MAP_GLOW = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
   { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
   { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
-  { featureType: "poi", stylers: [{ visibility: "simplified" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#1E2E24" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6A8A6A" }] },
+  // Hide all default Google POI icons/labels — only our custom cafe/restaurant/SPBU/shopping markers should show
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#1E2E24" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ visibility: "on" }, { color: "#6A8A6A" }] },
   { featureType: "transit", stylers: [{ visibility: "simplified" }] },
   { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
   { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
@@ -231,6 +232,8 @@ export default function MapScreen() {
 
   // Selected destination (cafe or custom tapped location)
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
+  // Whether the user has confirmed the selected pin via "Choose Location"
+  const [locationChosen, setLocationChosen] = useState(false);
 
   // Navigation / routing state
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
@@ -631,12 +634,18 @@ export default function MapScreen() {
 
   const handleCafePress = useCallback((cafe: CafePOI) => {
     setSelectedDestination({ type: "cafe", data: cafe });
+    setLocationChosen(false);
     setRouteInfo(null);
     mapRef.current?.animateCamera(
-      { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 16, pitch: 40 },
-      { duration: 600 }
+      { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
+      { duration: 500 }
     );
   }, []);
+
+  const handleChooseLocation = useCallback(() => {
+    if (!selectedDestination) return;
+    setLocationChosen(true);
+  }, [selectedDestination]);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -660,6 +669,7 @@ export default function MapScreen() {
     setRouteInfo(null);
     setNavigating(false);
     setSelectedDestination(null);
+    setLocationChosen(false);
     estimatedDurationRef.current = null;
   }, []);
 
@@ -669,6 +679,7 @@ export default function MapScreen() {
     // Clear any pending destination when leaving pick mode
     if (isPickMode) {
       setSelectedDestination(null);
+      setLocationChosen(false);
       setRouteInfo(null);
     }
   }, [isPickMode]);
@@ -682,9 +693,14 @@ export default function MapScreen() {
     mapPressCooldownRef.current = now;
     const { latitude, longitude } = event.nativeEvent.coordinate;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
+    setLocationChosen(false);
     setRouteInfo(null);
     // Turn off pick mode after placing a pin (single-use)
     setIsPickMode(false);
+    mapRef.current?.animateCamera(
+      { center: { latitude, longitude }, zoom: 17, pitch: 40 },
+      { duration: 500 }
+    );
   }, [isPickMode]);
 
   // --- Recording handlers ---
@@ -843,19 +859,21 @@ export default function MapScreen() {
               default: return <UtensilsCrossed size={s} color={c} strokeWidth={2} />;
             }
           };
+          const isChosen = isSelected && locationChosen;
           return (
             <Marker
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
-              tracksViewChanges={false}
+              tracksViewChanges={isSelected}
             >
               <View style={[
                 styles.landmarkMarker,
                 { borderColor: `${catColor}60` },
                 isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+                isChosen && styles.landmarkMarkerChosen,
               ]}>
-                {catIcon(isSelected ? 15 : 12, isSelected ? "#EAEAEA" : catColor)}
+                {catIcon(isChosen ? 19 : isSelected ? 15 : 12, isSelected ? "#EAEAEA" : catColor)}
               </View>
             </Marker>
           );
@@ -978,9 +996,10 @@ export default function MapScreen() {
           <Marker
             coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
             anchor={{ x: 0.5, y: 1 }}
+            tracksViewChanges={locationChosen}
           >
             <View style={styles.customPin}>
-              <MapPin size={28} color="#FF6B35" fill="#FF6B35" />
+              <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
             </View>
           </Marker>
         )}
@@ -1377,7 +1396,7 @@ export default function MapScreen() {
         <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 90 }]}>
           <TouchableOpacity
             style={styles.cafeCardClose}
-            onPress={() => setSelectedDestination(null)}
+            onPress={() => { setSelectedDestination(null); setLocationChosen(false); }}
           >
             <View style={styles.cafeCardCloseBar} />
           </TouchableOpacity>
@@ -1408,14 +1427,33 @@ export default function MapScreen() {
                 </View>
               ) : null}
             </View>
-            <TouchableOpacity
-              style={styles.navBtn}
-              onPress={handleNavigate}
-              activeOpacity={0.7}
-            >
-              <Route size={18} color="#FFFFFF" />
-              <Text style={styles.navBtnText}>Route</Text>
-            </TouchableOpacity>
+            {locationChosen ? (
+              <View style={styles.chosenBadge}>
+                <View style={styles.chosenCheckCircle}>
+                  <Text style={styles.chosenCheckMark}>✓</Text>
+                </View>
+                <Text style={styles.chosenBadgeText}>Chosen</Text>
+              </View>
+            ) : (
+              <View style={styles.cafeCardActions}>
+                <TouchableOpacity
+                  style={styles.chooseBtn}
+                  onPress={handleChooseLocation}
+                  activeOpacity={0.7}
+                >
+                  <MapPin size={16} color="#FFFFFF" />
+                  <Text style={styles.chooseBtnText}>Choose Location</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.navBtnOutline}
+                  onPress={handleNavigate}
+                  activeOpacity={0.7}
+                >
+                  <Route size={16} color={ROUTE_RED} />
+                  <Text style={styles.navBtnOutlineText}>Route</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
         );
@@ -1601,6 +1639,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 8,
+  },
+  landmarkMarkerChosen: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 2.5,
+    shadowOpacity: 0.8,
+    shadowRadius: 16,
+    elevation: 10,
   },
   // Car marker
   carMarker: {
@@ -2132,29 +2179,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  navBtn: {
+  cafeCardActions: {
+    flexDirection: "column",
+    gap: 8,
+    alignItems: "stretch",
+  },
+  chooseBtn: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    backgroundColor: ROUTE_RED,
+    backgroundColor: "#8B5CF6",
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 12,
-    shadowColor: ROUTE_RED,
+    shadowColor: "#8B5CF6",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 6,
   },
-  navBtnText: {
+  chooseBtnText: {
     color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "700",
   },
-  cafeCardActions: {
-    flexDirection: "column",
+  navBtnOutline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${ROUTE_RED}60`,
+  },
+  navBtnOutlineText: {
+    color: ROUTE_RED,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  chosenBadge: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
-    alignItems: "flex-end",
+    backgroundColor: "rgba(34, 197, 94, 0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.4)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  chosenCheckCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#22C55E",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  chosenCheckMark: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  chosenBadgeText: {
+    color: "#22C55E",
+    fontSize: 13,
+    fontWeight: "700",
   },
   recNavBtn: {
     flexDirection: "row",
