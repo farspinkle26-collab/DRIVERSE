@@ -2,7 +2,8 @@ import React from "react";
 import { StyleSheet, View, TouchableOpacity, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
-import { Slot, usePathname, useRouter } from "expo-router";
+import { Tabs } from "expo-router";
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { MapIcon, DriveIcon, ProfileIcon } from "../../components/TabIcons";
 
 type TabKey = "map" | "drive" | "profile";
@@ -13,12 +14,11 @@ const TABS: { key: TabKey; Icon: typeof MapIcon }[] = [
   { key: "profile", Icon: ProfileIcon },
 ];
 
-export default function TabLayout() {
+// Floating pill navigation bar. Rendered as the tab navigator's custom
+// tabBar so taps go through React Navigation and reliably switch screens.
+function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const pathname = usePathname();
-  const activeTab: TabKey =
-    TABS.find((tab) => pathname.endsWith(`/${tab.key}`))?.key ?? "map";
+  const activeRouteName = state.routes[state.index]?.name;
 
   const TabBarBg = Platform.OS === "ios" ? BlurView : View;
   const tabBarBgProps =
@@ -27,46 +27,72 @@ export default function TabLayout() {
       : { style: [styles.tabBar, styles.tabBarAndroid, { paddingBottom: insets.bottom + 6 }] };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.content}>
-        <Slot />
-      </View>
+    <TabBarBg {...tabBarBgProps}>
+      <View style={styles.tabPill}>
+        {TABS.map((tab) => {
+          const isActive = activeRouteName === tab.key;
+          const IconComponent = tab.Icon;
+          const route = state.routes.find((r) => r.name === tab.key);
 
-      {/* Bottom floating nav bar with icons */}
-      <TabBarBg {...tabBarBgProps}>
-        <View style={styles.tabPill}>
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-            const IconComponent = tab.Icon;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[styles.tabItem, isActive && styles.tabItemActive]}
-                onPress={() => router.navigate(`/(tabs)/${tab.key}` as any)}
-                activeOpacity={0.7}
-              >
-                <IconComponent
-                  size={22}
-                  color={isActive ? "#FF6B35" : "#5A5A6E"}
-                  filled={isActive}
-                />
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </TabBarBg>
-    </View>
+          const onPress = () => {
+            if (!route) return;
+            const event = navigation.emit({
+              type: "tabPress",
+              target: route.key,
+              canPreventDefault: true,
+            });
+            if (!isActive && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tabItem, isActive && styles.tabItemActive]}
+              onPress={onPress}
+              activeOpacity={0.7}
+            >
+              <IconComponent
+                size={22}
+                color={isActive ? "#FF6B35" : "#5A5A6E"}
+                filled={isActive}
+              />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </TabBarBg>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <Tabs
+      tabBar={(props) => <FloatingTabBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+        sceneStyle: { backgroundColor: "#161628" },
+      }}
+    >
+      {/* Primary tabs shown in the floating pill */}
+      <Tabs.Screen name="map" />
+      <Tabs.Screen name="drive" />
+      <Tabs.Screen name="profile" />
+
+      {/* Screens inside the (tabs) group that are pushed as full pages and
+          must not appear as their own pill button. */}
+      <Tabs.Screen name="home" options={{ href: null }} />
+      <Tabs.Screen name="orders" options={{ href: null }} />
+      <Tabs.Screen name="atpm" options={{ href: null }} />
+      <Tabs.Screen name="towing-plus" options={{ href: null }} />
+      <Tabs.Screen name="member-asuransi" options={{ href: null }} />
+      <Tabs.Screen name="transactions" options={{ href: null }} />
+    </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#161628",
-  },
-  content: {
-    flex: 1,
-  },
   tabBar: {
     position: "absolute",
     bottom: 0,
