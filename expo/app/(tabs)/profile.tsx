@@ -53,6 +53,8 @@ import {
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
+import { rankForLevel } from "@/constants/ranks";
+import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -435,17 +437,6 @@ export default function ProfileScreen() {
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
 
-  const levelTitle = (lvl: number): string => {
-    if (lvl >= 50) return "G.O.A.T.";
-    if (lvl >= 40) return "Hall of Fame";
-    if (lvl >= 30) return "Racing Legend";
-    if (lvl >= 25) return "Track Master";
-    if (lvl >= 20) return "Speed Demon";
-    if (lvl >= 15) return "Elite Driver";
-    if (lvl >= 10) return "Pro Drifter";
-    if (lvl >= 5) return "Street Racer";
-    return "Rookie Driver";
-  };
 
   // ─── Not logged in view ────────────────────────────────────
   if (!isAuthenticated) {
@@ -512,7 +503,15 @@ export default function ProfileScreen() {
           </View>
 
           <Text style={styles.userName}>{user?.name ?? "Driver"}</Text>
-          <Text style={styles.userTitle}>{levelTitle(level)}</Text>
+          <TouchableOpacity
+            style={styles.rankPill}
+            onPress={() => router.push("/ranks" as any)}
+            activeOpacity={0.7}
+          >
+            <RankBadge rank={rankForLevel(level)} size={20} />
+            <Text style={styles.userTitle}>{rankForLevel(level).name}</Text>
+            <ChevronRight size={13} color="#FF6B35" />
+          </TouchableOpacity>
 
           {/* Now driving — tap to switch car in the garage picker */}
           {activeCar && (
@@ -1008,6 +1007,14 @@ export default function ProfileScreen() {
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>Settings</Text>
 
+          <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
+            <View style={styles.settingLeft}>
+              <Trophy size={18} color="#FFD700" />
+              <Text style={styles.settingText}>Levels & Ranks</Text>
+            </View>
+            <ChevronRight size={16} color="#5A5A6E" />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/terms-and-conditions" as any)}>
             <View style={styles.settingLeft}>
               <Shield size={18} color="#8A8A9A" />
@@ -1170,11 +1177,23 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginBottom: 2,
   },
+  rankPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,107,53,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,107,53,0.25)",
+    borderRadius: 20,
+    paddingLeft: 6,
+    paddingRight: 10,
+    paddingVertical: 5,
+    marginBottom: 16,
+  },
   userTitle: {
     fontSize: 14,
     color: "#FF6B35",
-    fontWeight: "600",
-    marginBottom: 12,
+    fontWeight: "700",
   },
   nowDrivingChip: {
     flexDirection: "row",
