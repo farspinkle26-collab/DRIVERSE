@@ -44,6 +44,7 @@ import CreateEventModal, {
   eventTypeLabel,
 } from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
+import { usePreferences } from "@/hooks/usePreferencesStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 
@@ -301,6 +302,7 @@ export default function MapScreen() {
   // Online users system
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
   const { user } = useAuth();
+  const { convertSpeed, speedUnitLabel } = usePreferences();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [addingFriend, setAddingFriend] = useState(false);
 
@@ -1274,8 +1276,8 @@ export default function MapScreen() {
               <View>
                 <Text style={styles.recordingStatLabel}>Speed</Text>
                 <View style={styles.speedRow}>
-                  <Text style={styles.recordingStatValue}>{currentSpeed.toFixed(0)}</Text>
-                  <Text style={styles.speedUnit}>km/h</Text>
+                  <Text style={styles.recordingStatValue}>{convertSpeed(currentSpeed).toFixed(0)}</Text>
+                  <Text style={styles.speedUnit}>{speedUnitLabel}</Text>
                 </View>
               </View>
             </View>
@@ -1333,8 +1335,8 @@ export default function MapScreen() {
               <Text style={styles.tripStatLabel}>Avg Speed</Text>
               <View style={styles.tripStatRow}>
                 <TrendingUp size={14} color="#3B82F6" />
-                <Text style={styles.tripStatValue}>{avgSpeed.toFixed(1)}</Text>
-                <Text style={styles.tripStatUnit}>km/h</Text>
+                <Text style={styles.tripStatValue}>{convertSpeed(avgSpeed).toFixed(1)}</Text>
+                <Text style={styles.tripStatUnit}>{speedUnitLabel}</Text>
               </View>
             </View>
           </View>
