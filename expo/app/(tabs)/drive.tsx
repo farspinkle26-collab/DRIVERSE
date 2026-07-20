@@ -27,6 +27,7 @@ import {
   Clock,
   Flame,
   X,
+  Route,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
@@ -45,6 +46,15 @@ type DriveFeature = {
 };
 
 const DRIVE_FEATURES: DriveFeature[] = [
+  {
+    id: "routes",
+    title: "Routes",
+    subtitle: "Save & share your drives",
+    icon: Route,
+    color: "#00D4AA",
+    bgColor: "#00D4AA15",
+    route: "/routes",
+  },
   {
     id: "quests",
     title: "Quests",

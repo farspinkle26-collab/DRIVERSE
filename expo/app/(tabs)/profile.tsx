@@ -690,6 +690,22 @@ export default function ProfileScreen() {
         {/* ═══ TRIPS ═══ */}
         {activeTab === "trips" && (
           <View style={styles.section}>
+            {/* Saved & shared routes banner */}
+            <TouchableOpacity
+              style={styles.routesBanner}
+              onPress={() => router.push("/routes" as any)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.routesBannerIcon}>
+                <Route size={20} color="#00D4AA" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.routesBannerTitle}>Saved Routes & Share</Text>
+                <Text style={styles.routesBannerSub}>Save drives, give kudos, and share with the community</Text>
+              </View>
+              <ChevronRight size={18} color="#5A5A6E" />
+            </TouchableOpacity>
+
             {tripsLoading ? (
               <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
             ) : trips.length === 0 ? (
@@ -1383,6 +1399,35 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   // ─── Trips ──────────────────────────────────────────────
+  routesBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(0, 212, 170, 0.06)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(0, 212, 170, 0.2)",
+  },
+  routesBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 212, 170, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  routesBannerTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  routesBannerSub: {
+    fontSize: 12,
+    color: "#8A8A9A",
+    marginTop: 2,
+  },
   tripCard: {
     backgroundColor: "rgba(255, 255, 255, 0.03)",
     borderRadius: 14,
