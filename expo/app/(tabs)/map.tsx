@@ -283,7 +283,7 @@ export default function MapScreen() {
 
   // Selected destination (cafe or custom tapped location)
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
-  // Whether the user has confirmed the selected pin via "Choose Location"
+  // Whether the selected pin has been confirmed (kept for marker emphasis styling)
   const [locationChosen, setLocationChosen] = useState(false);
 
   // Navigation / routing state
@@ -739,11 +739,6 @@ export default function MapScreen() {
       { duration: 500 }
     );
   }, []);
-
-  const handleChooseLocation = useCallback(() => {
-    if (!selectedDestination) return;
-    setLocationChosen(true);
-  }, [selectedDestination]);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -1659,33 +1654,16 @@ export default function MapScreen() {
                 </View>
               ) : null}
             </View>
-            {locationChosen ? (
-              <View style={styles.chosenBadge}>
-                <View style={styles.chosenCheckCircle}>
-                  <Text style={styles.chosenCheckMark}>✓</Text>
-                </View>
-                <Text style={styles.chosenBadgeText}>Chosen</Text>
-              </View>
-            ) : (
-              <View style={styles.cafeCardActions}>
-                <TouchableOpacity
-                  style={styles.chooseBtn}
-                  onPress={handleChooseLocation}
-                  activeOpacity={0.7}
-                >
-                  <MapPin size={16} color="#FFFFFF" />
-                  <Text style={styles.chooseBtnText}>Choose Location</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.navBtnOutline}
-                  onPress={handleNavigate}
-                  activeOpacity={0.7}
-                >
-                  <Route size={16} color={ROUTE_RED} />
-                  <Text style={styles.navBtnOutlineText}>Route</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            <View style={styles.cafeCardActions}>
+              <TouchableOpacity
+                style={styles.navBtnOutline}
+                onPress={handleNavigate}
+                activeOpacity={0.7}
+              >
+                <Route size={16} color={ROUTE_RED} />
+                <Text style={styles.navBtnOutlineText}>Route</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
         );
@@ -2598,26 +2576,6 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: "stretch",
   },
-  chooseBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    backgroundColor: "#8B5CF6",
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 12,
-    shadowColor: "#8B5CF6",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  chooseBtnText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
-  },
   navBtnOutline: {
     flexDirection: "row",
     alignItems: "center",
@@ -2632,35 +2590,6 @@ const styles = StyleSheet.create({
   navBtnOutlineText: {
     color: ROUTE_RED,
     fontSize: 12,
-    fontWeight: "700",
-  },
-  chosenBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(34, 197, 94, 0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.4)",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  chosenCheckCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#22C55E",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  chosenCheckMark: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  chosenBadgeText: {
-    color: "#22C55E",
-    fontSize: 13,
     fontWeight: "700",
   },
   recNavBtn: {
