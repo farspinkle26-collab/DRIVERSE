@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthContext } from "@/hooks/useAuthStore";
 import { TowingContext } from "@/hooks/useTowingStore";
 import { ThemeContext } from "@/hooks/useThemeStore";
+import { PreferencesContext } from "@/hooks/usePreferencesStore";
 import { TransactionContext } from "@/hooks/useTransactionStore";
 import { PaymentContext } from "@/hooks/usePaymentStore";
 import { ChatContext } from "@/hooks/useChatStore";
@@ -77,6 +78,7 @@ export default function RootLayout() {
             backgroundColor="transparent"
           />
           <ThemeContext>
+            <PreferencesContext>
             <AuthContext>
               <PaymentContext>
                 <TransactionContext>
@@ -99,6 +101,7 @@ export default function RootLayout() {
                 </TransactionContext>
               </PaymentContext>
             </AuthContext>
+            </PreferencesContext>
           </ThemeContext>
         </GestureHandlerRootView>
       </QueryClientProvider>

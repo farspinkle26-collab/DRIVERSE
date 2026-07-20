@@ -9,8 +9,8 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
-  Dimensions,
   Animated,
+  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -25,14 +25,16 @@ import {
   Phone,
   Car,
   ChevronRight,
-  Circle,
   CheckCircle2,
+  Globe,
+  Gauge,
+  Check,
+  X,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { usePreferences, LANGUAGES } from "@/hooks/usePreferencesStore";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
-const STEPS = ["account", "profile", "car"] as const;
+const STEPS = ["account", "profile", "car", "preferences"] as const;
 type Step = (typeof STEPS)[number];
 
 const CAR_COLORS = [
@@ -57,11 +59,19 @@ export default function SignUpScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signup, loading, error } = useAuth();
+  const {
+    currentLanguage,
+    setLanguage,
+    speedUnit,
+    setSpeedUnit,
+  } = usePreferences();
   const scrollRef = useRef<ScrollView>(null);
 
   const [step, setStep] = useState<Step>("account");
   const stepIndex = STEPS.indexOf(step);
-  const progress = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(1 / STEPS.length)).current;
+
+  const [langModal, setLangModal] = useState(false);
 
   // Step 1: Account
   const [name, setName] = useState("");
@@ -114,6 +124,8 @@ export default function SignUpScreen() {
         return selectedMake.length > 0 && selectedColor != null;
       case "car":
         return carName.trim().length > 0 || true; // car name can be auto-set
+      case "preferences":
+        return true; // language + units always have sensible defaults
       default:
         return false;
     }
@@ -122,7 +134,6 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     if (!canGoNext()) return;
 
-    const fullCarName = carName.trim() || `${selectedMake} ${carYear}`;
     const success = await signup(email.trim(), password, name.trim(), phone.trim());
 
     if (success) {
@@ -132,18 +143,38 @@ export default function SignUpScreen() {
     }
   };
 
+  const isLastStep = step === "preferences";
+
   const progressWidth = progress.interpolate({
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
   });
 
+  const stepTitle =
+    step === "account" ? "Create Account"
+    : step === "profile" ? "Your Drive"
+    : step === "car" ? "Name Your Ride"
+    : "Personalize";
+
+  const stepSubtitle =
+    step === "account" ? "Set up your login credentials"
+    : step === "profile" ? "Choose your car's make and color"
+    : step === "car" ? "Give your ride an identity"
+    : "Language and how you like your speed shown";
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
+      {/* Decorative ambient glow orbs */}
+      <View pointerEvents="none" style={styles.orbLayer}>
+        <View style={[styles.orb, styles.orbOrange]} />
+        <View style={[styles.orb, styles.orbPink]} />
+        <View style={[styles.orb, styles.orbBlue]} />
+      </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1, paddingTop: insets.top + 20 }}
+        style={{ flex: 1, paddingTop: insets.top + 16 }}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -175,6 +206,16 @@ export default function SignUpScreen() {
               })}
             </View>
           </View>
+
+          {/* Quick language switcher — always available */}
+          <TouchableOpacity
+            style={styles.langPill}
+            onPress={() => setLangModal(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.langPillFlag}>{currentLanguage.flag}</Text>
+            <Text style={styles.langPillText}>{currentLanguage.code.toUpperCase()}</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -183,6 +224,20 @@ export default function SignUpScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Brand mark */}
+          <View style={styles.brand}>
+            <LinearGradient
+              colors={["#FF6B35", "#FF3B6F"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.brandBadge}
+            >
+              <Car size={30} color="#FFFFFF" strokeWidth={2.4} />
+            </LinearGradient>
+            <Text style={styles.brandName}>DRIVERSE</Text>
+            <Text style={styles.brandTagline}>Build your driver profile</Text>
+          </View>
+
           {/* Error */}
           {error ? (
             <View style={styles.errorBox}>
@@ -192,19 +247,15 @@ export default function SignUpScreen() {
 
           {/* Step titles */}
           <View style={styles.stepTitleSection}>
-            <Text style={styles.stepTitle}>
-              {step === "account" ? "Create Account" : step === "profile" ? "Your Drive" : "Name Your Ride"}
-            </Text>
-            <Text style={styles.stepSubtitle}>
-              {step === "account"
-                ? "Set up your login credentials"
-                : step === "profile"
-                ? "Choose your car's make and color"
-                : "Give your ride an identity"}
-            </Text>
+            <View style={styles.stepTitleRow}>
+              <View style={styles.stepAccent} />
+              <Text style={styles.stepTitle}>{stepTitle}</Text>
+            </View>
+            <Text style={styles.stepSubtitle}>{stepSubtitle}</Text>
           </View>
 
           <View style={styles.formContent}>
+            <View style={styles.card}>
             {/* ============ STEP 1: ACCOUNT ============ */}
             {step === "account" && (
               <View style={styles.stepForm}>
@@ -366,10 +417,94 @@ export default function SignUpScreen() {
               </View>
             )}
 
+            {/* ============ STEP 4: PREFERENCES ============ */}
+            {step === "preferences" && (
+              <View style={styles.stepForm}>
+                {/* Language */}
+                <View style={styles.prefHeaderRow}>
+                  <View style={styles.prefIcon}>
+                    <Globe size={18} color="#FF6B35" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.prefTitle}>Language</Text>
+                    <Text style={styles.prefHint}>Choose your preferred language</Text>
+                  </View>
+                </View>
+                <View style={styles.langList}>
+                  {LANGUAGES.map((lang) => {
+                    const active = currentLanguage.code === lang.code;
+                    return (
+                      <TouchableOpacity
+                        key={lang.code}
+                        style={[styles.langRow, active && styles.langRowActive]}
+                        onPress={() => setLanguage(lang.code)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.langFlag}>{lang.flag}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.langName, active && styles.langNameActive]}>{lang.label}</Text>
+                          <Text style={styles.langEnglish}>{lang.english}</Text>
+                        </View>
+                        {active && (
+                          <View style={styles.langCheck}>
+                            <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Speed units */}
+                <View style={[styles.prefHeaderRow, { marginTop: 24 }]}>
+                  <View style={styles.prefIcon}>
+                    <Gauge size={18} color="#FF6B35" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.prefTitle}>Speed Units</Text>
+                    <Text style={styles.prefHint}>How your speed and distance are shown</Text>
+                  </View>
+                </View>
+                <View style={styles.unitToggle}>
+                  {(["kmh", "mph"] as const).map((unit) => {
+                    const active = speedUnit === unit;
+                    return (
+                      <TouchableOpacity
+                        key={unit}
+                        style={styles.unitOption}
+                        onPress={() => setSpeedUnit(unit)}
+                        activeOpacity={0.85}
+                      >
+                        {active ? (
+                          <LinearGradient
+                            colors={["#FF6B35", "#FF3B6F"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.unitOptionActive}
+                          >
+                            <Text style={styles.unitTextActive}>{unit === "kmh" ? "km/h" : "mph"}</Text>
+                            <Text style={styles.unitSubActive}>
+                              {unit === "kmh" ? "Kilometers" : "Miles"}
+                            </Text>
+                          </LinearGradient>
+                        ) : (
+                          <View style={styles.unitOptionInner}>
+                            <Text style={styles.unitText}>{unit === "kmh" ? "km/h" : "mph"}</Text>
+                            <Text style={styles.unitSub}>{unit === "kmh" ? "Kilometers" : "Miles"}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+            </View>
+
             {/* Action button */}
             <TouchableOpacity
               style={[styles.actionBtn, !canGoNext() && styles.actionBtnDisabled]}
-              onPress={step === "car" ? handleSignUp : nextStep}
+              onPress={isLastStep ? handleSignUp : nextStep}
               activeOpacity={0.8}
               disabled={loading || !canGoNext()}
             >
@@ -381,10 +516,8 @@ export default function SignUpScreen() {
               >
                 {loading ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : step === "car" ? (
-                  <>
-                    <Text style={styles.actionBtnText}>Create Account</Text>
-                  </>
+                ) : isLastStep ? (
+                  <Text style={styles.actionBtnText}>Create Account</Text>
                 ) : (
                   <>
                     <Text style={styles.actionBtnText}>Next</Text>
@@ -404,6 +537,49 @@ export default function SignUpScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Language quick-select modal */}
+      <Modal visible={langModal} animationType="fade" transparent onRequestClose={() => setLangModal(false)}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setLangModal(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Globe size={18} color="#FF6B35" />
+              <Text style={styles.modalTitle}>Change Language</Text>
+              <TouchableOpacity onPress={() => setLangModal(false)} activeOpacity={0.7}>
+                <X size={20} color="#8A8A9A" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {LANGUAGES.map((lang) => {
+                const active = currentLanguage.code === lang.code;
+                return (
+                  <TouchableOpacity
+                    key={lang.code}
+                    style={[styles.langRow, active && styles.langRowActive]}
+                    onPress={() => {
+                      setLanguage(lang.code);
+                      setLangModal(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.langFlag}>{lang.flag}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.langName, active && styles.langNameActive]}>{lang.label}</Text>
+                      <Text style={styles.langEnglish}>{lang.english}</Text>
+                    </View>
+                    {active && (
+                      <View style={styles.langCheck}>
+                        <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -416,11 +592,40 @@ const styles = StyleSheet.create({
   bg: {
     ...StyleSheet.absoluteFillObject,
   },
+  orbLayer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: "hidden",
+  },
+  orb: {
+    position: "absolute",
+    borderRadius: 260,
+  },
+  orbOrange: {
+    width: 320,
+    height: 320,
+    top: -110,
+    right: -90,
+    backgroundColor: "rgba(255, 107, 53, 0.18)",
+  },
+  orbPink: {
+    width: 300,
+    height: 300,
+    top: 180,
+    left: -130,
+    backgroundColor: "rgba(255, 59, 111, 0.14)",
+  },
+  orbBlue: {
+    width: 340,
+    height: 340,
+    bottom: -140,
+    right: -110,
+    backgroundColor: "rgba(59, 130, 246, 0.10)",
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    gap: 16,
+    gap: 14,
     marginBottom: 10,
   },
   backBtn: {
@@ -444,7 +649,7 @@ const styles = StyleSheet.create({
   },
   stepDots: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
   stepDot: {
     width: 24,
@@ -472,6 +677,56 @@ const styles = StyleSheet.create({
   stepDotTextActive: {
     color: "#FF6B35",
   },
+  langPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.10)",
+  },
+  langPillFlag: {
+    fontSize: 15,
+  },
+  langPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#EAEAEA",
+    letterSpacing: 0.5,
+  },
+  brand: {
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 18,
+  },
+  brandBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  brandName: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    letterSpacing: 4,
+  },
+  brandTagline: {
+    fontSize: 13,
+    color: "#8A8A9A",
+    fontWeight: "500",
+    marginTop: 4,
+  },
   errorBox: {
     backgroundColor: "rgba(239, 68, 68, 0.1)",
     borderRadius: 12,
@@ -489,13 +744,24 @@ const styles = StyleSheet.create({
   },
   stepTitleSection: {
     paddingHorizontal: 24,
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  stepTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 4,
+  },
+  stepAccent: {
+    width: 4,
+    height: 26,
+    borderRadius: 2,
+    backgroundColor: "#FF6B35",
   },
   stepTitle: {
     fontSize: 28,
     fontWeight: "800",
     color: "#FFFFFF",
-    marginBottom: 4,
   },
   stepSubtitle: {
     fontSize: 15,
@@ -504,6 +770,13 @@ const styles = StyleSheet.create({
   },
   formContent: {
     paddingHorizontal: 24,
+  },
+  card: {
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
+    padding: 18,
   },
   stepForm: {
     gap: 14,
@@ -600,10 +873,131 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#FFFFFF",
   },
+  // --- Preferences step ---
+  prefHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  prefIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.25)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  prefTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  prefHint: {
+    fontSize: 12,
+    color: "#8A8A9A",
+    marginTop: 1,
+  },
+  langList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  langRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  langRowActive: {
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    borderColor: "#FF6B35",
+  },
+  langFlag: {
+    fontSize: 24,
+  },
+  langName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#EAEAEA",
+  },
+  langNameActive: {
+    color: "#FFFFFF",
+  },
+  langEnglish: {
+    fontSize: 12,
+    color: "#7A7A8A",
+    marginTop: 1,
+  },
+  langCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  unitToggle: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 4,
+  },
+  unitOption: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  unitOptionInner: {
+    height: 74,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  unitOptionActive: {
+    height: 74,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  unitText: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#8A8A9A",
+  },
+  unitTextActive: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  unitSub: {
+    fontSize: 11,
+    color: "#6A6A7A",
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  unitSubActive: {
+    fontSize: 11,
+    color: "rgba(255, 255, 255, 0.85)",
+    marginTop: 2,
+    fontWeight: "600",
+  },
   actionBtn: {
     borderRadius: 14,
     overflow: "hidden",
-    marginTop: 24,
+    marginTop: 20,
   },
   actionBtnDisabled: {
     opacity: 0.5,
@@ -623,7 +1017,7 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 32,
+    marginTop: 28,
     paddingBottom: 20,
   },
   footerText: {
@@ -634,5 +1028,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#FF6B35",
+  },
+  // --- Language modal ---
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: "#14141F",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 18,
+    paddingBottom: 34,
+    paddingTop: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  modalHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+    marginBottom: 14,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 14,
+  },
+  modalTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 });
