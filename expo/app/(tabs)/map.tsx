@@ -8,6 +8,7 @@ import {
   Animated,
   ActivityIndicator,
   Dimensions,
+  Image,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +37,7 @@ import {
   LogOut,
   Bookmark,
   Share2,
+  ChevronRight,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -1178,9 +1180,13 @@ export default function MapScreen() {
           >
             <View style={styles.onlineUserMarker}>
               <View style={styles.onlineUserAvatar}>
-                <Text style={styles.onlineUserAvatarText}>
-                  {onlineUser.name[0].toUpperCase()}
-                </Text>
+                {onlineUser.avatar ? (
+                  <Image source={{ uri: onlineUser.avatar }} style={styles.onlineUserAvatarImg} />
+                ) : (
+                  <Text style={styles.onlineUserAvatarText}>
+                    {(onlineUser.name?.[0] ?? "D").toUpperCase()}
+                  </Text>
+                )}
               </View>
               <View style={styles.onlineUserLabel}>
                 <Text style={styles.onlineUserLabelText} numberOfLines={1}>
@@ -1574,32 +1580,60 @@ export default function MapScreen() {
             <View style={styles.cafeCardCloseBar} />
           </TouchableOpacity>
           <View style={styles.onlineUserCardContent}>
-            <View style={styles.onlineUserCardHeader}>
+            <TouchableOpacity
+              style={styles.onlineUserCardHeader}
+              activeOpacity={0.7}
+              onPress={() => {
+                const uid = selectedOnlineUser.user_id;
+                setSelectedOnlineUser(null);
+                router.push(`/user/${uid}` as any);
+              }}
+            >
               <View style={styles.onlineUserCardAvatar}>
-                <Text style={styles.onlineUserCardAvatarText}>
-                  {selectedOnlineUser.name[0].toUpperCase()}
-                </Text>
+                {selectedOnlineUser.avatar ? (
+                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.onlineUserCardAvatarImg} />
+                ) : (
+                  <Text style={styles.onlineUserCardAvatarText}>
+                    {(selectedOnlineUser.name?.[0] ?? "D").toUpperCase()}
+                  </Text>
+                )}
+                <View style={styles.onlineUserCardOnlineDot} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.onlineUserCardName} numberOfLines={1}>
                   {selectedOnlineUser.name}
                 </Text>
                 <Text style={styles.onlineUserCardLevel}>
-                  Level {selectedOnlineUser.level}
+                  Level {selectedOnlineUser.level} · Online now
                 </Text>
               </View>
-            </View>
-            <TouchableOpacity
-              style={[styles.onlineUserAddBtn, addingFriend && { opacity: 0.5 }]}
-              onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-              disabled={addingFriend}
-              activeOpacity={0.7}
-            >
-              <UserPlus size={18} color="#FFFFFF" />
-              <Text style={styles.onlineUserAddBtnText}>
-                {addingFriend ? "Sending..." : "Add Friend"}
-              </Text>
+              <ChevronRight size={22} color="#8A8A9A" />
             </TouchableOpacity>
+            <View style={styles.onlineUserCardActions}>
+              <TouchableOpacity
+                style={styles.onlineUserProfileBtn}
+                onPress={() => {
+                  const uid = selectedOnlineUser.user_id;
+                  setSelectedOnlineUser(null);
+                  router.push(`/user/${uid}` as any);
+                }}
+                activeOpacity={0.8}
+              >
+                <Users size={18} color="#FFFFFF" />
+                <Text style={styles.onlineUserProfileBtnText}>View Profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.onlineUserAddBtn, addingFriend && { opacity: 0.5 }]}
+                onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+                disabled={addingFriend}
+                activeOpacity={0.7}
+              >
+                <UserPlus size={18} color="#FFFFFF" />
+                <Text style={styles.onlineUserAddBtnText}>
+                  {addingFriend ? "Sending..." : "Add Friend"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       )}
@@ -2888,6 +2922,11 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#FFFFFF",
   },
+  onlineUserAvatarImg: {
+    width: 31,
+    height: 31,
+    borderRadius: 16,
+  },
   onlineUserLabel: {
     marginTop: 3,
     backgroundColor: "rgba(10, 10, 20, 0.9)",
@@ -2937,6 +2976,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  onlineUserCardAvatarImg: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  onlineUserCardOnlineDot: {
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    backgroundColor: "#22C55E",
+    borderWidth: 2.5,
+    borderColor: "rgba(18, 22, 32, 1)",
+  },
   onlineUserCardAvatarText: {
     fontSize: 20,
     fontWeight: "800",
@@ -2953,16 +3008,38 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 2,
   },
+  onlineUserCardActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  onlineUserProfileBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(34, 197, 94, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.35)",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  onlineUserProfileBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
   onlineUserAddBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     backgroundColor: "#FF6B35",
     paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
     borderRadius: 12,
-    alignSelf: "stretch",
   },
   onlineUserAddBtnText: {
     fontSize: 14,

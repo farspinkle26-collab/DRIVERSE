@@ -8,6 +8,7 @@ export interface OnlineUser {
   user_id: string;
   name: string;
   level: number;
+  avatar?: string;
   latitude: number;
   longitude: number;
   heading: number;
@@ -28,7 +29,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   const [userId, setUserId] = useState<string | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const profileRef = useRef<{ name: string; level: number }>({ name: "Driver", level: 1 });
+  const profileRef = useRef<{ name: string; level: number; avatar?: string }>({ name: "Driver", level: 1 });
 
   // ─── Listen for auth state ───────────────────────────────
   useEffect(() => {
@@ -60,6 +61,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
         user_id: key,
         name: latest.name ?? "Driver",
         level: latest.level ?? 1,
+        avatar: latest.avatar,
         latitude: latest.latitude,
         longitude: latest.longitude,
         heading: latest.heading ?? 0,
@@ -88,6 +90,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
         user_id: uid,
         name: profileRef.current.name,
         level: profileRef.current.level,
+        avatar: profileRef.current.avatar,
         latitude: pos.latitude,
         longitude: pos.longitude,
         heading: pos.heading,
@@ -130,12 +133,13 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
       // Load own profile name + level for the presence payload
       try {
         const [{ data: profile }, { data: xp }] = await Promise.all([
-          supabase.from("profiles").select("name").eq("id", userId).single(),
+          supabase.from("profiles").select("name, avatar").eq("id", userId).single(),
           supabase.from("user_xp").select("level").eq("user_id", userId).single(),
         ]);
         profileRef.current = {
           name: profile?.name ?? "Driver",
           level: xp?.level ?? 1,
+          avatar: profile?.avatar ?? undefined,
         };
       } catch {
         // Defaults stay
