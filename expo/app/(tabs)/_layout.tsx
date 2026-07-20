@@ -1,22 +1,11 @@
-import React, { useState, useCallback, createContext, useContext } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, Platform } from "react-native";
+import React from "react";
+import { StyleSheet, View, TouchableOpacity, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
-import MapScreen from "./map";
-import DriveScreen from "./drive";
-import ProfileScreen from "./profile";
+import { Slot, usePathname, useRouter } from "expo-router";
 import { MapIcon, DriveIcon, ProfileIcon } from "../../components/TabIcons";
 
 type TabKey = "map" | "drive" | "profile";
-
-export const TabContext = createContext<{
-  activeTab: TabKey;
-  setActiveTab: (tab: TabKey) => void;
-}>({ activeTab: "map", setActiveTab: () => {} });
-
-export function useTabNavigation() {
-  return useContext(TabContext);
-}
 
 const TABS: { key: TabKey; Icon: typeof MapIcon }[] = [
   { key: "map", Icon: MapIcon },
@@ -26,18 +15,10 @@ const TABS: { key: TabKey; Icon: typeof MapIcon }[] = [
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabKey>("map");
-
-  const renderContent = useCallback(() => {
-    switch (activeTab) {
-      case "map":
-        return <MapScreen />;
-      case "drive":
-        return <DriveScreen />;
-      case "profile":
-        return <ProfileScreen />;
-    }
-  }, [activeTab]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const activeTab: TabKey =
+    TABS.find((tab) => pathname.endsWith(`/${tab.key}`))?.key ?? "map";
 
   const TabBarBg = Platform.OS === "ios" ? BlurView : View;
   const tabBarBgProps =
@@ -46,9 +27,10 @@ export default function TabLayout() {
       : { style: [styles.tabBar, styles.tabBarAndroid, { paddingBottom: insets.bottom + 6 }] };
 
   return (
-    <TabContext.Provider value={{ activeTab, setActiveTab }}>
     <View style={styles.container}>
-      <View style={styles.content}>{renderContent()}</View>
+      <View style={styles.content}>
+        <Slot />
+      </View>
 
       {/* Bottom floating nav bar with icons */}
       <TabBarBg {...tabBarBgProps}>
@@ -60,7 +42,7 @@ export default function TabLayout() {
               <TouchableOpacity
                 key={tab.key}
                 style={[styles.tabItem, isActive && styles.tabItemActive]}
-                onPress={() => setActiveTab(tab.key)}
+                onPress={() => router.navigate(`/(tabs)/${tab.key}` as any)}
                 activeOpacity={0.7}
               >
                 <IconComponent
@@ -74,7 +56,6 @@ export default function TabLayout() {
         </View>
       </TabBarBg>
     </View>
-    </TabContext.Provider>
   );
 }
 
