@@ -15,6 +15,7 @@ import { NotificationContext } from "@/hooks/useNotificationStore";
 import { RealtimeContext } from "@/hooks/useRealtimeStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
+import { EventsProvider } from "@/hooks/useEventsStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 
@@ -85,8 +86,10 @@ export default function RootLayout() {
                         <ChatContext>
                         <XPProvider>
                           <OnlineUsersProvider>
-                            <RootLayoutNav />
-                            <NotificationBanner />
+                            <EventsProvider>
+                              <RootLayoutNav />
+                              <NotificationBanner />
+                            </EventsProvider>
                           </OnlineUsersProvider>
                         </XPProvider>
                       </ChatContext>
