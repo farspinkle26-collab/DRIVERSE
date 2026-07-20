@@ -405,8 +405,34 @@ export default function MapScreen() {
       }
     }
 
-    setCafes(allResults.slice(0, 200));
+    // Merge into whatever is already shown (e.g. the nearby landmarks loaded
+    // first) instead of replacing, so icons near the user are never wiped out.
+    setCafes((prev) => {
+      const seenIds = new Set(prev.map((c) => c.id));
+      const merged = [...prev];
+      for (const c of allResults) {
+        if (seenIds.has(c.id)) continue;
+        seenIds.add(c.id);
+        merged.push(c);
+      }
+      return merged.slice(0, 300);
+    });
     setLoadingCafes(false);
+  }, [fetchCityCafes]);
+
+  // --- Fetch restaurants / cafes / gas stations right around the user ---
+  // Runs as soon as we have a location so the landmark icons are visible
+  // immediately, without any interaction.
+  const fetchNearbyLandmarks = useCallback(async (lat: number, lng: number) => {
+    if (!GOOGLE_API_KEY) return;
+    const nearby = await fetchCityCafes(lat, lng, "Nearby");
+    if (nearby.length === 0) return;
+    setCafes((prev) => {
+      const seenIds = new Set(prev.map((c) => c.id));
+      const fresh = nearby.filter((c) => !seenIds.has(c.id));
+      // Put nearby landmarks first so they always survive the cap.
+      return [...fresh, ...prev].slice(0, 300);
+    });
   }, [fetchCityCafes]);
 
   // --- Fetch directions from user location to destination ---
@@ -492,7 +518,9 @@ export default function MapScreen() {
 
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
 
-        // Load ALL Indonesia cafes
+        // Show restaurants / cafes / gas stations around the user immediately,
+        // then fill in the wider nationwide set in the background.
+        fetchNearbyLandmarks(coords.latitude, coords.longitude);
         fetchAllIndonesiaCafes();
 
         // Watch GPS position for real-time tracking
