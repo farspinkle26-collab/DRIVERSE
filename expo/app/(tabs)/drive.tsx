@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -8,7 +8,6 @@ import {
   Animated,
   Dimensions,
   Platform,
-  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -155,13 +154,9 @@ const DRIVE_FEATURES: DriveFeature[] = [
 ];
 
 // ─── Live daily quest card ───────────────────────────────────────────
-function QuestCard({
-  quest,
-  onClaim,
-}: {
-  quest: DailyQuest;
-  onClaim: (q: DailyQuest) => void;
-}) {
+// Quests auto-complete from real indicators (distance driven, friends made,
+// places visited) — there is deliberately no "mark complete" button.
+function QuestCard({ quest }: { quest: DailyQuest }) {
   const Icon = questIcon(quest.icon);
   const tier = DIFFICULTY_TIERS[quest.difficulty];
   const done = quest.status === "completed";
@@ -231,26 +226,22 @@ function QuestCard({
         {done ? (
           <View style={styles.doneBadge}>
             <Check size={12} color="#22C55E" />
-            <Text style={styles.doneBadgeText}>Claimed</Text>
+            <Text style={styles.doneBadgeText}>Completed</Text>
+          </View>
+        ) : ready ? (
+          <View style={styles.doneBadge}>
+            <Sparkles size={12} color="#FBBF24" />
+            <Text style={[styles.doneBadgeText, { color: "#FBBF24" }]}>
+              Finishing…
+            </Text>
           </View>
         ) : (
-          <TouchableOpacity
-            style={[
-              styles.claimButton,
-              { backgroundColor: ready ? "#22C55E" : quest.accent_color + "22" },
-            ]}
-            onPress={() => onClaim(quest)}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.claimButtonText,
-                { color: ready ? "#FFFFFF" : quest.accent_color },
-              ]}
-            >
-              {ready ? "Claim Reward" : "Mark Complete"}
+          <View style={styles.autoBadge}>
+            <Zap size={11} color={quest.accent_color} />
+            <Text style={[styles.autoBadgeText, { color: quest.accent_color }]}>
+              Auto-tracks
             </Text>
-          </TouchableOpacity>
+          </View>
         )}
       </View>
     </View>
@@ -260,9 +251,9 @@ function QuestCard({
 const UPCOMING_EVENTS = [
   {
     id: "e1",
-    title: "Jakarta Midnight Rally",
+    title: "Midnight Rally",
     date: "Sat, 29 Jun",
-    location: "SCBD Parking Lot",
+    location: "Downtown Parking Lot",
     attendees: 128,
     image: null,
   },
@@ -270,7 +261,7 @@ const UPCOMING_EVENTS = [
     id: "e2",
     title: "EV Showcase & Coffee",
     date: "Sun, 30 Jun",
-    location: "Kemang Village",
+    location: "City Central",
     attendees: 56,
     image: null,
   },
@@ -292,29 +283,7 @@ export default function DriveScreen() {
     loading: questsLoading,
     generating: questsGenerating,
     generateQuests,
-    completeQuest,
   } = useQuests();
-
-  const handleClaimQuest = useCallback(
-    async (quest: DailyQuest) => {
-      const { result, error } = await completeQuest(quest.id);
-      if (error) {
-        Alert.alert("Quest", error);
-        return;
-      }
-      if (result?.awarded) {
-        const badgeNote =
-          result.new_badges.length > 0
-            ? `\nNew badge${result.new_badges.length > 1 ? "s" : ""} unlocked!`
-            : "";
-        Alert.alert(
-          "Quest Complete! 🏁",
-          `+${result.xp_reward} XP · +${result.coin_reward} coins${badgeNote}`
-        );
-      }
-    },
-    [completeQuest]
-  );
 
   const handleFeaturePress = (feature: DriveFeature) => {
     if (feature.route) {
@@ -417,7 +386,7 @@ export default function DriveScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.sectionTitle}>Daily Quests</Text>
                 <Text style={styles.sectionSubtitle}>
-                  Refreshes every 24h · earn XP, coins & badges
+                  Refreshes every 24h · auto-completes as you drive & explore
                 </Text>
               </View>
               <View style={styles.statPills}>
@@ -448,7 +417,7 @@ export default function DriveScreen() {
             ) : (
               <>
                 {quests.map((quest) => (
-                  <QuestCard key={quest.id} quest={quest} onClaim={handleClaimQuest} />
+                  <QuestCard key={quest.id} quest={quest} />
                 ))}
                 {allDone && (
                   <View style={styles.allDoneBanner}>
@@ -714,13 +683,17 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 8,
   },
-  claimButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 10,
+  autoBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
-  claimButtonText: {
-    fontSize: 12,
+  autoBadgeText: {
+    fontSize: 11,
     fontWeight: "700",
   },
   doneBadge: {

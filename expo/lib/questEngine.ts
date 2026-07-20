@@ -8,6 +8,16 @@
 //   • an objective-type registry so new quest kinds slot in cleanly
 //   • presentation helpers (labels, colours, progress formatting)
 //
+// The quests are **universal**: distances, generic place categories
+// (a café, a mall, a park…), and social goals that make sense for a
+// driver anywhere on Earth — not tied to any one country.
+//
+// Quests are **auto-completed**. Progress is never set by the user; it is
+// driven only by real indicators (distance driven, a friend made, a place
+// visited) via the `record_quest_event` RPC and database triggers. When an
+// indicator reaches the target the server grants the rewards. See
+// EVENT_FOR_OBJECTIVE for the objective → indicator routing.
+//
 // Adding a future quest type is a two-step, additive change:
 //   1. add a row (or rows) to quest_templates with a new objective_type
 //   2. register that objective_type here so the UI knows how to render it
@@ -28,26 +38,51 @@ export type QuestCategory =
   | "eco"
   | "streak";
 
-export type PoiCategory =
-  | "landmark"
+// Generic, worldwide place categories. These are *kinds* of places, not
+// specific named locations, so a quest like "visit a café" works anywhere.
+export type PlaceCategory =
   | "cafe"
+  | "restaurant"
+  | "mall"
+  | "park"
+  | "gym"
   | "viewpoint"
-  | "route"
-  | "workshop"
+  | "landmark"
   | "fuel"
-  | "ev_station";
+  | "ev_station"
+  | "workshop"
+  | "any";
+
+/** @deprecated Use PlaceCategory. Kept as an alias for older imports. */
+export type PoiCategory = PlaceCategory;
 
 // How a quest's progress is measured. Extend this union (and OBJECTIVES
-// below) to introduce new quest mechanics.
+// below) to introduce new quest mechanics. Every objective maps to a
+// real-world indicator via EVENT_FOR_OBJECTIVE.
 export type ObjectiveType =
   | "drive_distance"
   | "night_drive"
-  | "visit_poi"
-  | "explore_category"
-  | "complete_route"
-  | "photo_capture"
-  | "social_event"
-  | "eco_drive";
+  | "visit_place"
+  | "visit_places"
+  | "make_friend"
+  | "photo_capture";
+
+// The indicator/event that drives each objective's progress. The client
+// (and DB triggers) emit these via record_quest_event.
+export type QuestEventType =
+  | "drive_distance"
+  | "visit_place"
+  | "make_friend"
+  | "photo_capture";
+
+export const EVENT_FOR_OBJECTIVE: Record<ObjectiveType, QuestEventType> = {
+  drive_distance: "drive_distance",
+  night_drive: "drive_distance",
+  visit_place: "visit_place",
+  visit_places: "visit_place",
+  make_friend: "make_friend",
+  photo_capture: "photo_capture",
+};
 
 export type TimeWindow =
   | "morning"
@@ -70,6 +105,7 @@ export interface DailyQuest {
   accent_color: string;
   category: QuestCategory;
   objective_type: ObjectiveType;
+  objective_category: PlaceCategory | null; // place kind an indicator must match
   target: number;
   progress: number;
   unit: string;
@@ -116,8 +152,11 @@ export interface UserBadge {
   unlocked_at: string;
 }
 
-export interface CompleteQuestResult {
-  awarded: boolean;
+// One row per quest touched by an indicator event (record_quest_event).
+export interface QuestEventResult {
+  quest_id: string;
+  title: string;
+  completed: boolean;
   xp_reward: number;
   coin_reward: number;
   new_badges: string[];
@@ -177,35 +216,45 @@ export interface ObjectiveMeta {
 export const OBJECTIVES: Record<ObjectiveType, ObjectiveMeta> = {
   drive_distance: { type: "drive_distance", label: "Drive distance", progressNoun: "km driven", incremental: true },
   night_drive: { type: "night_drive", label: "Night drive", progressNoun: "km driven", incremental: true },
-  visit_poi: { type: "visit_poi", label: "Visit a place", progressNoun: "visit", incremental: false },
-  explore_category: { type: "explore_category", label: "Explore places", progressNoun: "places visited", incremental: true },
-  complete_route: { type: "complete_route", label: "Complete a route", progressNoun: "route", incremental: false },
+  visit_place: { type: "visit_place", label: "Visit a place", progressNoun: "visit", incremental: false },
+  visit_places: { type: "visit_places", label: "Visit places", progressNoun: "places visited", incremental: true },
+  make_friend: { type: "make_friend", label: "Make friends", progressNoun: "friends made", incremental: true },
   photo_capture: { type: "photo_capture", label: "Capture photos", progressNoun: "photos taken", incremental: true },
-  social_event: { type: "social_event", label: "Join an event", progressNoun: "km with the crew", incremental: true },
-  eco_drive: { type: "eco_drive", label: "Eco drive", progressNoun: "km driven", incremental: true },
 };
 
-// ─── POI presentation ────────────────────────────────────────────────
-export const POI_CATEGORY_LABELS: Record<PoiCategory, string> = {
-  landmark: "Landmark",
+// ─── Place presentation ──────────────────────────────────────────────
+export const PLACE_CATEGORY_LABELS: Record<PlaceCategory, string> = {
   cafe: "Café",
+  restaurant: "Restaurant",
+  mall: "Shopping Mall",
+  park: "Park",
+  gym: "Gym",
   viewpoint: "Viewpoint",
-  route: "Scenic Route",
-  workshop: "Workshop",
+  landmark: "Landmark",
   fuel: "Fuel Stop",
   ev_station: "EV Station",
+  workshop: "Workshop",
+  any: "Place",
 };
 
-// Aligns with constants/colors.ts POI palette.
-export const POI_CATEGORY_COLORS: Record<PoiCategory, string> = {
-  landmark: "#3B82F6",
+export const PLACE_CATEGORY_COLORS: Record<PlaceCategory, string> = {
   cafe: "#8B5CF6",
+  restaurant: "#F59E0B",
+  mall: "#EC4899",
+  park: "#22C55E",
+  gym: "#EF4444",
   viewpoint: "#00D4AA",
-  route: "#FF6B35",
-  workshop: "#FF6B35",
+  landmark: "#3B82F6",
   fuel: "#F59E0B",
   ev_station: "#22C55E",
+  workshop: "#FF6B35",
+  any: "#3B82F6",
 };
+
+/** @deprecated Use PLACE_CATEGORY_LABELS. */
+export const POI_CATEGORY_LABELS = PLACE_CATEGORY_LABELS;
+/** @deprecated Use PLACE_CATEGORY_COLORS. */
+export const POI_CATEGORY_COLORS = PLACE_CATEGORY_COLORS;
 
 // ─── Presentation helpers ────────────────────────────────────────────
 export function progressRatio(quest: Pick<DailyQuest, "progress" | "target">): number {
@@ -252,14 +301,19 @@ export function pendingRewards(quests: DailyQuest[]): { xp: number; coins: numbe
     );
 }
 
-// The current Asia/Jakarta time-of-day bucket, matching the SQL generator.
-// Useful for client-side previews and messaging.
+// The universal "quest day" in UTC (YYYY-MM-DD). Every user on Earth rolls
+// over at the same instant, matching the SQL generator's day boundary.
+export function questDay(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+// The current UTC time-of-day bucket, matching the SQL generator. Useful
+// for client-side previews and messaging.
 export function currentTimeWindow(now: Date = new Date()): TimeWindow {
-  // Convert to Asia/Jakarta (UTC+7) without pulling a tz library.
-  const jakartaHour = (now.getUTCHours() + 7) % 24;
-  if (jakartaHour >= 5 && jakartaHour < 11) return "morning";
-  if (jakartaHour >= 11 && jakartaHour < 15) return "midday";
-  if (jakartaHour >= 15 && jakartaHour < 18) return "afternoon";
-  if (jakartaHour >= 18 && jakartaHour < 22) return "evening";
+  const hour = now.getUTCHours();
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 15) return "midday";
+  if (hour >= 15 && hour < 18) return "afternoon";
+  if (hour >= 18 && hour < 22) return "evening";
   return "night";
 }
