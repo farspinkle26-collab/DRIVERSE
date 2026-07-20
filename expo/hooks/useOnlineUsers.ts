@@ -14,13 +14,21 @@ export interface OnlineUser {
   updated_at: string;
 }
 
+const LOCATION_BROADCAST_MS = 4000; // how often we push our own position
+const PRESENCE_CHANNEL = "online-players";
+
 // ─── Context Hook ──────────────────────────────────────────
+// Online player locations use Supabase Realtime Presence:
+// each online player tracks their position on a shared channel, so
+// every client receives live moves instantly without DB round-trips.
+// Positions are also upserted to user_locations for persistence.
 export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [isOnline, setIsOnline] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const profileRef = useRef<{ name: string; level: number }>({ name: "Driver", level: 1 });
 
   // ─── Listen for auth state ───────────────────────────────
   useEffect(() => {
@@ -36,129 +44,151 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // ─── Toggle online: subscribe/unsubscribe to realtime channel ──
-  const goOnline = useCallback(async () => {
-    if (!userId) return;
+  // ─── Rebuild the players list from channel presence state ──
+  const syncFromPresence = useCallback((selfId: string) => {
+    const channel = channelRef.current;
+    if (!channel) return;
 
-    // Get current location
+    const state = channel.presenceState<OnlineUser>();
+    const users: OnlineUser[] = [];
+    for (const key of Object.keys(state)) {
+      if (key === selfId) continue; // own car is rendered separately
+      const metas = state[key];
+      const latest = metas[metas.length - 1];
+      if (!latest || typeof latest.latitude !== "number") continue;
+      users.push({
+        user_id: key,
+        name: latest.name ?? "Driver",
+        level: latest.level ?? 1,
+        latitude: latest.latitude,
+        longitude: latest.longitude,
+        heading: latest.heading ?? 0,
+        updated_at: latest.updated_at ?? new Date().toISOString(),
+      });
+    }
+    setOnlineUsers(users);
+  }, []);
+
+  // ─── Read current GPS position ───────────────────────────
+  const getPosition = useCallback(async () => {
+    const loc = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    return {
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+      heading: loc.coords.heading ?? 0,
+    };
+  }, []);
+
+  // ─── Broadcast own position: presence track + DB persist ──
+  const publishPosition = useCallback(
+    async (uid: string, pos: { latitude: number; longitude: number; heading: number }) => {
+      const payload: OnlineUser = {
+        user_id: uid,
+        name: profileRef.current.name,
+        level: profileRef.current.level,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        heading: pos.heading,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Realtime: everyone on the channel sees this move instantly
+      try {
+        await channelRef.current?.track(payload);
+      } catch {
+        // Silent
+      }
+
+      // Persistence: survives reconnects and feeds stale-cleanup
+      try {
+        await supabase.from("user_locations").upsert({
+          user_id: uid,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+          heading: pos.heading,
+          is_online: true,
+        });
+      } catch {
+        // Silent
+      }
+    },
+    []
+  );
+
+  // ─── Go online ───────────────────────────────────────────
+  const goOnline = useCallback(async () => {
+    if (!userId || channelRef.current) return;
+
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
 
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 5000,
+      const pos = await getPosition();
+
+      // Load own profile name + level for the presence payload
+      try {
+        const [{ data: profile }, { data: xp }] = await Promise.all([
+          supabase.from("profiles").select("name").eq("id", userId).single(),
+          supabase.from("user_xp").select("level").eq("user_id", userId).single(),
+        ]);
+        profileRef.current = {
+          name: profile?.name ?? "Driver",
+          level: xp?.level ?? 1,
+        };
+      } catch {
+        // Defaults stay
+      }
+
+      const channel = supabase.channel(PRESENCE_CHANNEL, {
+        config: { presence: { key: userId } },
       });
 
-      // Upsert location
-      await supabase.from("user_locations").upsert({
-        user_id: userId,
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        heading: loc.coords.heading ?? 0,
-        is_online: true,
-      });
-
-      setIsOnline(true);
-
-      // Subscribe to all user_locations changes via Realtime
-      const channel = supabase
-        .channel("online-users")
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "user_locations" },
-          async () => {
-            // Refetch all online users with their profiles
-            await fetchOnlineUsers();
+      channel
+        .on("presence", { event: "sync" }, () => syncFromPresence(userId))
+        .on("presence", { event: "join" }, () => syncFromPresence(userId))
+        .on("presence", { event: "leave" }, () => syncFromPresence(userId))
+        .subscribe(async (subscribeStatus) => {
+          if (subscribeStatus === "SUBSCRIBED") {
+            await publishPosition(userId, pos);
           }
-        )
-        .subscribe();
+        });
 
       channelRef.current = channel;
+      setIsOnline(true);
 
-      // Initial fetch
-      await fetchOnlineUsers();
-
-      // Periodically update own location (every 5 seconds)
+      // Periodically re-broadcast own location
       locationIntervalRef.current = setInterval(async () => {
         try {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-            timeInterval: 5000,
-          });
-          await supabase.from("user_locations").upsert({
-            user_id: userId,
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-            heading: loc.coords.heading ?? 0,
-            is_online: true,
-          });
+          const next = await getPosition();
+          await publishPosition(userId, next);
         } catch {
           // Silent
         }
-      }, 5000);
+      }, LOCATION_BROADCAST_MS);
     } catch {
       // Silent
     }
-  }, [userId]);
-
-  // ─── Fetch all online users with their profile info ────────
-  const fetchOnlineUsers = useCallback(async () => {
-    if (!userId) return;
-
-    try {
-      // Get all online locations
-      const { data: locations } = await supabase
-        .from("user_locations")
-        .select("*")
-        .eq("is_online", true)
-        .neq("user_id", userId);
-
-      if (!locations || locations.length === 0) {
-        setOnlineUsers([]);
-        return;
-      }
-
-      // Fetch profiles for these users
-      const userIds = locations.map((l: { user_id: string }) => l.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, name")
-        .in("id", userIds);
-
-      // Fetch XP for these users
-      const { data: xpData } = await supabase
-        .from("user_xp")
-        .select("user_id, level")
-        .in("user_id", userIds);
-
-      const profileMap = new Map(
-        (profiles ?? []).map((p: { id: string; name: string }) => [p.id, p])
-      );
-      const xpMap = new Map(
-        (xpData ?? []).map((x: { user_id: string; level: number }) => [x.user_id, x.level])
-      );
-
-      const users: OnlineUser[] = locations.map(
-        (l: { user_id: string; latitude: number; longitude: number; heading: number; updated_at: string }) => ({
-          user_id: l.user_id,
-          name: profileMap.get(l.user_id)?.name ?? "Driver",
-          level: xpMap.get(l.user_id) ?? 1,
-          latitude: l.latitude,
-          longitude: l.longitude,
-          heading: l.heading ?? 0,
-          updated_at: l.updated_at,
-        })
-      );
-
-      setOnlineUsers(users);
-    } catch {
-      // Silent
-    }
-  }, [userId]);
+  }, [userId, getPosition, publishPosition, syncFromPresence]);
 
   // ─── Go offline: cleanup ─────────────────────────────────
   const goOffline = useCallback(async () => {
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+      locationIntervalRef.current = null;
+    }
+
+    if (channelRef.current) {
+      try {
+        await channelRef.current.untrack();
+      } catch {
+        // Silent
+      }
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
     if (userId) {
       try {
         await supabase
@@ -170,16 +200,6 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
       }
     }
 
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-
-    if (locationIntervalRef.current) {
-      clearInterval(locationIntervalRef.current);
-      locationIntervalRef.current = null;
-    }
-
     setIsOnline(false);
     setOnlineUsers([]);
   }, [userId]);
@@ -189,6 +209,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
       if (locationIntervalRef.current) {
         clearInterval(locationIntervalRef.current);

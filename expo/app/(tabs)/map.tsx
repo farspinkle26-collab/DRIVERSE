@@ -31,9 +31,18 @@ import {
   Coffee,
   Fuel,
   ShoppingBag,
+  Flag,
+  Crown,
+  LogOut,
 } from "lucide-react-native";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
+import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
+import CreateEventModal, {
+  EventTypeIcon,
+  eventTypeColor,
+  eventTypeLabel,
+} from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
@@ -181,6 +190,22 @@ function fmtDuration(seconds: number): string {
   return `${m} min`;
 }
 
+/** Event start time: "Live now", "Today 20:00", "Tomorrow 10:00", "12 Aug 19:30" */
+function fmtEventTime(iso: string, isLive: boolean): string {
+  if (isLive) return "Live now";
+  const d = new Date(iso);
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return `Today ${time}`;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return `Tomorrow ${time}`;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${d.getDate()} ${months[d.getMonth()]} ${time}`;
+}
+
 /** Live timer format: "02:34:15" */
 function fmtTimer(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -278,6 +303,17 @@ export default function MapScreen() {
   const { user } = useAuth();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [addingFriend, setAddingFriend] = useState(false);
+
+  // Events system
+  const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
+  const [isEventPickMode, setIsEventPickMode] = useState(false);
+  const [eventCoordinate, setEventCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [showCreateEvent, setShowCreateEvent] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [eventActionBusy, setEventActionBusy] = useState(false);
+  // Keep the selected event fresh as realtime updates flow in
+  const selectedEvent: DriveEvent | null =
+    events.find((e) => e.id === selectedEventId) ?? null;
 
   // Animations
   const carFloat = useRef(new Animated.Value(0)).current;
@@ -687,11 +723,23 @@ export default function MapScreen() {
   // --- Map press: drop a pin at tapped location (only when pick mode is ON) ---
   const mapPressCooldownRef = useRef(0);
   const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
-    if (!isPickMode) return;
+    if (!isPickMode && !isEventPickMode) return;
     const now = Date.now();
     if (now - mapPressCooldownRef.current < 200) return;
     mapPressCooldownRef.current = now;
     const { latitude, longitude } = event.nativeEvent.coordinate;
+
+    // Event building mode: drop the event pin and open the builder
+    if (isEventPickMode) {
+      setIsEventPickMode(false);
+      setEventCoordinate({ latitude, longitude });
+      setShowCreateEvent(true);
+      mapRef.current?.animateCamera(
+        { center: { latitude, longitude }, zoom: 16, pitch: 40 },
+        { duration: 400 }
+      );
+      return;
+    }
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setLocationChosen(false);
     setRouteInfo(null);
@@ -701,7 +749,62 @@ export default function MapScreen() {
       { center: { latitude, longitude }, zoom: 17, pitch: 40 },
       { duration: 500 }
     );
-  }, [isPickMode]);
+  }, [isPickMode, isEventPickMode]);
+
+  // --- Event handlers ---
+  const toggleEventPickMode = useCallback(() => {
+    if (!user) {
+      Alert.alert("Sign In Required", "Create an account to build events on the map");
+      return;
+    }
+    setIsEventPickMode((prev) => !prev);
+    setIsPickMode(false);
+  }, [user]);
+
+  const handleEventCreated = useCallback(() => {
+    setShowCreateEvent(false);
+    setEventCoordinate(null);
+  }, []);
+
+  const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
+    setEventActionBusy(true);
+    const { error } = await joinEvent(ev.id);
+    setEventActionBusy(false);
+    if (error) Alert.alert("Could Not Join", error);
+  }, [joinEvent]);
+
+  const handleLeaveEvent = useCallback(async (ev: DriveEvent) => {
+    setEventActionBusy(true);
+    const { error } = await leaveEvent(ev.id);
+    setEventActionBusy(false);
+    if (error) Alert.alert("Could Not Leave", error);
+  }, [leaveEvent]);
+
+  const handleCancelEvent = useCallback((ev: DriveEvent) => {
+    Alert.alert("Cancel Event", `Cancel "${ev.title}" for everyone?`, [
+      { text: "Keep Event", style: "cancel" },
+      {
+        text: "Cancel Event",
+        style: "destructive",
+        onPress: async () => {
+          setEventActionBusy(true);
+          const { error } = await cancelEvent(ev.id);
+          setEventActionBusy(false);
+          setSelectedEventId(null);
+          if (error) Alert.alert("Error", error);
+        },
+      },
+    ]);
+  }, [cancelEvent]);
+
+  const handleRouteToEvent = useCallback((ev: DriveEvent) => {
+    if (!userLocation) return;
+    setSelectedEventId(null);
+    setSelectedDestination({ type: "location", lat: ev.latitude, lng: ev.longitude });
+    setLocationChosen(true);
+    setNavigating(true);
+    fetchDirections(userLocation, { latitude: ev.latitude, longitude: ev.longitude });
+  }, [userLocation, fetchDirections]);
 
   // --- Recording handlers ---
   const startRecording = useCallback(() => {
@@ -1028,6 +1131,44 @@ export default function MapScreen() {
           </Marker>
         ))}
 
+        {/* Event markers */}
+        {!isRecording && events.map((ev) => {
+          const evColor = eventTypeColor(ev.event_type);
+          const isSelected = selectedEventId === ev.id;
+          return (
+            <Marker
+              key={`event-${ev.id}`}
+              coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              onPress={() => setSelectedEventId(ev.id)}
+              tracksViewChanges={isSelected}
+            >
+              <View style={styles.eventMarkerWrap}>
+                {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
+                <View style={[
+                  styles.eventMarker,
+                  { borderColor: evColor, shadowColor: evColor },
+                  isSelected && styles.eventMarkerSelected,
+                ]}>
+                  <EventTypeIcon type={ev.event_type} size={isSelected ? 18 : 15} color={evColor} />
+                </View>
+                <View style={[styles.eventMarkerBadge, { backgroundColor: evColor }]}>
+                  <Text style={styles.eventMarkerBadgeText}>{ev.participant_count}</Text>
+                </View>
+              </View>
+            </Marker>
+          );
+        })}
+
+        {/* Pending event pin (placed, builder open) */}
+        {eventCoordinate && showCreateEvent && (
+          <Marker coordinate={eventCoordinate} anchor={{ x: 0.5, y: 1 }}>
+            <View style={styles.customPin}>
+              <Flag size={30} color="#FF6B35" fill="#FF6B3530" />
+            </View>
+          </Marker>
+        )}
+
         {/* User car marker — always visible, recording or not */}
         {userLocation && (
           <Marker
@@ -1251,6 +1392,13 @@ export default function MapScreen() {
             activeOpacity={0.7}
           >
             <MapPin size={18} color={isPickMode ? "#FF6B35" : "#6A6A7E"} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, isEventPickMode && styles.actionBtnActive]}
+            onPress={toggleEventPickMode}
+            activeOpacity={0.7}
+          >
+            <Flag size={18} color={isEventPickMode ? "#FF6B35" : "#6A6A7E"} />
           </TouchableOpacity>
           {routeInfo && (
             <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
@@ -1533,6 +1681,135 @@ export default function MapScreen() {
           </View>
         </Animated.View>
       )}
+
+      {/* --- Event pick mode banner --- */}
+      {isEventPickMode && (
+        <View style={[styles.eventPickBanner, { top: insets.top + 16 }]} pointerEvents="none">
+          <Flag size={14} color="#FF6B35" />
+          <Text style={styles.eventPickBannerText}>Tap the map to place your event</Text>
+        </View>
+      )}
+
+      {/* --- Selected event card --- */}
+      {selectedEvent && !isRecording && (() => {
+        const ev = selectedEvent;
+        const evColor = eventTypeColor(ev.event_type);
+        const isFull =
+          ev.max_participants > 0 && ev.participant_count >= ev.max_participants && !ev.is_joined;
+        return (
+          <View style={[styles.eventCard, { paddingBottom: insets.bottom + 90 }]}>
+            <TouchableOpacity
+              style={styles.cafeCardClose}
+              onPress={() => setSelectedEventId(null)}
+            >
+              <View style={styles.cafeCardCloseBar} />
+            </TouchableOpacity>
+
+            <View style={styles.eventCardHeader}>
+              <View style={[styles.eventCardIcon, { borderColor: evColor, backgroundColor: `${evColor}15` }]}>
+                <EventTypeIcon type={ev.event_type} size={20} color={evColor} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.eventCardTitle} numberOfLines={2}>{ev.title}</Text>
+                <View style={styles.eventCardMetaRow}>
+                  <View style={[styles.eventTypePill, { backgroundColor: `${evColor}18` }]}>
+                    <Text style={[styles.eventTypePillText, { color: evColor }]}>
+                      {eventTypeLabel(ev.event_type)}
+                    </Text>
+                  </View>
+                  {ev.is_live && (
+                    <View style={styles.eventLivePill}>
+                      <View style={styles.eventLiveDot} />
+                      <Text style={styles.eventLivePillText}>LIVE</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            {ev.description ? (
+              <Text style={styles.eventCardDesc} numberOfLines={2}>{ev.description}</Text>
+            ) : null}
+
+            <View style={styles.eventCardStats}>
+              <View style={styles.eventCardStat}>
+                <Clock size={14} color="#F59E0B" />
+                <Text style={styles.eventCardStatText}>{fmtEventTime(ev.starts_at, ev.is_live)}</Text>
+              </View>
+              <View style={styles.eventCardStat}>
+                <Users size={14} color="#22C55E" />
+                <Text style={styles.eventCardStatText}>
+                  {ev.participant_count}
+                  {ev.max_participants > 0 ? ` / ${ev.max_participants}` : ""} joined
+                </Text>
+              </View>
+              <View style={styles.eventCardStat}>
+                <Crown size={14} color="#FFD700" />
+                <Text style={styles.eventCardStatText} numberOfLines={1}>{ev.host_name}</Text>
+              </View>
+            </View>
+
+            <View style={styles.eventCardActions}>
+              {ev.is_host ? (
+                <TouchableOpacity
+                  style={[styles.eventCancelBtn, eventActionBusy && { opacity: 0.5 }]}
+                  onPress={() => handleCancelEvent(ev)}
+                  disabled={eventActionBusy}
+                  activeOpacity={0.7}
+                >
+                  <X size={16} color="#EF4444" />
+                  <Text style={styles.eventCancelBtnText}>Cancel Event</Text>
+                </TouchableOpacity>
+              ) : ev.is_joined ? (
+                <TouchableOpacity
+                  style={[styles.eventLeaveBtn, eventActionBusy && { opacity: 0.5 }]}
+                  onPress={() => handleLeaveEvent(ev)}
+                  disabled={eventActionBusy}
+                  activeOpacity={0.7}
+                >
+                  <LogOut size={16} color="#8A8A9A" />
+                  <Text style={styles.eventLeaveBtnText}>Leave</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.eventJoinBtn,
+                    { backgroundColor: evColor },
+                    (eventActionBusy || isFull || !user) && { opacity: 0.5 },
+                  ]}
+                  onPress={() => handleJoinEvent(ev)}
+                  disabled={eventActionBusy || isFull || !user}
+                  activeOpacity={0.7}
+                >
+                  <UserPlus size={16} color="#FFFFFF" />
+                  <Text style={styles.eventJoinBtnText}>
+                    {isFull ? "Event Full" : eventActionBusy ? "Joining..." : "Join Event"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.navBtnOutline}
+                onPress={() => handleRouteToEvent(ev)}
+                activeOpacity={0.7}
+              >
+                <Route size={16} color={ROUTE_RED} />
+                <Text style={styles.navBtnOutlineText}>Route</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        );
+      })()}
+
+      {/* --- Event builder modal --- */}
+      <CreateEventModal
+        visible={showCreateEvent}
+        coordinate={eventCoordinate}
+        onClose={() => {
+          setShowCreateEvent(false);
+          setEventCoordinate(null);
+        }}
+        onCreated={handleEventCreated}
+      />
     </View>
   );
 }
@@ -2625,5 +2902,234 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#FFFFFF",
+  },
+  // ========================
+  //  EVENTS
+  // ========================
+  eventMarkerWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 52,
+    height: 52,
+  },
+  eventMarkerLiveRing: {
+    position: "absolute",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 1.5,
+  },
+  eventMarker: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(14, 14, 24, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  eventMarkerSelected: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    shadowOpacity: 0.8,
+    shadowRadius: 14,
+  },
+  eventMarkerBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#0E0E18",
+  },
+  eventMarkerBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  eventPickBanner: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(10, 10, 20, 0.92)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.35)",
+    zIndex: 200,
+  },
+  eventPickBannerText: {
+    color: "#FF6B35",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  eventCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    backgroundColor: "rgba(14, 14, 24, 0.97)",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    zIndex: 180,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  eventCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 6,
+  },
+  eventCardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+  },
+  eventCardTitle: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  eventCardMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  eventTypePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  eventTypePillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  eventLivePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  eventLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#22C55E",
+  },
+  eventLivePillText: {
+    color: "#22C55E",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+  },
+  eventCardDesc: {
+    color: "#8A8A9A",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 10,
+  },
+  eventCardStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 14,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  eventCardStat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "45%",
+  },
+  eventCardStatText: {
+    color: "#C0C0CE",
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  eventCardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 12,
+  },
+  eventJoinBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  eventJoinBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  eventLeaveBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  },
+  eventLeaveBtnText: {
+    color: "#8A8A9A",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  eventCancelBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.35)",
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
+  eventCancelBtnText: {
+    color: "#EF4444",
+    fontSize: 14,
+    fontWeight: "700",
   },
 });
