@@ -171,6 +171,27 @@ function haversineMeters(
   return 2 * R * Math.asin(Math.sqrt(Math.min(1, h)));
 }
 
+// --- Compass bearing (degrees, 0-360) from point a to point b ---
+function bearingBetween(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+): number {
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return (brng + 360) % 360;
+}
+
+// --- Shortest signed delta between two headings (-180..180) ---
+function headingDelta(from: number, to: number): number {
+  return ((to - from + 540) % 360) - 180;
+}
+
 // --- Format helpers ---
 function fmtKm(meters: number): string {
   if (meters < 1000) return `${meters} m`;
@@ -282,6 +303,8 @@ export default function MapScreen() {
   const lastCoordTimeRef = useRef<number>(0);
   const isRecordingRef = useRef(false);
   const userLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  // Smoothed heading the chase camera is currently pointing at (degrees)
+  const navHeadingRef = useRef(0);
 
   // Estimated route duration (seconds) — saved when route is fetched, used for XP comparison
   const estimatedDurationRef = useRef<number | null>(null);
@@ -482,11 +505,18 @@ export default function MapScreen() {
               longitude: pos.coords.longitude,
             };
             setUserLocation(newCoord);
-            if (pos.coords.heading != null) setHeading(pos.coords.heading);
+            // Outside navigation, keep the marker pointed with raw GPS course.
+            // While navigating, the chase camera below owns the heading.
+            if (!isRecordingRef.current && pos.coords.heading != null && pos.coords.heading >= 0) {
+              setHeading(pos.coords.heading);
+            }
 
             // --- Recording: append new coordinate, update distance, calculate speed ---
             if (isRecordingRef.current) {
               const now = Date.now();
+              // Capture the previous fix before setRecordedPath overwrites the ref,
+              // so we can derive travel direction for the chase camera.
+              const prevCoord = lastCoordRef.current;
               setRecordedPath((prev) => {
                 const next = [...prev, newCoord];
                 if (lastCoordRef.current) {
@@ -511,6 +541,29 @@ export default function MapScreen() {
                 }
               }
               lastCoordTimeRef.current = now;
+
+              // --- Third-person chase camera (Google Maps navigation style) ---
+              // Determine the direction of travel, preferring GPS course while
+              // moving, falling back to the bearing between fixes, then holding
+              // the last heading when stationary so the view doesn't spin.
+              const movedMeters = prevCoord ? haversineMeters(prevCoord, newCoord) : 0;
+              const gpsHeading = pos.coords.heading;
+              const gpsSpeed = pos.coords.speed; // m/s (may be null/-1)
+              let targetHeading = navHeadingRef.current;
+              if (typeof gpsHeading === "number" && gpsHeading >= 0 && (gpsSpeed == null || gpsSpeed > 0.7)) {
+                targetHeading = gpsHeading;
+              } else if (prevCoord && movedMeters > 2) {
+                targetHeading = bearingBetween(prevCoord, newCoord);
+              }
+              // Ease toward the target heading to avoid jitter on noisy fixes.
+              const smoothedHeading =
+                (navHeadingRef.current + headingDelta(navHeadingRef.current, targetHeading) * 0.6 + 360) % 360;
+              navHeadingRef.current = smoothedHeading;
+              setHeading(smoothedHeading);
+              mapRef.current?.animateCamera(
+                { center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading },
+                { duration: 900 }
+              );
 
               // --- Auto-stop when near destination ---
               const dest = destCoordsRef.current;
@@ -821,11 +874,13 @@ export default function MapScreen() {
     setRouteSplitIdx(null);
     lastCoordRef.current = userLocation;
     lastCoordTimeRef.current = now;
+    navHeadingRef.current = heading;
     if (userLocation) {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
     }
-    // Animate camera to user location with tight zoom
+    // Drop into the third-person navigation view: tight zoom, tilted horizon,
+    // and rotated so the direction of travel points up the screen.
     if (userLocation && mapRef.current) {
       mapRef.current.animateCamera(
         { center: userLocation, zoom: 18, pitch: 60, heading },
@@ -941,7 +996,7 @@ export default function MapScreen() {
         rotateEnabled
         customMapStyle={MAP_GLOW}
         onPress={handleMapPress}
-        followsUserLocation={isRecording}
+        followsUserLocation={false}
       >
         {/* Landmark Markers — category-based custom icons */}
         {!isRecording && cafes.map((poi) => {
@@ -1675,7 +1730,7 @@ export default function MapScreen() {
                 <Animated.View style={{ transform: [{ scale: recPulse }] }}>
                   <Circle size={22} color="#FFFFFF" fill={RECORD_RED} />
                 </Animated.View>
-                <Text style={styles.routeRecBtnText}>START RECORDING</Text>
+                <Text style={styles.routeRecBtnText}>START NAVIGATION</Text>
               </TouchableOpacity>
             )}
           </View>
