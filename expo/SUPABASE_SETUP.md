@@ -93,6 +93,64 @@ CREATE TRIGGER profiles_updated_at
   FOR EACH ROW EXECUTE PROCEDURE public.handle_updated_at();
 ```
 
+## 4b. Profile Pictures & Public Profiles
+
+These two features need (a) a Storage bucket for avatars and (b) read
+policies that let drivers view *each other's* public profile + rank.
+
+### Avatar storage bucket
+
+Run in the SQL Editor (or create the bucket from the Storage UI):
+
+```sql
+-- Public bucket that holds user profile pictures
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Anyone can view avatars (public read)
+CREATE POLICY "Avatar images are publicly readable"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'avatars');
+
+-- A user may upload/replace only files inside their own folder (userId/...)
+CREATE POLICY "Users can upload their own avatar"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'avatars'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+CREATE POLICY "Users can update their own avatar"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'avatars'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+```
+
+### Let drivers view each other's profile + rank
+
+By default the `profiles` policy only allows viewing your *own* row. Add a
+public-read policy so the "see other people's profile" screen works, and
+allow reading other users' level from `user_xp`:
+
+```sql
+-- Public profiles can be viewed by any signed-in user
+CREATE POLICY "Public profiles are viewable"
+  ON profiles FOR SELECT
+  USING (true);
+
+-- Levels/ranks are viewable by any signed-in user
+CREATE POLICY "Public XP is viewable"
+  ON user_xp FOR SELECT
+  USING (true);
+```
+
+> If you already created a stricter `"Users can view own profile"` policy,
+> keep it — Postgres combines SELECT policies with OR, so the public policy
+> simply widens read access. Writes stay locked to the owner.
+
 ## 5. Test the Authentication
 
 1. Start your app: `npm start` or `yarn start`
@@ -109,6 +167,8 @@ CREATE TRIGGER profiles_updated_at
 - ✅ Automatic session management
 - ✅ Secure authentication with Supabase
 - ✅ Real-time auth state updates
+- ✅ Profile picture upload (camera / library → Supabase Storage)
+- ✅ Viewing other drivers' public profiles with their rank shown large
 
 ## Next Steps
 
