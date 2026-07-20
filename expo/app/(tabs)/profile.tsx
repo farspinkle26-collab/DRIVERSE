@@ -12,10 +12,12 @@ import {
   FlatList,
   RefreshControl,
   Platform,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import * as ImagePickerExpo from "expo-image-picker";
 import {
   Car,
   Trophy,
@@ -49,6 +51,7 @@ import {
   Circle,
   Plus,
   Trash2,
+  Camera,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
@@ -114,7 +117,7 @@ type ProfileTab = "garage" | "trips" | "friends" | "messages";
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, logout, loading: authLoading, updateProfilePicture } = useAuth();
   const { level, xp, xpProgress, xpCurrentLevel, xpRequired, totalXp, addXP } = useXP();
   const { activeCar } = useActiveCar();
 
@@ -138,8 +141,11 @@ export default function ProfileScreen() {
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendSearchQuery, setFriendSearchQuery] = useState("");
-  const [friendSearchResults, setFriendSearchResults] = useState<Array<{ id: string; name: string; level: number }>>([]);
+  const [friendSearchResults, setFriendSearchResults] = useState<Array<{ id: string; name: string; level: number; avatar?: string }>>([]);
   const [friendSearchLoading, setFriendSearchLoading] = useState(false);
+
+  // ─── Avatar upload state ───────────────────────────────
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // ─── Messages state ────────────────────────────────────
   const [messages, setMessages] = useState<MessageItem[]>([]);
@@ -199,18 +205,29 @@ export default function ProfileScreen() {
     if (!isAuthenticated || !user) return;
     setFriendsLoading(true);
     try {
-      // Get friendships where user is user_id or friend_id
+      // Get friendships where user is user_id or friend_id. The aliased FK
+      // join pulls the *other* person's profile so we can show their name +
+      // avatar in the list.
       const { data: sentData } = await supabase
         .from("friends")
-        .select("*, profiles!friends_friend_id_fkey(name)")
+        .select("*, profiles!friends_friend_id_fkey(name, avatar)")
         .eq("user_id", user.id);
 
       const { data: receivedData } = await supabase
         .from("friends")
-        .select("*, profiles!friends_user_id_fkey(name)")
+        .select("*, profiles!friends_user_id_fkey(name, avatar)")
         .eq("friend_id", user.id);
 
-      const all = [...(sentData ?? []), ...(receivedData ?? [])].filter(
+      const normalize = (rows: any[]): FriendItem[] =>
+        (rows ?? []).map((row) => {
+          const p = row.profiles ?? {};
+          return {
+            ...row,
+            friend_profile: { name: p.name, avatar: p.avatar, level: 1 },
+          } as FriendItem;
+        });
+
+      const all = [...normalize(sentData ?? []), ...normalize(receivedData ?? [])].filter(
         (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i
       );
 
@@ -319,14 +336,32 @@ export default function ProfileScreen() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name")
+        .select("id, name, avatar")
         .ilike("name", `%${friendSearchQuery.trim()}%`)
         .neq("id", user.id)
         .limit(10);
 
       if (!error && data) {
+        // Fetch levels for the matched users in one query.
+        const ids = data.map((p: { id: string }) => p.id);
+        const levelMap: Record<string, number> = {};
+        if (ids.length > 0) {
+          const { data: xpData } = await supabase
+            .from("user_xp")
+            .select("user_id, level")
+            .in("user_id", ids);
+          (xpData ?? []).forEach((x: { user_id: string; level: number }) => {
+            levelMap[x.user_id] = x.level;
+          });
+        }
+
         setFriendSearchResults(
-          data.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name, level: 1 }))
+          data.map((p: { id: string; name: string; avatar?: string }) => ({
+            id: p.id,
+            name: p.name,
+            level: levelMap[p.id] ?? 1,
+            avatar: p.avatar,
+          }))
         );
       }
     } catch (err) {
@@ -422,6 +457,57 @@ export default function ProfileScreen() {
     ]);
   };
 
+  // ─── Change profile picture ────────────────────────────────
+  const pickAndSetAvatar = async (useCamera: boolean) => {
+    try {
+      if (Platform.OS !== "web") {
+        const perm = useCamera
+          ? await ImagePickerExpo.requestCameraPermissionsAsync()
+          : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== "granted") {
+          Alert.alert(
+            "Permission needed",
+            `We need ${useCamera ? "camera" : "photo library"} access to update your profile picture.`
+          );
+          return;
+        }
+      }
+
+      const result = useCamera
+        ? await ImagePickerExpo.launchCameraAsync({
+            mediaTypes: ImagePickerExpo.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          })
+        : await ImagePickerExpo.launchImageLibraryAsync({
+            mediaTypes: ImagePickerExpo.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      setUploadingAvatar(true);
+      const ok = await updateProfilePicture(result.assets[0].uri);
+      if (!ok) Alert.alert("Error", "Could not update your profile picture. Please try again.");
+    } catch (err) {
+      console.error("Avatar pick error:", err);
+      Alert.alert("Error", "Something went wrong updating your photo.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleChangeAvatar = () => {
+    Alert.alert("Profile Picture", "Choose a new profile picture", [
+      { text: "Take Photo", onPress: () => pickAndSetAvatar(true) },
+      { text: "Choose from Library", onPress: () => pickAndSetAvatar(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
   // ─── Helpers ───────────────────────────────────────────────
   const formatDuration = (seconds: number): string => {
     const h = Math.floor(seconds / 3600);
@@ -489,18 +575,32 @@ export default function ProfileScreen() {
       >
         {/* ═══ PROFILE HEADER ═══ */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatarSection}>
+          <TouchableOpacity
+            style={styles.avatarSection}
+            onPress={handleChangeAvatar}
+            activeOpacity={0.85}
+            disabled={uploadingAvatar}
+          >
             <LinearGradient colors={["#FF6B35", "#FF8A50"]} style={styles.avatarRing}>
               <View style={styles.avatarInner}>
-                <Text style={styles.avatarLetter}>
-                  {(user?.name ?? "D")[0].toUpperCase()}
-                </Text>
+                {uploadingAvatar ? (
+                  <ActivityIndicator color="#FF6B35" />
+                ) : user?.profilePicture ? (
+                  <Image source={{ uri: user.profilePicture }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarLetter}>
+                    {(user?.name ?? "D")[0].toUpperCase()}
+                  </Text>
+                )}
               </View>
             </LinearGradient>
             <View style={styles.levelBadge}>
               <Text style={styles.levelBadgeText}>{level}</Text>
             </View>
-          </View>
+            <View style={styles.avatarEditBadge}>
+              <Camera size={13} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
 
           <Text style={styles.userName}>{user?.name ?? "Driver"}</Text>
           <TouchableOpacity
@@ -804,13 +904,25 @@ export default function ProfileScreen() {
               <View style={styles.friendResults}>
                 {friendSearchResults.map((r) => (
                   <View key={r.id} style={styles.friendResultRow}>
-                    <View style={styles.friendResultAvatar}>
-                      <Text style={styles.friendResultAvatarText}>{r.name[0].toUpperCase()}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.friendResultName}>{r.name}</Text>
-                      <Text style={styles.friendResultLevel}>Level {r.level}</Text>
-                    </View>
+                    <TouchableOpacity
+                      style={styles.friendResultInfo}
+                      onPress={() => router.push(`/user/${r.id}` as any)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.friendResultAvatar}>
+                        {r.avatar ? (
+                          <Image source={{ uri: r.avatar }} style={styles.friendResultAvatarImg} />
+                        ) : (
+                          <Text style={styles.friendResultAvatarText}>{r.name[0].toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendResultName}>{r.name}</Text>
+                        <Text style={styles.friendResultLevel}>
+                          {rankForLevel(r.level).name} · Level {r.level}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.friendAddBtn}
                       onPress={() => handleAddFriend(r.id, r.name)}
@@ -837,13 +949,17 @@ export default function ProfileScreen() {
                 <View key={f.id} style={styles.friendCard}>
                   <TouchableOpacity
                     style={styles.friendInfo}
-                    onPress={() => handleOpenConversation(f.user_id === user?.id ? f.friend_id : f.user_id)}
+                    onPress={() => router.push(`/user/${f.user_id === user?.id ? f.friend_id : f.user_id}` as any)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.friendAvatar}>
-                      <Text style={styles.friendAvatarText}>
-                        {(f.friend_profile?.name ?? "?")[0]?.toUpperCase()}
-                      </Text>
+                      {f.friend_profile?.avatar ? (
+                        <Image source={{ uri: f.friend_profile.avatar }} style={styles.friendAvatarImg} />
+                      ) : (
+                        <Text style={styles.friendAvatarText}>
+                          {(f.friend_profile?.name ?? "?")[0]?.toUpperCase()}
+                        </Text>
+                      )}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.friendName}>
@@ -1152,6 +1268,24 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: "800",
     color: "#FF6B35",
+  },
+  avatarImage: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+  },
+  avatarEditBadge: {
+    position: "absolute",
+    bottom: -2,
+    left: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#0A0A0F",
   },
   levelBadge: {
     position: "absolute",
@@ -1601,6 +1735,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.05)",
   },
+  friendResultInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   friendResultAvatar: {
     width: 40,
     height: 40,
@@ -1608,6 +1748,12 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 107, 53, 0.15)",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
+  },
+  friendResultAvatarImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   friendResultAvatarText: {
     fontSize: 16,
@@ -1654,6 +1800,12 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 107, 53, 0.1)",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
+  },
+  friendAvatarImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   friendAvatarText: {
     fontSize: 16,

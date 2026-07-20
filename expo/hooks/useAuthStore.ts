@@ -2,6 +2,7 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
+import { uploadAvatar } from "@/lib/uploadAvatar";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 const GUEST_USER: User = {
@@ -356,9 +357,18 @@ export const [AuthContext, useAuth] = createContextHook(() => {
       setLoading(true);
       setError(null);
 
+      // Upload to Supabase Storage so the avatar persists across devices.
+      // Fall back to the raw local URI if the upload can't complete.
+      let finalUrl = imageUri;
+      try {
+        finalUrl = await uploadAvatar(session.user.id, imageUri);
+      } catch (uploadErr) {
+        console.warn("Avatar upload failed, storing local URI instead:", uploadErr);
+      }
+
       const { error: updErr } = await supabase
         .from("profiles")
-        .update({ avatar: imageUri })
+        .update({ avatar: finalUrl })
         .eq("id", session.user.id);
 
       if (updErr) {
@@ -366,7 +376,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         return false;
       }
 
-      const updatedUser = { ...user, profilePicture: imageUri };
+      const updatedUser = { ...user, profilePicture: finalUrl };
       setUser(updatedUser);
       return true;
     } catch (err) {
