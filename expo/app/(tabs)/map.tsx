@@ -96,7 +96,7 @@ const INDONESIAN_CITIES = [
   { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
 ];
 
-type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping";
+type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "charging";
 
 interface CafePOI {
   id: string;
@@ -112,6 +112,8 @@ interface CafePOI {
 /** Detect landmark category from Google Places types */
 function detectCategory(placeTypes: string[]): LandmarkCategory {
   const t = placeTypes.map((s) => s.toLowerCase());
+  if (t.some((s) => s.includes("charging") || s === "electric_vehicle_charging_station")) return "charging";
+  if (t.some((s) => s.includes("car_wash"))) return "carwash";
   if (t.some((s) => s.includes("gas") || s === "gas_station")) return "spbu";
   if (t.some((s) => s.includes("restaurant") || s.includes("food"))) return "restaurant";
   if (t.some((s) => s.includes("cafe"))) return "cafe";
@@ -309,6 +311,8 @@ const CAT_COLORS: Record<LandmarkCategory, string> = {
   restaurant: "#FF6B6B",
   spbu: "#F59E0B",
   shopping: "#00D4AA",
+  carwash: "#3B82F6",
+  charging: "#A3E635",
 };
 
 const CAT_LABELS: Record<LandmarkCategory, string> = {
@@ -316,6 +320,18 @@ const CAT_LABELS: Record<LandmarkCategory, string> = {
   restaurant: "Food",
   spbu: "Fuel",
   shopping: "Shops",
+  carwash: "Car Wash",
+  charging: "Charging",
+};
+
+// Neon badge marker images (design reference). SPBU still uses the vector
+// chip — its badge image is yet to come.
+const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
+  cafe: require("@/assets/images/map-icons/cafe.png"),
+  restaurant: require("@/assets/images/map-icons/restaurant.png"),
+  shopping: require("@/assets/images/map-icons/shopping.png"),
+  carwash: require("@/assets/images/map-icons/carwash.png"),
+  charging: require("@/assets/images/map-icons/charging.png"),
 };
 
 // --- Warm Glow Map Style ---
@@ -423,10 +439,21 @@ export default function MapScreen() {
     restaurant: true,
     spbu: true,
     shopping: true,
+    carwash: true,
+    charging: true,
   });
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showDriversLayer, setShowDriversLayer] = useState(true);
   const weatherFetchedRef = useRef(false);
+
+  // Keep markers re-rendering briefly after POIs change so the badge images
+  // finish decoding before tracksViewChanges turns off (Android blank-marker fix)
+  const [markerImagesSettling, setMarkerImagesSettling] = useState(true);
+  useEffect(() => {
+    setMarkerImagesSettling(true);
+    const t = setTimeout(() => setMarkerImagesSettling(false), 1500);
+    return () => clearTimeout(t);
+  }, [cafes]);
 
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
@@ -451,7 +478,7 @@ export default function MapScreen() {
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
     if (!GOOGLE_API_KEY) return [];
-    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store"];
+    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash", "electric_vehicle_charging_station"];
     const allResults: CafePOI[] = [];
     const seen = new Set<string>();
 
@@ -1208,11 +1235,12 @@ export default function MapScreen() {
         onPress={handleMapPress}
         followsUserLocation={false}
       >
-        {/* Landmark Markers — icon chip + name + distance label (design spec) */}
+        {/* Landmark Markers — neon badge image + name + distance label (design spec) */}
         {!isRecording && cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const cat = poi.category;
           const catColor = CAT_COLORS[cat];
+          const badgeSrc = CAT_ICONS[cat];
           const catIcon = (s: number, c: string) => {
             switch (cat) {
               case "cafe": return <Coffee size={s} color={c} strokeWidth={2.2} />;
@@ -1230,18 +1258,30 @@ export default function MapScreen() {
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
-              tracksViewChanges={isSelected}
+              tracksViewChanges={markerImagesSettling || isSelected}
               anchor={{ x: 0.5, y: 0.3 }}
             >
               <View style={styles.poiMarkerWrap}>
-                <View style={[
-                  styles.landmarkMarker,
-                  { borderColor: `${catColor}70` },
-                  isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
-                  isChosen && styles.landmarkMarkerChosen,
-                ]}>
-                  {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
-                </View>
+                {badgeSrc ? (
+                  <Image
+                    source={badgeSrc}
+                    style={[
+                      styles.poiBadge,
+                      isSelected && styles.poiBadgeSelected,
+                      isChosen && styles.poiBadgeChosen,
+                    ]}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View style={[
+                    styles.landmarkMarker,
+                    { borderColor: `${catColor}70` },
+                    isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+                    isChosen && styles.landmarkMarkerChosen,
+                  ]}>
+                    {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
+                  </View>
+                )}
                 <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
                 {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
               </View>
@@ -1867,9 +1907,9 @@ export default function MapScreen() {
                   }}
                 >
                   <View style={[styles.searchResultIcon, { borderColor: `${CAT_COLORS[res.category]}55` }]}>
-                    {res.category === "cafe" ? <Coffee size={14} color={CAT_COLORS[res.category]} />
-                      : res.category === "spbu" ? <Fuel size={14} color={CAT_COLORS[res.category]} />
-                      : res.category === "shopping" ? <ShoppingBag size={14} color={CAT_COLORS[res.category]} />
+                    {CAT_ICONS[res.category] ? (
+                      <Image source={CAT_ICONS[res.category]} style={styles.searchResultBadge} resizeMode="contain" />
+                    ) : res.category === "spbu" ? <Fuel size={14} color={CAT_COLORS[res.category]} />
                       : <UtensilsCrossed size={14} color={CAT_COLORS[res.category]} />}
                   </View>
                   <View style={{ flex: 1 }}>
@@ -2222,6 +2262,7 @@ export default function MapScreen() {
                   const catData = (selectedDestination as { type: "cafe"; data: CafePOI }).data;
                   const catColorMap: Record<LandmarkCategory, string> = {
                     cafe: "#D4A574", restaurant: "#E53935", spbu: "#F59E0B", shopping: "#00D4AA",
+                    carwash: "#3B82F6", charging: "#A3E635",
                   };
                   const cc = catColorMap[catData.category];
                   return (
@@ -2603,6 +2644,23 @@ const styles = StyleSheet.create({
   poiMarkerWrap: {
     alignItems: "center",
     maxWidth: 110,
+  },
+  // Neon badge image markers (glow is baked into the PNG)
+  poiBadge: {
+    width: 44,
+    height: 44,
+  },
+  poiBadgeSelected: {
+    width: 58,
+    height: 58,
+  },
+  poiBadgeChosen: {
+    width: 66,
+    height: 66,
+  },
+  searchResultBadge: {
+    width: 24,
+    height: 24,
   },
   poiMarkerName: {
     marginTop: 4,
