@@ -178,3 +178,13 @@ After setting up Supabase, you can:
 3. Add email verification
 4. Create additional tables for towing requests, drivers, etc.
 5. Add real-time subscriptions for live updates
+
+## Feature Migrations
+
+Run these additional SQL migrations in the Supabase SQL Editor to enable
+their features (each is idempotent and safe to re-run):
+
+- `database_migration_saved_routes.sql` — Strava-style route sharing
+- `database_migration_events_realtime.sql` — live drive events
+- `database_migration_daily_quests.sql` — **Daily Quest System** (procedural,
+  rule-based quest engine with XP/coins/badges; see `DAILY_QUEST_SYSTEM.md`)
