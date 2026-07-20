@@ -9,13 +9,14 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  TextInput,
+  Keyboard,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
   Navigation,
-  Crosshair,
   UtensilsCrossed,
   MapPin,
   X,
@@ -38,6 +39,20 @@ import {
   Bookmark,
   Share2,
   ChevronRight,
+  Search,
+  SlidersHorizontal,
+  LocateFixed,
+  Plus,
+  MessageCircle,
+  ChevronDown,
+  Car,
+  Sun,
+  Cloud,
+  CloudRain,
+  CloudSnow,
+  CloudLightning,
+  CloudFog,
+  Check,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -243,6 +258,66 @@ function fmtTimer(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
+/** Featured event header date: "Sun, 19 May • 07:00" */
+function fmtFeaturedDate(iso: string): string {
+  const d = new Date(iso);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} • ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Relative time for the live feed: "2 min ago", "1 hr ago" */
+function fmtAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.max(0, Math.floor(diffMs / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  return `${Math.floor(hrs / 24)} d ago`;
+}
+
+/** Time-of-day greeting */
+function greetingForHour(hour: number): string {
+  if (hour < 5) return "Good night";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** Open-Meteo WMO weather code → icon */
+function WeatherGlyph({ code, size }: { code: number; size: number }) {
+  if (code >= 95) return <CloudLightning size={size} color="#F2C94C" />;
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return <CloudSnow size={size} color="#CFE2FF" />;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return <CloudRain size={size} color="#7FB2F2" />;
+  if (code >= 45 && code <= 48) return <CloudFog size={size} color="#9AA4BC" />;
+  if (code >= 2) return <Cloud size={size} color="#B9C2D8" />;
+  return <Sun size={size} color="#FFD75E" fill="rgba(255, 215, 94, 0.25)" />;
+}
+
+// Neon ring palette for other players on the map (stable per user id)
+const PLAYER_COLORS = ["#22D3EE", "#A78BFA", "#FB923C", "#F472B6", "#FACC15", "#34D399"];
+function playerColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return PLAYER_COLORS[hash % PLAYER_COLORS.length];
+}
+
+const CAT_COLORS: Record<LandmarkCategory, string> = {
+  cafe: "#D4A574",
+  restaurant: "#FF6B6B",
+  spbu: "#F59E0B",
+  shopping: "#00D4AA",
+};
+
+const CAT_LABELS: Record<LandmarkCategory, string> = {
+  cafe: "Cafes",
+  restaurant: "Food",
+  spbu: "Fuel",
+  shopping: "Shops",
+};
+
 // --- Warm Glow Map Style ---
 const MAP_GLOW = [
   { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
@@ -336,6 +411,22 @@ export default function MapScreen() {
   const { user } = useAuth();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [addingFriend, setAddingFriend] = useState(false);
+
+  // ─── HUD chrome state (GTA-style homepage) ───────────────
+  const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null);
+  const [greetingExpanded, setGreetingExpanded] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [visibleCats, setVisibleCats] = useState<Record<LandmarkCategory, boolean>>({
+    cafe: true,
+    restaurant: true,
+    spbu: true,
+    shopping: true,
+  });
+  const [showEventsLayer, setShowEventsLayer] = useState(true);
+  const [showDriversLayer, setShowDriversLayer] = useState(true);
+  const weatherFetchedRef = useRef(false);
 
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
@@ -697,6 +788,28 @@ export default function MapScreen() {
     }).start();
   }, [onlineSlide]);
 
+  // --- Live weather for the greeting pill (Open-Meteo, keyless) ---
+  useEffect(() => {
+    if (!userLocation || weatherFetchedRef.current) return;
+    weatherFetchedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${userLocation.latitude}&longitude=${userLocation.longitude}&current=temperature_2m,weather_code`
+        );
+        const data = await res.json();
+        if (data?.current?.temperature_2m != null) {
+          setWeather({
+            temp: Math.round(data.current.temperature_2m),
+            code: data.current.weather_code ?? 0,
+          });
+        }
+      } catch {
+        // Greeting pill simply renders without a temperature
+      }
+    })();
+  }, [userLocation]);
+
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!user) return;
@@ -986,6 +1099,96 @@ export default function MapScreen() {
   const ROUTE_GLOW = "#FF5252";
   const RECORDED_PATH_COLOR = "#FF2D55";
 
+  // ─── HUD derived data ────────────────────────────────────
+  // Idle = no route/recording/cards open; the full homepage chrome shows only then
+  const hudIdle =
+    !isRecording &&
+    !routeInfo &&
+    !selectedDestination &&
+    !selectedEvent &&
+    !selectedOnlineUser &&
+    recordedPath.length === 0;
+
+  const firstName = (user?.name ?? "Driver").split(" ")[0];
+  const greeting = greetingForHour(new Date().getHours());
+
+  // Featured event for the top banner: live first, else next upcoming
+  const featuredEvent = events.find((e) => e.is_live) ?? events[0] ?? null;
+
+  // Nearest landmark (fills the "trending" slot of the live feed)
+  let nearestPoi: (CafePOI & { dist: number }) | null = null;
+  if (userLocation && cafes.length > 0) {
+    for (const c of cafes) {
+      const d = haversineMeters(userLocation, { latitude: c.lat, longitude: c.lng });
+      if (!nearestPoi || d < nearestPoi.dist) nearestPoi = { ...c, dist: d };
+    }
+  }
+
+  // Live feed rows: live meets → upcoming events → trending landmark
+  type FeedItem = {
+    id: string;
+    color: string;
+    title: string;
+    sub: string;
+    time: string;
+    count?: number;
+    onPress: () => void;
+    icon: React.ReactNode;
+  };
+  const feedItems: FeedItem[] = [];
+  for (const ev of events) {
+    if (feedItems.length >= 3) break;
+    const evColor = eventTypeColor(ev.event_type);
+    feedItems.push({
+      id: `feed-ev-${ev.id}`,
+      color: evColor,
+      title: ev.is_live ? `${ev.host_name} started a meet` : `New event by ${ev.host_name}`,
+      sub: ev.title,
+      time: ev.is_live ? fmtAgo(ev.starts_at) : fmtEventTime(ev.starts_at, false),
+      count: ev.participant_count,
+      icon: <EventTypeIcon type={ev.event_type} size={15} color={evColor} />,
+      onPress: () => {
+        setSelectedEventId(ev.id);
+        mapRef.current?.animateCamera(
+          { center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 },
+          { duration: 600 }
+        );
+      },
+    });
+  }
+  if (feedItems.length < 3 && nearestPoi) {
+    const poi = nearestPoi;
+    feedItems.push({
+      id: `feed-poi-${poi.id}`,
+      color: CAT_COLORS[poi.category],
+      title: `${poi.name} is trending`,
+      sub: "Popular with drivers nearby",
+      time: fmtMeters(Math.round(poi.dist)),
+      icon: <Coffee size={15} color={CAT_COLORS[poi.category]} />,
+      onPress: () => handleCafePress(poi),
+    });
+  }
+
+  // Search results: name match, nearest first
+  const searchResults = searchOpen && searchQuery.trim().length > 0
+    ? cafes
+        .filter((c) => c.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+        .map((c) => ({
+          ...c,
+          dist: userLocation
+            ? haversineMeters(userLocation, { latitude: c.lat, longitude: c.lng })
+            : Number.MAX_SAFE_INTEGER,
+        }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 6)
+    : [];
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    Keyboard.dismiss();
+  };
+
   return (
     <View style={styles.container}>
       {/* --- Map --- */}
@@ -1005,40 +1208,42 @@ export default function MapScreen() {
         onPress={handleMapPress}
         followsUserLocation={false}
       >
-        {/* Landmark Markers — category-based custom icons */}
-        {!isRecording && cafes.map((poi) => {
+        {/* Landmark Markers — icon chip + name + distance label (design spec) */}
+        {!isRecording && cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const cat = poi.category;
-          const catColors: Record<LandmarkCategory, string> = {
-            cafe: "#D4A574",
-            restaurant: "#E53935",
-            spbu: "#F59E0B",
-            shopping: "#00D4AA",
-          };
-          const catColor = catColors[cat];
+          const catColor = CAT_COLORS[cat];
           const catIcon = (s: number, c: string) => {
             switch (cat) {
-              case "cafe": return <Coffee size={s} color={c} strokeWidth={2} />;
-              case "spbu": return <Fuel size={s} color={c} strokeWidth={2} />;
-              case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2} />;
-              default: return <UtensilsCrossed size={s} color={c} strokeWidth={2} />;
+              case "cafe": return <Coffee size={s} color={c} strokeWidth={2.2} />;
+              case "spbu": return <Fuel size={s} color={c} strokeWidth={2.2} />;
+              case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2.2} />;
+              default: return <UtensilsCrossed size={s} color={c} strokeWidth={2.2} />;
             }
           };
           const isChosen = isSelected && locationChosen;
+          const distLabel = userLocation
+            ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
+            : null;
           return (
             <Marker
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
               tracksViewChanges={isSelected}
+              anchor={{ x: 0.5, y: 0.3 }}
             >
-              <View style={[
-                styles.landmarkMarker,
-                { borderColor: `${catColor}60` },
-                isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
-                isChosen && styles.landmarkMarkerChosen,
-              ]}>
-                {catIcon(isChosen ? 19 : isSelected ? 15 : 12, isSelected ? "#EAEAEA" : catColor)}
+              <View style={styles.poiMarkerWrap}>
+                <View style={[
+                  styles.landmarkMarker,
+                  { borderColor: `${catColor}70` },
+                  isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+                  isChosen && styles.landmarkMarkerChosen,
+                ]}>
+                  {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
+                </View>
+                <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
+                {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
               </View>
             </Marker>
           );
@@ -1169,57 +1374,64 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* Online user markers */}
-        {isUserOnline && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => (
-          <Marker
-            key={`online-${onlineUser.user_id}`}
-            coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
-            anchor={{ x: 0.5, y: 0.8 }}
-            onPress={() => setSelectedOnlineUser(onlineUser)}
-            tracksViewChanges={false}
-          >
-            <View style={styles.onlineUserMarker}>
-              <View style={styles.onlineUserAvatar}>
-                {onlineUser.avatar ? (
-                  <Image source={{ uri: onlineUser.avatar }} style={styles.onlineUserAvatarImg} />
-                ) : (
-                  <Text style={styles.onlineUserAvatarText}>
-                    {(onlineUser.name?.[0] ?? "D").toUpperCase()}
-                  </Text>
-                )}
+        {/* Online player markers — neon ring + car + name/level (design spec) */}
+        {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
+          const ringColor = playerColor(onlineUser.user_id);
+          return (
+            <Marker
+              key={`online-${onlineUser.user_id}`}
+              coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
+              anchor={{ x: 0.5, y: 0.35 }}
+              onPress={() => setSelectedOnlineUser(onlineUser)}
+              tracksViewChanges={false}
+            >
+              <View style={styles.playerMarkerWrap}>
+                <View style={[styles.playerRing, { borderColor: ringColor, shadowColor: ringColor }]}>
+                  {onlineUser.avatar ? (
+                    <Image source={{ uri: onlineUser.avatar }} style={styles.playerAvatarImg} />
+                  ) : (
+                    <Car size={15} color={ringColor} strokeWidth={2.2} />
+                  )}
+                </View>
+                <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
+                <Text style={styles.playerLevel}>Lv. {onlineUser.level}</Text>
               </View>
-              <View style={styles.onlineUserLabel}>
-                <Text style={styles.onlineUserLabelText} numberOfLines={1}>
-                  {onlineUser.name}
-                </Text>
-              </View>
-            </View>
-          </Marker>
-        ))}
+            </Marker>
+          );
+        })}
 
-        {/* Event markers */}
-        {!isRecording && events.map((ev) => {
+        {/* Event markers — pin + mini info card (design spec) */}
+        {!isRecording && showEventsLayer && events.map((ev) => {
           const evColor = eventTypeColor(ev.event_type);
           const isSelected = selectedEventId === ev.id;
           return (
             <Marker
               key={`event-${ev.id}`}
               coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
-              anchor={{ x: 0.5, y: 0.5 }}
+              anchor={{ x: 0.5, y: 0.22 }}
               onPress={() => setSelectedEventId(ev.id)}
               tracksViewChanges={isSelected}
             >
-              <View style={styles.eventMarkerWrap}>
-                {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
-                <View style={[
-                  styles.eventMarker,
-                  { borderColor: evColor, shadowColor: evColor },
-                  isSelected && styles.eventMarkerSelected,
-                ]}>
-                  <EventTypeIcon type={ev.event_type} size={isSelected ? 18 : 15} color={evColor} />
+              <View style={styles.eventMarkerColumn}>
+                <View style={styles.eventMarkerWrap}>
+                  {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
+                  <View style={[
+                    styles.eventMarker,
+                    { borderColor: evColor, shadowColor: evColor },
+                    isSelected && styles.eventMarkerSelected,
+                  ]}>
+                    <EventTypeIcon type={ev.event_type} size={isSelected ? 18 : 15} color={evColor} />
+                  </View>
+                  <View style={[styles.eventMarkerBadge, { backgroundColor: evColor }]}>
+                    <Text style={styles.eventMarkerBadgeText}>{ev.participant_count}</Text>
+                  </View>
                 </View>
-                <View style={[styles.eventMarkerBadge, { backgroundColor: evColor }]}>
-                  <Text style={styles.eventMarkerBadgeText}>{ev.participant_count}</Text>
+                <View style={[styles.eventMiniCard, { borderColor: `${evColor}55` }]}>
+                  <Text style={[styles.eventMiniTitle, { color: evColor }]} numberOfLines={1}>{ev.title}</Text>
+                  <Text style={styles.eventMiniMeta} numberOfLines={1}>
+                    {fmtEventTime(ev.starts_at, ev.is_live)}
+                    {ev.location_name ? ` · ${ev.location_name}` : ""}
+                  </Text>
                 </View>
               </View>
             </Marker>
@@ -1235,7 +1447,7 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker — always visible, recording or not */}
+        {/* User car marker — green "You" ring + level label (design spec) */}
         {userLocation && (
           <Marker
             coordinate={userLocation}
@@ -1246,9 +1458,28 @@ export default function MapScreen() {
             <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
               <View style={styles.carGlow} />
               <View style={[styles.carRing, isRecording && styles.carRingRecording]}>
-                <Navigation size={16} color="#FF6B35" fill="#FF6B3525" strokeWidth={2.5} />
+                <Navigation
+                  size={16}
+                  color={isRecording ? "#FF2D55" : "#22C55E"}
+                  fill={isRecording ? "rgba(255,45,85,0.15)" : "rgba(34,197,94,0.15)"}
+                  strokeWidth={2.5}
+                />
               </View>
             </Animated.View>
+          </Marker>
+        )}
+
+        {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
+        {userLocation && !isRecording && (
+          <Marker
+            coordinate={userLocation}
+            anchor={{ x: 0.5, y: -0.35 }}
+            tracksViewChanges={false}
+          >
+            <View style={styles.youLabelWrap}>
+              <Text style={styles.youLabelName}>You</Text>
+              <Text style={styles.youLabelLevel}>Lv. {level}</Text>
+            </View>
           </Marker>
         )}
       </MapView>
@@ -1465,36 +1696,351 @@ export default function MapScreen() {
         );
       })()}
 
-      {/* --- Right-side buttons --- */}
-      {!isRecording && (
-        <Animated.View style={[styles.rightButtons, { top: insets.top + 60, opacity: fadeIn }]}>
-          <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
-            <Crosshair size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+      {/* ===================================================== */}
+      {/*   TOP CHROME — greeting pill + featured event banner   */}
+      {/* ===================================================== */}
+      {!isRecording && !isEventPickMode && !searchOpen && (
+        <Animated.View
+          style={[styles.topChrome, { top: insets.top + 10, opacity: fadeIn }]}
+          pointerEvents="box-none"
+        >
+          {/* Weather / greeting pill */}
           <TouchableOpacity
-            style={[styles.actionBtn, isPickMode && styles.actionBtnActive]}
-            onPress={togglePickMode}
-            activeOpacity={0.7}
+            style={styles.greetingPill}
+            onPress={() => setGreetingExpanded((v) => !v)}
+            activeOpacity={0.85}
           >
-            <MapPin size={18} color={isPickMode ? "#FF6B35" : "#6A6A7E"} />
+            <View style={styles.greetingTempRow}>
+              <WeatherGlyph code={weather?.code ?? 0} size={16} />
+              {weather && <Text style={styles.greetingTemp}>{weather.temp}°</Text>}
+            </View>
+            <Text style={styles.greetingLabel}>{greeting},</Text>
+            <View style={styles.greetingNameRow}>
+              <Text style={styles.greetingName} numberOfLines={1}>{firstName}!</Text>
+              <ChevronDown
+                size={14}
+                color="#8A8A9A"
+                style={greetingExpanded ? { transform: [{ rotate: "180deg" }] } : undefined}
+              />
+            </View>
+            {greetingExpanded && (
+              <Text style={styles.greetingDate}>
+                {fmtFeaturedDate(new Date().toISOString())}
+              </Text>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionBtn, isEventPickMode && styles.actionBtnActive]}
-            onPress={toggleEventPickMode}
-            activeOpacity={0.7}
-          >
-            <Flag size={18} color={isEventPickMode ? "#FF6B35" : "#6A6A7E"} />
-          </TouchableOpacity>
-          {routeInfo && (
-            <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
-              <X size={20} color="#EF4444" />
+
+          {/* Featured event banner */}
+          {featuredEvent && (() => {
+            const fe = featuredEvent;
+            const feColor = eventTypeColor(fe.event_type);
+            return (
+              <TouchableOpacity
+                style={styles.featuredCard}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setSelectedEventId(fe.id);
+                  mapRef.current?.animateCamera(
+                    { center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 },
+                    { duration: 600 }
+                  );
+                }}
+              >
+                <View style={[styles.featuredThumb, { backgroundColor: `${feColor}1E`, borderColor: `${feColor}50` }]}>
+                  <EventTypeIcon type={fe.event_type} size={20} color={feColor} />
+                </View>
+                <View style={styles.featuredInfo}>
+                  <Text style={styles.featuredTitle} numberOfLines={1}>{fe.title}</Text>
+                  <Text style={styles.featuredMeta} numberOfLines={1}>
+                    {fmtFeaturedDate(fe.starts_at)}
+                  </Text>
+                  <View style={styles.featuredLocRow}>
+                    <MapPin size={11} color="#8A8A9A" />
+                    <Text style={styles.featuredLoc} numberOfLines={1}>
+                      {fe.location_name || "On the map"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.featuredBadge}>
+                  <Users size={11} color="#FFFFFF" />
+                  <Text style={styles.featuredBadgeText}>{fe.participant_count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })()}
+        </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   RIGHT COLUMN — Search / My Location / Filters        */}
+      {/* ===================================================== */}
+      {!isRecording && !searchOpen && (
+        <Animated.View style={[styles.rightButtons, { top: insets.top + 10, opacity: fadeIn }]}>
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={[styles.actionBtn, searchOpen && styles.actionBtnActive]}
+              onPress={() => {
+                if (searchOpen) {
+                  closeSearch();
+                } else {
+                  setSearchOpen(true);
+                  setFiltersOpen(false);
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Search size={19} color="#FFFFFF" strokeWidth={2.2} />
             </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Search</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
+              <LocateFixed size={19} color="#FFFFFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>My Location</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={[styles.actionBtn, filtersOpen && styles.actionBtnActive]}
+              onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
+              activeOpacity={0.7}
+            >
+              <SlidersHorizontal size={18} color={filtersOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Filters</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={[styles.actionBtn, isPickMode && styles.actionBtnActive]}
+              onPress={togglePickMode}
+              activeOpacity={0.7}
+            >
+              <MapPin size={18} color={isPickMode ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Drop Pin</Text>
+          </View>
+
+          {routeInfo && (
+            <View style={styles.labeledBtn}>
+              <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
+                <X size={20} color="#EF4444" />
+              </TouchableOpacity>
+              <Text style={styles.actionBtnLabel}>Clear</Text>
+            </View>
           )}
         </Animated.View>
       )}
 
       {/* ===================================================== */}
-      {/*   GO ONLINE CARD — Large prominent button              */}
+      {/*   SEARCH OVERLAY                                       */}
+      {/* ===================================================== */}
+      {searchOpen && !isRecording && (
+        <View style={[styles.searchOverlay, { top: insets.top + 10 }]}>
+          <View style={styles.searchBar}>
+            <Search size={17} color="#8A8A9A" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search places nearby..."
+              placeholderTextColor="#5A5A6E"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              returnKeyType="search"
+            />
+            <TouchableOpacity onPress={closeSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <X size={18} color="#8A8A9A" />
+            </TouchableOpacity>
+          </View>
+          {searchResults.length > 0 && (
+            <View style={styles.searchResults}>
+              {searchResults.map((res) => (
+                <TouchableOpacity
+                  key={res.id}
+                  style={styles.searchResultRow}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    closeSearch();
+                    handleCafePress(res);
+                  }}
+                >
+                  <View style={[styles.searchResultIcon, { borderColor: `${CAT_COLORS[res.category]}55` }]}>
+                    {res.category === "cafe" ? <Coffee size={14} color={CAT_COLORS[res.category]} />
+                      : res.category === "spbu" ? <Fuel size={14} color={CAT_COLORS[res.category]} />
+                      : res.category === "shopping" ? <ShoppingBag size={14} color={CAT_COLORS[res.category]} />
+                      : <UtensilsCrossed size={14} color={CAT_COLORS[res.category]} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.searchResultName} numberOfLines={1}>{res.name}</Text>
+                    {res.vicinity && (
+                      <Text style={styles.searchResultVicinity} numberOfLines={1}>{res.vicinity}</Text>
+                    )}
+                  </View>
+                  {res.dist < Number.MAX_SAFE_INTEGER && (
+                    <Text style={styles.searchResultDist}>{fmtMeters(Math.round(res.dist))}</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   FILTERS POPOVER                                      */}
+      {/* ===================================================== */}
+      {filtersOpen && !isRecording && (
+        <View style={[styles.filtersPopover, { top: insets.top + 150 }]}>
+          <Text style={styles.filtersTitle}>Map Layers</Text>
+          {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => (
+            <TouchableOpacity
+              key={cat}
+              style={styles.filterRow}
+              activeOpacity={0.7}
+              onPress={() => setVisibleCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
+            >
+              <View style={[styles.filterDot, { backgroundColor: CAT_COLORS[cat] }]} />
+              <Text style={styles.filterLabel}>{CAT_LABELS[cat]}</Text>
+              <View style={[styles.filterCheck, visibleCats[cat] && styles.filterCheckOn]}>
+                {visibleCats[cat] && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            style={styles.filterRow}
+            activeOpacity={0.7}
+            onPress={() => setShowEventsLayer((v) => !v)}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#A78BFA" }]} />
+            <Text style={styles.filterLabel}>Events</Text>
+            <View style={[styles.filterCheck, showEventsLayer && styles.filterCheckOn]}>
+              {showEventsLayer && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.filterRow}
+            activeOpacity={0.7}
+            onPress={() => setShowDriversLayer((v) => !v)}
+          >
+            <View style={[styles.filterDot, { backgroundColor: "#22C55E" }]} />
+            <Text style={styles.filterLabel}>Drivers</Text>
+            <View style={[styles.filterCheck, showDriversLayer && styles.filterCheckOn]}>
+              {showDriversLayer && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   LIVE FEED — bottom-left panel                        */}
+      {/* ===================================================== */}
+      {hudIdle && !searchOpen && !isEventPickMode && (
+        <Animated.View
+          style={[styles.liveFeedPanel, { bottom: insets.bottom + 168, opacity: fadeIn }]}
+        >
+          <View style={styles.liveFeedHeader}>
+            <View style={styles.liveFeedTitleRow}>
+              <View style={styles.liveFeedDot} />
+              <Text style={styles.liveFeedTitle}>Live Feed</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                if (events.length > 0) {
+                  mapRef.current?.fitToCoordinates(
+                    events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
+                    { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
+                  );
+                }
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.liveFeedSeeAll}>See All</Text>
+            </TouchableOpacity>
+          </View>
+          {feedItems.length === 0 ? (
+            <Text style={styles.liveFeedEmpty}>
+              No activity yet — create an event and get the city moving.
+            </Text>
+          ) : (
+            feedItems.map((item, i) => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.liveFeedRow, i > 0 && styles.liveFeedRowBorder]}
+                activeOpacity={0.7}
+                onPress={item.onPress}
+              >
+                <View style={[styles.liveFeedIcon, { borderColor: `${item.color}60` }]}>
+                  {item.icon}
+                </View>
+                <View style={styles.liveFeedTextWrap}>
+                  <Text style={styles.liveFeedRowTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={[styles.liveFeedRowSub, { color: item.color }]} numberOfLines={1}>
+                    {item.sub}
+                  </Text>
+                  <Text style={styles.liveFeedRowTime}>{item.time}</Text>
+                </View>
+                {item.count != null && item.count > 0 && (
+                  <View style={[styles.liveFeedCount, { backgroundColor: `${item.color}22` }]}>
+                    <Users size={10} color={item.color} />
+                    <Text style={[styles.liveFeedCountText, { color: item.color }]}>{item.count}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))
+          )}
+        </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   ACTION STACK — Create Event / Convoy / Chat          */}
+      {/* ===================================================== */}
+      {hudIdle && !searchOpen && (
+        <Animated.View
+          style={[styles.actionStack, { bottom: insets.bottom + 168, opacity: fadeIn }]}
+        >
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={[styles.createEventBtn, isEventPickMode && styles.createEventBtnActive]}
+              onPress={toggleEventPickMode}
+              activeOpacity={0.8}
+            >
+              {isEventPickMode ? (
+                <X size={26} color="#FFFFFF" strokeWidth={2.5} />
+              ) : (
+                <Plus size={26} color="#FFFFFF" strokeWidth={2.5} />
+              )}
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>{isEventPickMode ? "Cancel" : "Create Event"}</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={styles.stackBtn}
+              onPress={() => router.push("/(tabs)/drive" as any)}
+              activeOpacity={0.7}
+            >
+              <Users size={20} color="#FFFFFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Convoy</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={styles.stackBtn}
+              onPress={() => router.push("/chat" as any)}
+              activeOpacity={0.7}
+            >
+              <MessageCircle size={20} color="#FFFFFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Chat</Text>
+          </View>
+        </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   ONLINE STATUS BANNER — compact, above the tab bar    */}
       {/* ===================================================== */}
       {!isRecording && !routeInfo && !selectedDestination && recordedPath.length === 0 && (() => {
         const onlineCount = onlineUsers.length;
@@ -1502,68 +2048,76 @@ export default function MapScreen() {
           <Animated.View
             style={[
               styles.onlineBigCard,
-              { paddingBottom: insets.bottom + 90, transform: [{ translateY: onlineSlide }] },
+              { paddingBottom: insets.bottom + 78, transform: [{ translateY: onlineSlide }] },
             ]}
+            pointerEvents="box-none"
           >
             {!user ? (
               /* NOT LOGGED IN — prompt to sign in */
-              <View style={styles.goOnlineBtn}>
-                <View style={styles.goOnlineIconWrap}>
-                  <Users size={22} color="#6A6A7E" />
-                </View>
-                <View style={styles.goOnlineTextWrap}>
-                  <Text style={styles.goOnlineTitle}>Sign In to Go Online</Text>
-                  <Text style={styles.goOnlineSubtitle}>
-                    Create an account to show your location and see other drivers
-                  </Text>
-                </View>
-              </View>
-            ) : !isUserOnline ? (
-              /* OFFLINE — big green "GO ONLINE" button */
-              <TouchableOpacity
-                style={styles.goOnlineBtn}
-                onPress={goOnline}
-                activeOpacity={0.75}
-              >
-                <Animated.View style={[styles.goOnlineIconWrap, { transform: [{ scale: onlinePulse }] }]}>
-                  <View style={styles.goOnlineDot} />
-                </Animated.View>
-                <View style={styles.goOnlineTextWrap}>
-                  <Text style={styles.goOnlineTitle}>Go Online</Text>
-                  <Text style={styles.goOnlineSubtitle}>
-                    Show your location to others on the map
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ) : (
-              /* ONLINE — green glowing card with user count */
-              <View style={styles.onlineActiveCard}>
-                <View style={styles.onlineActiveRow}>
-                  <View style={styles.onlineActiveLeft}>
-                    <Animated.View style={[styles.onlineActiveDot, { transform: [{ scale: onlinePulse }] }]} />
-                    <Text style={styles.onlineActiveTitle}>You're Online</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.goOfflineBtn}
-                    onPress={goOffline}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.goOfflineBtnText}>Go Offline</Text>
-                  </TouchableOpacity>
-                </View>
-                {onlineCount > 0 && (
-                  <View style={styles.onlineCountBadge}>
-                    <Users size={14} color="#22C55E" />
-                    <Text style={styles.onlineCountText}>
-                      {onlineCount} driver{onlineCount !== 1 ? "s" : ""} on the map
+              <View style={[styles.onlineBanner, styles.onlineBannerOffline]}>
+                <View style={styles.onlineBannerLeft}>
+                  <View style={[styles.onlineBannerDot, { backgroundColor: "#6A6A7E" }]} />
+                  <View style={styles.onlineBannerTextWrap}>
+                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>Sign in to go online</Text>
+                    <Text style={styles.onlineBannerSub}>
+                      See other drivers and share your location.
                     </Text>
                   </View>
-                )}
-                {onlineCount === 0 && (
-                  <Text style={styles.onlineEmptyText}>
-                    Your location is visible to others. Waiting for drivers to come online...
-                  </Text>
-                )}
+                </View>
+                <TouchableOpacity
+                  style={styles.onlineBannerBtnGreen}
+                  onPress={() => router.push("/login" as any)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.onlineBannerBtnGreenText}>Sign In</Text>
+                </TouchableOpacity>
+              </View>
+            ) : !isUserOnline ? (
+              /* OFFLINE — compact banner with green Go Online pill */
+              <View style={[styles.onlineBanner, styles.onlineBannerOffline]}>
+                <View style={styles.onlineBannerLeft}>
+                  <View style={[styles.onlineBannerDot, { backgroundColor: "#6A6A7E" }]} />
+                  <View style={styles.onlineBannerTextWrap}>
+                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>You're Offline</Text>
+                    <Text style={styles.onlineBannerSub}>
+                      Hidden from the map. Go online to join the action.
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.onlineBannerBtnGreen}
+                  onPress={goOnline}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.onlineBannerBtnGreenText}>Go Online</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              /* ONLINE — glowing green banner (design spec) */
+              <View style={styles.onlineBanner}>
+                <View style={styles.onlineBannerLeft}>
+                  <Animated.View
+                    style={[
+                      styles.onlineBannerDot,
+                      { backgroundColor: "#22C55E", transform: [{ scale: onlinePulse }] },
+                    ]}
+                  />
+                  <View style={styles.onlineBannerTextWrap}>
+                    <Text style={styles.onlineBannerTitle}>You're Online</Text>
+                    <Text style={styles.onlineBannerSub}>
+                      {onlineCount > 0
+                        ? `Your location is visible to others. ${onlineCount} driver${onlineCount !== 1 ? "s" : ""} on the map.`
+                        : "Your location is visible to others.\nTap to change privacy settings."}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.goOfflineBtn}
+                  onPress={goOffline}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.goOfflineBtnText}>Go Offline</Text>
+                </TouchableOpacity>
               </View>
             )}
           </Animated.View>
@@ -2045,6 +2599,31 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
+  // POI marker label column (icon chip + name + distance)
+  poiMarkerWrap: {
+    alignItems: "center",
+    maxWidth: 110,
+  },
+  poiMarkerName: {
+    marginTop: 4,
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#E8E8F0",
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    maxWidth: 108,
+  },
+  poiMarkerDist: {
+    marginTop: 1,
+    fontSize: 9.5,
+    fontWeight: "600",
+    color: "#9A9AB0",
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   // Car marker
   carMarker: {
     alignItems: "center",
@@ -2055,7 +2634,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "rgba(255, 107, 53, 0.08)",
+    backgroundColor: "rgba(34, 197, 94, 0.1)",
   },
   carRing: {
     width: 34,
@@ -2063,14 +2642,35 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: "#0A0A14",
     borderWidth: 2,
-    borderColor: "#FF6B35",
+    borderColor: "#22C55E",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#FF6B35",
+    shadowColor: "#22C55E",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.45,
     shadowRadius: 14,
     elevation: 10,
+  },
+  // "You / Lv." label under the player's own marker
+  youLabelWrap: {
+    alignItems: "center",
+  },
+  youLabelName: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  youLabelLevel: {
+    fontSize: 9.5,
+    fontWeight: "600",
+    color: "#9A9AB0",
+    marginTop: 1,
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   carRingRecording: {
     borderColor: "#FF2D55",
@@ -2097,9 +2697,10 @@ const styles = StyleSheet.create({
   // Right buttons
   rightButtons: {
     position: "absolute",
-    right: 14,
-    gap: 10,
+    right: 8,
+    gap: 12,
     zIndex: 100,
+    alignItems: "center",
   },
   actionBtn: {
     width: 42,
@@ -2119,6 +2720,435 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 6,
+  },
+  labeledBtn: {
+    alignItems: "center",
+    width: 62,
+  },
+  actionBtnLabel: {
+    marginTop: 4,
+    fontSize: 9,
+    fontWeight: "600",
+    color: "#C0C0CE",
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  // ========================
+  //  TOP CHROME
+  // ========================
+  topChrome: {
+    position: "absolute",
+    left: 14,
+    right: 76,
+    flexDirection: "row",
+    gap: 10,
+    zIndex: 120,
+    alignItems: "flex-start",
+  },
+  greetingPill: {
+    backgroundColor: "rgba(14, 14, 24, 0.92)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minWidth: 108,
+    maxWidth: 140,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  greetingTempRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  greetingTemp: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  greetingLabel: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#8A8A9A",
+    marginTop: 4,
+  },
+  greetingNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  greetingName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    flexShrink: 1,
+  },
+  greetingDate: {
+    fontSize: 9.5,
+    fontWeight: "600",
+    color: "#6A6A7E",
+    marginTop: 6,
+  },
+  featuredCard: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(14, 14, 24, 0.92)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  featuredThumb: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  featuredInfo: {
+    flex: 1,
+  },
+  featuredTitle: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: "#FF9450",
+  },
+  featuredMeta: {
+    fontSize: 10.5,
+    fontWeight: "600",
+    color: "#B0B0C0",
+    marginTop: 2,
+  },
+  featuredLocRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginTop: 2,
+  },
+  featuredLoc: {
+    fontSize: 10.5,
+    fontWeight: "500",
+    color: "#8A8A9A",
+    flexShrink: 1,
+  },
+  featuredBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FF6B35",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: "flex-start",
+  },
+  featuredBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  // ========================
+  //  SEARCH OVERLAY
+  // ========================
+  searchOverlay: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    zIndex: 250,
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.3)",
+    paddingHorizontal: 14,
+    height: 48,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  searchInput: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "500",
+    paddingVertical: 0,
+  },
+  searchResults: {
+    marginTop: 8,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  searchResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  searchResultIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(18, 18, 30, 0.9)",
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  searchResultName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  searchResultVicinity: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#6A6A7E",
+    marginTop: 1,
+  },
+  searchResultDist: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#8A8A9A",
+  },
+  // ========================
+  //  FILTERS POPOVER
+  // ========================
+  filtersPopover: {
+    position: "absolute",
+    right: 78,
+    width: 170,
+    backgroundColor: "rgba(14, 14, 24, 0.97)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    zIndex: 240,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  filtersTitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#6A6A7E",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  filterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingVertical: 7,
+  },
+  filterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  filterLabel: {
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: "#E0E0EA",
+  },
+  filterCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  filterCheckOn: {
+    backgroundColor: "#FF6B35",
+    borderColor: "#FF6B35",
+  },
+  // ========================
+  //  LIVE FEED PANEL
+  // ========================
+  liveFeedPanel: {
+    position: "absolute",
+    left: 14,
+    width: SCREEN_WIDTH * 0.62,
+    maxWidth: 300,
+    backgroundColor: "rgba(14, 14, 24, 0.92)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+    zIndex: 130,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  liveFeedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  liveFeedTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  liveFeedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#22C55E",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  liveFeedTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  liveFeedSeeAll: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#8A8A9A",
+  },
+  liveFeedEmpty: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#6A6A7E",
+    lineHeight: 16,
+    paddingBottom: 8,
+  },
+  liveFeedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+  },
+  liveFeedRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.05)",
+  },
+  liveFeedIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(18, 18, 30, 0.9)",
+    borderWidth: 1.5,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  liveFeedTextWrap: {
+    flex: 1,
+  },
+  liveFeedRowTitle: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#E8E8F0",
+  },
+  liveFeedRowSub: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  liveFeedRowTime: {
+    fontSize: 9.5,
+    fontWeight: "500",
+    color: "#6A6A7E",
+    marginTop: 1,
+  },
+  liveFeedCount: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  liveFeedCountText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  // ========================
+  //  ACTION STACK (Create Event / Convoy / Chat)
+  // ========================
+  actionStack: {
+    position: "absolute",
+    right: 8,
+    alignItems: "center",
+    gap: 12,
+    zIndex: 130,
+  },
+  createEventBtn: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  createEventBtnActive: {
+    backgroundColor: "#E5502A",
+  },
+  stackBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(18, 18, 30, 0.92)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
   },
   // ========================
   //  RECORD BUTTON
@@ -2763,7 +3793,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
   },
-  // ─── GO ONLINE CARD ──────────────────────────────────
+  // ─── ONLINE STATUS BANNER ────────────────────────────
   onlineBigCard: {
     position: "absolute",
     bottom: 0,
@@ -2771,176 +3801,133 @@ const styles = StyleSheet.create({
     right: 12,
     zIndex: 155,
   },
-  goOnlineBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-    backgroundColor: "rgba(16, 24, 20, 0.97)",
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "rgba(34, 197, 94, 0.35)",
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 12,
-  },
-  goOnlineIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(34, 197, 94, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(34, 197, 94, 0.4)",
-  },
-  goOnlineDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#22C55E",
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  goOnlineTextWrap: {
-    flex: 1,
-  },
-  goOnlineTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 0.5,
-  },
-  goOnlineSubtitle: {
-    fontSize: 12,
-    color: "#6A8A7A",
-    fontWeight: "500",
-    marginTop: 3,
-  },
-  // ─── ONLINE ACTIVE CARD ──────────────────────────────
-  onlineActiveCard: {
-    backgroundColor: "rgba(16, 24, 20, 0.97)",
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "rgba(34, 197, 94, 0.3)",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    elevation: 10,
-  },
-  onlineActiveRow: {
+  onlineBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+    backgroundColor: "rgba(12, 22, 16, 0.94)",
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "rgba(34, 197, 94, 0.4)",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
   },
-  onlineActiveLeft: {
+  onlineBannerOffline: {
+    backgroundColor: "rgba(16, 16, 26, 0.94)",
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+  },
+  onlineBannerLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 11,
+    flex: 1,
   },
-  onlineActiveDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#22C55E",
+  onlineBannerDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
     shadowColor: "#22C55E",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowRadius: 7,
+    elevation: 5,
   },
-  onlineActiveTitle: {
-    fontSize: 17,
+  onlineBannerTextWrap: {
+    flex: 1,
+  },
+  onlineBannerTitle: {
+    fontSize: 15,
     fontWeight: "800",
     color: "#22C55E",
     letterSpacing: 0.3,
+  },
+  onlineBannerSub: {
+    fontSize: 10.5,
+    fontWeight: "500",
+    color: "#8FA89A",
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  onlineBannerBtnGreen: {
+    backgroundColor: "#22C55E",
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 12,
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  onlineBannerBtnGreenText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#06130B",
   },
   goOfflineBtn: {
     backgroundColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.12)",
   },
   goOfflineBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "700",
-    color: "#A0A0B0",
+    color: "#E0E0EA",
   },
-  onlineCountBadge: {
-    flexDirection: "row",
+  // ─── Online player markers on map ────────────────────
+  playerMarkerWrap: {
     alignItems: "center",
-    gap: 8,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(34, 197, 94, 0.12)",
+    maxWidth: 96,
   },
-  onlineCountText: {
-    fontSize: 13,
-    color: "#CCCCCC",
-    fontWeight: "600",
-  },
-  onlineEmptyText: {
-    fontSize: 11,
-    color: "#4A5A4E",
-    fontWeight: "500",
-    marginTop: 10,
-    textAlign: "center",
-  },
-  // ─── Online user markers on map ──────────────────────
-  onlineUserMarker: {
-    alignItems: "center",
-  },
-  onlineUserAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#22C55E",
+  playerRing: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(10, 10, 20, 0.95)",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2.5,
-    borderColor: "#0A0A14",
-    shadowColor: "#22C55E",
+    borderWidth: 2,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.55,
     shadowRadius: 10,
     elevation: 8,
+    overflow: "hidden",
   },
-  onlineUserAvatarText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
+  playerAvatarImg: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
   },
-  onlineUserAvatarImg: {
-    width: 31,
-    height: 31,
-    borderRadius: 16,
+  playerName: {
+    marginTop: 4,
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#E8E8F0",
+    textAlign: "center",
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    maxWidth: 92,
   },
-  onlineUserLabel: {
-    marginTop: 3,
-    backgroundColor: "rgba(10, 10, 20, 0.9)",
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 5,
-    maxWidth: 80,
-    borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.2)",
-  },
-  onlineUserLabelText: {
-    fontSize: 9,
+  playerLevel: {
+    marginTop: 1,
+    fontSize: 9.5,
     fontWeight: "600",
-    color: "#DDDDDD",
+    color: "#9A9AB0",
+    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   // ─── Online user profile card ─────────────────────────
   onlineUserCard: {
@@ -3049,11 +4036,35 @@ const styles = StyleSheet.create({
   // ========================
   //  EVENTS
   // ========================
+  eventMarkerColumn: {
+    alignItems: "center",
+    maxWidth: 170,
+  },
   eventMarkerWrap: {
     alignItems: "center",
     justifyContent: "center",
     width: 52,
     height: 52,
+  },
+  eventMiniCard: {
+    marginTop: 2,
+    backgroundColor: "rgba(14, 14, 24, 0.94)",
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    maxWidth: 168,
+    alignItems: "center",
+  },
+  eventMiniTitle: {
+    fontSize: 10.5,
+    fontWeight: "800",
+  },
+  eventMiniMeta: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: "#9A9AB0",
+    marginTop: 1,
   },
   eventMarkerLiveRing: {
     position: "absolute",
