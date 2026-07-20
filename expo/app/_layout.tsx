@@ -14,6 +14,7 @@ import { ChatContext } from "@/hooks/useChatStore";
 import { NotificationContext } from "@/hooks/useNotificationStore";
 import { RealtimeContext } from "@/hooks/useRealtimeStore";
 import { XPProvider } from "@/hooks/useXPStore";
+import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
 import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
@@ -92,16 +93,18 @@ export default function RootLayout() {
                       <NotificationContext>
                         <ChatContext>
                         <XPProvider>
-                          <OnlineUsersProvider>
-                            <EventsProvider>
-                              <RoutesProvider>
-                                <ActiveCarProvider>
-                                  <RootLayoutNav />
-                                  <NotificationBanner />
-                                </ActiveCarProvider>
-                              </RoutesProvider>
-                            </EventsProvider>
-                          </OnlineUsersProvider>
+                          <QuestsProvider>
+                            <OnlineUsersProvider>
+                              <EventsProvider>
+                                <RoutesProvider>
+                                  <ActiveCarProvider>
+                                    <RootLayoutNav />
+                                    <NotificationBanner />
+                                  </ActiveCarProvider>
+                                </RoutesProvider>
+                              </EventsProvider>
+                            </OnlineUsersProvider>
+                          </QuestsProvider>
                         </XPProvider>
                       </ChatContext>
                       </NotificationContext>

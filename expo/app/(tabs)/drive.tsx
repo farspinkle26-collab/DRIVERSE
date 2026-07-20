@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,16 +22,47 @@ import {
   Store,
   AlertTriangle,
   ChevronRight,
-  Star,
   Trophy,
   MapPin,
   Clock,
   Flame,
-  X,
   Route,
+  Sunrise,
+  Camera,
+  Fuel,
+  Mountain,
+  Moon,
+  Zap,
+  Flag,
+  Compass,
+  Award,
+  Medal,
+  Gem,
+  Coins,
+  Check,
+  Sparkles,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useQuests } from "@/hooks/useQuestStore";
+import {
+  DIFFICULTY_TIERS,
+  progressPercent,
+  progressLabel,
+  isComplete,
+  type DailyQuest,
+} from "@/lib/questEngine";
+
+// Map the icon-name strings stored on templates/badges to components.
+type IconCmp = React.FC<{ size: number; color: string }>;
+const QUEST_ICONS: Record<string, IconCmp> = {
+  Flame, MapPin, Route, Car, Coffee, Sunrise, Camera, Fuel, Mountain,
+  Moon, Zap, Users, Flag, Compass, Swords, Trophy, Award, Medal, Gem,
+  Coins, Star: Sparkles,
+};
+function questIcon(name: string): IconCmp {
+  return QUEST_ICONS[name] ?? Flame;
+}
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
@@ -122,35 +154,108 @@ const DRIVE_FEATURES: DriveFeature[] = [
   },
 ];
 
-const ACTIVE_QUESTS = [
-  {
-    id: "q1",
-    title: "Night Cruiser",
-    description: "Drive 50 km between 8PM–2AM",
-    progress: 0.65,
-    reward: "250 XP",
-    icon: Flame,
-    color: "#FF6B35",
-  },
-  {
-    id: "q2",
-    title: "Scenic Explorer",
-    description: "Visit 3 scenic route markers",
-    progress: 0.33,
-    reward: "150 XP",
-    icon: MapPin,
-    color: "#00D4AA",
-  },
-  {
-    id: "q3",
-    title: "Speed Demon",
-    description: "Complete 10 highway sprints",
-    progress: 0.8,
-    reward: "500 XP",
-    icon: Flame,
-    color: "#FF3B6F",
-  },
-];
+// ─── Live daily quest card ───────────────────────────────────────────
+function QuestCard({
+  quest,
+  onClaim,
+}: {
+  quest: DailyQuest;
+  onClaim: (q: DailyQuest) => void;
+}) {
+  const Icon = questIcon(quest.icon);
+  const tier = DIFFICULTY_TIERS[quest.difficulty];
+  const done = quest.status === "completed";
+  const ready = quest.status === "active" && isComplete(quest);
+  const pct = progressPercent(quest);
+
+  return (
+    <View style={styles.questCard}>
+      <LinearGradient
+        colors={[quest.accent_color + "15", "transparent"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.questGradient}
+      />
+      <View style={styles.questHeader}>
+        <View style={[styles.questIcon, { backgroundColor: quest.accent_color + "20" }]}>
+          <Icon size={18} color={quest.accent_color} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={styles.questTitleRow}>
+            <Text style={styles.questTitle}>{quest.title}</Text>
+            <View style={[styles.diffPill, { backgroundColor: tier.color + "22" }]}>
+              <Text style={[styles.diffPillText, { color: tier.color }]}>
+                {tier.label}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.questDesc}>{quest.description}</Text>
+        </View>
+      </View>
+
+      {/* Reward row */}
+      <View style={styles.rewardRow}>
+        <View style={styles.rewardChip}>
+          <Sparkles size={12} color="#FBBF24" />
+          <Text style={styles.rewardChipText}>{quest.xp_reward} XP</Text>
+        </View>
+        <View style={styles.rewardChip}>
+          <Coins size={12} color="#FFD700" />
+          <Text style={styles.rewardChipText}>{quest.coin_reward}</Text>
+        </View>
+        {quest.badge_id ? (
+          <View style={styles.rewardChip}>
+            <Award size={12} color="#A855F7" />
+            <Text style={styles.rewardChipText}>Badge</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Progress bar */}
+      <View style={styles.progressBar}>
+        <Animated.View
+          style={[
+            styles.progressFill,
+            {
+              width: `${done ? 100 : pct}%`,
+              backgroundColor: done ? "#22C55E" : quest.accent_color,
+            },
+          ]}
+        />
+      </View>
+
+      <View style={styles.questFooterRow}>
+        <Text style={styles.progressText}>
+          {done ? "Completed" : progressLabel(quest)}
+        </Text>
+        {done ? (
+          <View style={styles.doneBadge}>
+            <Check size={12} color="#22C55E" />
+            <Text style={styles.doneBadgeText}>Claimed</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.claimButton,
+              { backgroundColor: ready ? "#22C55E" : quest.accent_color + "22" },
+            ]}
+            onPress={() => onClaim(quest)}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.claimButtonText,
+                { color: ready ? "#FFFFFF" : quest.accent_color },
+              ]}
+            >
+              {ready ? "Claim Reward" : "Mark Complete"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
 
 const UPCOMING_EVENTS = [
   {
@@ -178,6 +283,38 @@ export default function DriveScreen() {
   const [activeView, setActiveView] = useState<"features" | "quests" | "events">("features");
   const scrollY = useRef(new Animated.Value(0)).current;
   const [sheetExpanded, setSheetExpanded] = useState(true);
+
+  const {
+    quests,
+    allDone,
+    coins,
+    streak,
+    loading: questsLoading,
+    generating: questsGenerating,
+    generateQuests,
+    completeQuest,
+  } = useQuests();
+
+  const handleClaimQuest = useCallback(
+    async (quest: DailyQuest) => {
+      const { result, error } = await completeQuest(quest.id);
+      if (error) {
+        Alert.alert("Quest", error);
+        return;
+      }
+      if (result?.awarded) {
+        const badgeNote =
+          result.new_badges.length > 0
+            ? `\nNew badge${result.new_badges.length > 1 ? "s" : ""} unlocked!`
+            : "";
+        Alert.alert(
+          "Quest Complete! 🏁",
+          `+${result.xp_reward} XP · +${result.coin_reward} coins${badgeNote}`
+        );
+      }
+    },
+    [completeQuest]
+  );
 
   const handleFeaturePress = (feature: DriveFeature) => {
     if (feature.route) {
@@ -276,47 +413,53 @@ export default function DriveScreen() {
         {/* Active quests */}
         {activeView === "quests" && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Active Quests</Text>
-            <Text style={styles.sectionSubtitle}>
-              Complete quests to earn XP and unlock rewards
-            </Text>
-            {ACTIVE_QUESTS.map((quest) => (
-              <View key={quest.id} style={styles.questCard}>
-                <LinearGradient
-                  colors={[quest.color + "15", "transparent"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.questGradient}
-                />
-                <View style={styles.questHeader}>
-                  <View style={[styles.questIcon, { backgroundColor: quest.color + "20" }]}>
-                    <quest.icon size={18} color={quest.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.questTitle}>{quest.title}</Text>
-                    <Text style={styles.questDesc}>{quest.description}</Text>
-                  </View>
-                  <Text style={[styles.questReward, { color: quest.color }]}>
-                    {quest.reward}
-                  </Text>
-                </View>
-                {/* Progress bar */}
-                <View style={styles.progressBar}>
-                  <Animated.View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${quest.progress * 100}%`,
-                        backgroundColor: quest.color,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.progressText}>
-                  {Math.round(quest.progress * 100)}% complete
+            <View style={styles.questsHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>Daily Quests</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Refreshes every 24h · earn XP, coins & badges
                 </Text>
               </View>
-            ))}
+              <View style={styles.statPills}>
+                <View style={styles.statPill}>
+                  <Coins size={13} color="#FFD700" />
+                  <Text style={styles.statPillText}>{coins}</Text>
+                </View>
+                <View style={styles.statPill}>
+                  <Flame size={13} color="#FF6B35" />
+                  <Text style={styles.statPillText}>{streak}d</Text>
+                </View>
+              </View>
+            </View>
+
+            {questsLoading && quests.length === 0 ? (
+              <Text style={styles.questEmpty}>
+                {questsGenerating ? "Generating today's quests…" : "Loading quests…"}
+              </Text>
+            ) : quests.length === 0 ? (
+              <TouchableOpacity
+                style={styles.generateButton}
+                onPress={() => generateQuests()}
+                activeOpacity={0.8}
+              >
+                <Sparkles size={16} color="#FFFFFF" />
+                <Text style={styles.generateButtonText}>Generate Daily Quests</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                {quests.map((quest) => (
+                  <QuestCard key={quest.id} quest={quest} onClaim={handleClaimQuest} />
+                ))}
+                {allDone && (
+                  <View style={styles.allDoneBanner}>
+                    <Trophy size={16} color="#FBBF24" />
+                    <Text style={styles.allDoneText}>
+                      All quests complete! New ones arrive tomorrow.
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
           </View>
         )}
 
@@ -503,6 +646,130 @@ const styles = StyleSheet.create({
   questReward: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  // Quests header (coins / streak)
+  questsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+  statPills: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  statPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  statPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  questTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  diffPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  diffPillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  rewardRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  rewardChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  rewardChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#C9C9D4",
+  },
+  questFooterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
+  claimButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  claimButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  doneBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  doneBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#22C55E",
+  },
+  questEmpty: {
+    fontSize: 13,
+    color: "#8A8A9A",
+    paddingVertical: 20,
+    textAlign: "center",
+  },
+  generateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FF6B35",
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  generateButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  allDoneBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(251, 191, 36, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.2)",
+    padding: 14,
+    borderRadius: 14,
+    marginTop: 4,
+  },
+  allDoneText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#FBBF24",
+    flex: 1,
   },
   progressBar: {
     height: 4,
