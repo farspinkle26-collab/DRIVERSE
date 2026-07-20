@@ -52,7 +52,6 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
-import { useTabNavigation } from "./_layout";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -114,7 +113,6 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
   const { level, xp, xpProgress, xpCurrentLevel, xpRequired, totalXp, addXP } = useXP();
-  const { setActiveTab: switchTab } = useTabNavigation();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("garage");
 
@@ -414,7 +412,7 @@ export default function ProfileScreen() {
         style: "destructive",
         onPress: async () => {
           const success = await logout();
-          if (success) switchTab("map");
+          if (success) router.push("/(tabs)/map" as any);
         },
       },
     ]);

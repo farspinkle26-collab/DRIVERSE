@@ -30,7 +30,6 @@ import {
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useTabNavigation } from "./_layout";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
@@ -165,7 +164,6 @@ const UPCOMING_EVENTS = [
 export default function DriveScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { setActiveTab: switchTab } = useTabNavigation();
   const insets = useSafeAreaInsets();
   const [activeView, setActiveView] = useState<"features" | "quests" | "events">("features");
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -182,7 +180,7 @@ export default function DriveScreen() {
   };
 
   const handleNavigateMap = (_feature: DriveFeature) => {
-    switchTab("map");
+    router.push("/(tabs)/map" as any);
   };
 
   const sheetTranslateY = scrollY.interpolate({
