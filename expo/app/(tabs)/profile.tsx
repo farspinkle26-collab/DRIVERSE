@@ -52,6 +52,7 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
+import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -113,6 +114,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
   const { level, xp, xpProgress, xpCurrentLevel, xpRequired, totalXp, addXP } = useXP();
+  const { activeCar } = useActiveCar();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("garage");
 
@@ -511,6 +513,21 @@ export default function ProfileScreen() {
 
           <Text style={styles.userName}>{user?.name ?? "Driver"}</Text>
           <Text style={styles.userTitle}>{levelTitle(level)}</Text>
+
+          {/* Now driving — tap to switch car in the garage picker */}
+          {activeCar && (
+            <TouchableOpacity
+              style={styles.nowDrivingChip}
+              onPress={() => router.push("/select-car" as any)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.nowDrivingDot, { backgroundColor: activeCar.color }]} />
+              <Text style={styles.nowDrivingText} numberOfLines={1}>
+                Driving <Text style={styles.nowDrivingName}>{activeCar.name}</Text>
+              </Text>
+              <ChevronRight size={14} color="#8A8A9A" />
+            </TouchableOpacity>
+          )}
 
           {/* XP Progress bar */}
           <View style={styles.xpSection}>
@@ -1157,7 +1174,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#FF6B35",
     fontWeight: "600",
+    marginBottom: 12,
+  },
+  nowDrivingChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 20,
+    paddingLeft: 12,
+    paddingRight: 8,
+    paddingVertical: 7,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    maxWidth: "80%",
+  },
+  nowDrivingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  nowDrivingText: {
+    fontSize: 13,
+    color: "#8A8A9A",
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  nowDrivingName: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
   xpSection: {
     width: "100%",

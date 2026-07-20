@@ -16,6 +16,7 @@ import { RealtimeContext } from "@/hooks/useRealtimeStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
+import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
@@ -33,6 +34,7 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={darkScreenOptions}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="select-car" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="request-tow" />
       <Stack.Screen name="request-details" />
@@ -91,8 +93,10 @@ export default function RootLayout() {
                           <OnlineUsersProvider>
                             <EventsProvider>
                               <RoutesProvider>
-                                <RootLayoutNav />
-                                <NotificationBanner />
+                                <ActiveCarProvider>
+                                  <RootLayoutNav />
+                                  <NotificationBanner />
+                                </ActiveCarProvider>
                               </RoutesProvider>
                             </EventsProvider>
                           </OnlineUsersProvider>
