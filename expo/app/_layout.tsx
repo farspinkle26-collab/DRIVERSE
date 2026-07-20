@@ -16,6 +16,7 @@ import { RealtimeContext } from "@/hooks/useRealtimeStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
+import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 
@@ -48,6 +49,8 @@ function RootLayoutNav() {
       <Stack.Screen name="chat" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="routes" options={{ headerShown: false }} />
+      <Stack.Screen name="route/[id]" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -87,8 +90,10 @@ export default function RootLayout() {
                         <XPProvider>
                           <OnlineUsersProvider>
                             <EventsProvider>
-                              <RootLayoutNav />
-                              <NotificationBanner />
+                              <RoutesProvider>
+                                <RootLayoutNav />
+                                <NotificationBanner />
+                              </RoutesProvider>
                             </EventsProvider>
                           </OnlineUsersProvider>
                         </XPProvider>

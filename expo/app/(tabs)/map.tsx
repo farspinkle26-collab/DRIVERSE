@@ -34,7 +34,11 @@ import {
   Flag,
   Crown,
   LogOut,
+  Bookmark,
+  Share2,
 } from "lucide-react-native";
+import { useRouter } from "expo-router";
+import SaveRouteModal from "@/components/SaveRouteModal";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
@@ -265,6 +269,7 @@ const MAP_GLOW = [
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
+  const router = useRouter();
 
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -297,7 +302,10 @@ export default function MapScreen() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [tripHistory, setTripHistory] = useState<TripRecord[]>([]); // past trips
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h during recording
+  const [tripTopSpeed, setTripTopSpeed] = useState(0); // max km/h reached this trip
   const [routeSplitIdx, setRouteSplitIdx] = useState<number | null>(null); // index where user crossed on route polyline
+  // Save & Share Route modal
+  const [showSaveRoute, setShowSaveRoute] = useState(false);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const lastCoordTimeRef = useRef<number>(0);
@@ -537,6 +545,7 @@ export default function MapScreen() {
                   const speedKmh = (dist / 1000) / (timeDeltaSec / 3600);
                   if (speedKmh < 200) {
                     setCurrentSpeed(speedKmh);
+                    setTripTopSpeed((m) => Math.max(m, speedKmh));
                   }
                 }
               }
@@ -871,6 +880,7 @@ export default function MapScreen() {
     setWasFaster(false);
     setLeveledUp(false);
     setCurrentSpeed(0);
+    setTripTopSpeed(0);
     setRouteSplitIdx(null);
     lastCoordRef.current = userLocation;
     lastCoordTimeRef.current = now;
@@ -1431,6 +1441,25 @@ export default function MapScreen() {
               <View style={[styles.levelBarFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]} />
             </View>
           </View>
+
+          {/* Save & Share this route (Strava-style) */}
+          <View style={styles.saveRouteRow}>
+            <TouchableOpacity
+              style={styles.saveRouteBtn}
+              onPress={() => setShowSaveRoute(true)}
+              activeOpacity={0.85}
+            >
+              <Bookmark size={17} color="#FFFFFF" />
+              <Text style={styles.saveRouteBtnText}>Save & Share Route</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.myRoutesBtn}
+              onPress={() => router.push("/routes" as any)}
+              activeOpacity={0.7}
+            >
+              <Share2 size={17} color="#FF6B35" />
+            </TouchableOpacity>
+          </View>
         </View>
         );
       })()}
@@ -1864,6 +1893,29 @@ export default function MapScreen() {
           setEventCoordinate(null);
         }}
         onCreated={handleEventCreated}
+      />
+
+      {/* --- Save & Share Route modal --- */}
+      <SaveRouteModal
+        visible={showSaveRoute}
+        onClose={() => setShowSaveRoute(false)}
+        path={recordedPath}
+        distanceMeters={tripDistance}
+        durationSeconds={elapsedMs / 1000}
+        avgSpeedKmh={
+          elapsedMs > 0 ? (tripDistance / 1000) / (elapsedMs / 1000 / 3600) : 0
+        }
+        topSpeedKmh={tripTopSpeed}
+        xpEarned={xpEarned ?? 0}
+        originName="Current Location"
+        destinationName={
+          selectedDestination?.type === "cafe"
+            ? selectedDestination.data.name
+            : selectedDestination?.type === "location"
+            ? "Dropped Pin"
+            : ""
+        }
+        onSaved={(routeId) => router.push(`/route/${routeId}` as any)}
       />
     </View>
   );
@@ -2385,6 +2437,36 @@ const styles = StyleSheet.create({
     height: 6,
     backgroundColor: "#FF6B35",
     borderRadius: 3,
+  },
+  saveRouteRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  saveRouteBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "#FF6B35",
+  },
+  saveRouteBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  myRoutesBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,107,53,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,107,53,0.3)",
   },
   levelUpText: {
     fontSize: 13,
