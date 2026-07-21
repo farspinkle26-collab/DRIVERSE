@@ -63,15 +63,8 @@ import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 
-const TRIP_MAP_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-];
+// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
+const TRIP_MAP_STYLE: any[] = [];
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
