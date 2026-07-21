@@ -62,8 +62,24 @@ import {
   CloudLightning,
   CloudFog,
   Check,
+  CornerUpRight,
+  CornerUpLeft,
+  ArrowUpRight,
+  ArrowUpLeft,
+  ArrowUp,
+  RotateCcw,
+  RefreshCw,
+  Navigation,
+  Pause,
+  Play,
+  Camera,
+  Star,
+  Leaf,
+  Mountain,
+  ChevronUp,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
+import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
@@ -142,6 +158,67 @@ interface RouteInfo {
   distanceMeters: number;
   durationMin: string;
   durationSeconds: number;
+}
+
+// A single turn-by-turn maneuver parsed from the Google Directions leg.steps[]
+interface RouteStep {
+  maneuver: string;
+  instruction: string;
+  street: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  // Distance from the start of the route through the END of this step —
+  // lets us find "which step am I on" from the odometer alone.
+  cumulativeMeters: number;
+}
+
+function stripHtmlTags(s: string): string {
+  return s.replace(/<[^>]*>/g, "");
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"');
+}
+
+/** Directions API steps give html_instructions like "Turn <b>right</b> onto <b>Jl. Foo</b>" */
+function parseStepHtml(html: string): { instruction: string; street: string } {
+  const decoded = decodeHtmlEntities(html ?? "");
+  const bMatches = [...decoded.matchAll(/<b>(.*?)<\/b>/g)].map((m) => stripHtmlTags(m[1]));
+  const street = bMatches.length > 0 ? bMatches[bMatches.length - 1] : "";
+  const instruction = stripHtmlTags(decoded).replace(/\s+/g, " ").trim();
+  return { instruction, street };
+}
+
+/** Google Directions maneuver enum -> icon + short display label */
+function maneuverMeta(maneuver: string): { Icon: typeof ArrowUp; label: string } {
+  switch (maneuver) {
+    case "turn-right": return { Icon: CornerUpRight, label: "Turn Right" };
+    case "turn-left": return { Icon: CornerUpLeft, label: "Turn Left" };
+    case "turn-slight-right": return { Icon: ArrowUpRight, label: "Bear Right" };
+    case "turn-slight-left": return { Icon: ArrowUpLeft, label: "Bear Left" };
+    case "turn-sharp-right": return { Icon: CornerUpRight, label: "Sharp Right" };
+    case "turn-sharp-left": return { Icon: CornerUpLeft, label: "Sharp Left" };
+    case "uturn-right":
+    case "uturn-left": return { Icon: RotateCcw, label: "U-Turn" };
+    case "roundabout-right":
+    case "roundabout-left": return { Icon: RefreshCw, label: "Roundabout" };
+    case "merge": return { Icon: ArrowUpRight, label: "Merge" };
+    case "fork-left": return { Icon: ArrowUpLeft, label: "Keep Left" };
+    case "fork-right": return { Icon: ArrowUpRight, label: "Keep Right" };
+    case "ramp-left": return { Icon: ArrowUpLeft, label: "Take Ramp Left" };
+    case "ramp-right": return { Icon: ArrowUpRight, label: "Take Ramp Right" };
+    default: return { Icon: ArrowUp, label: "Continue Straight" };
+  }
+}
+
+function fmtThousands(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 interface TripRecord {
@@ -317,6 +394,11 @@ function playerColor(id: string): string {
   return PLAYER_COLORS[hash % PLAYER_COLORS.length];
 }
 
+// NOTE: no speed-limit data source is wired up anywhere in this app (no Roads
+// API, no OSM tags) — this is a fixed placeholder purely to match the driving
+// HUD mockup visually. Do not treat it as a real regulatory speed limit.
+const PLACEHOLDER_SPEED_LIMIT_KMH = 50;
+
 const CAT_COLORS: Record<LandmarkCategory, string> = {
   cafe: "#D4A574",
   restaurant: "#FF6B6B",
@@ -472,6 +554,21 @@ export default function MapScreen() {
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h during recording
   const [tripTopSpeed, setTripTopSpeed] = useState(0); // max km/h reached this trip
   const [routeSplitIdx, setRouteSplitIdx] = useState<number | null>(null); // index where user crossed on route polyline
+  // Turn-by-turn steps parsed from the last fetched Directions route
+  const [routeSteps, setRouteSteps] = useState<RouteStep[]>([]);
+  // Driving-mode HUD extras
+  const [isPaused, setIsPaused] = useState(false);
+  const [nearbyExpanded, setNearbyExpanded] = useState(false);
+  const [smoothScore, setSmoothScore] = useState(100);
+  const [scenicBonusAwarded, setScenicBonusAwarded] = useState(false);
+  const [showScenicToast, setShowScenicToast] = useState(false);
+  const [photoToast, setPhotoToast] = useState<string | null>(null);
+  const isPausedRef = useRef(false);
+  const pauseStartRef = useRef<number>(0);
+  const pausedAccumRef = useRef<number>(0);
+  const speedSamplesRef = useRef<number[]>([]);
+  const photoToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scenicToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Save & Share Route modal
   const [showSaveRoute, setShowSaveRoute] = useState(false);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -498,7 +595,7 @@ export default function MapScreen() {
   const [leveledUp, setLeveledUp] = useState(false);
 
   // XP system
-  const { level, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
+  const { level, totalXp, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
 
   // Online users system
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
@@ -664,6 +761,23 @@ export default function MapScreen() {
             durationMin: fmtDuration(estSecs),
             durationSeconds: estSecs,
           });
+
+          // Parse turn-by-turn steps for the driving-mode instruction card
+          let cumulative = 0;
+          const steps: RouteStep[] = (leg.steps ?? []).map((s: { maneuver?: string; html_instructions?: string; distance?: { value: number }; duration?: { value: number } }) => {
+            cumulative += s.distance?.value ?? 0;
+            const { instruction, street } = parseStepHtml(s.html_instructions ?? "");
+            return {
+              maneuver: s.maneuver ?? "straight",
+              instruction,
+              street,
+              distanceMeters: s.distance?.value ?? 0,
+              durationSeconds: s.duration?.value ?? 0,
+              cumulativeMeters: cumulative,
+            };
+          });
+          setRouteSteps(steps);
+
           mapRef.current?.fitToCoordinates(coords, {
             edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
             animated: true,
@@ -682,6 +796,7 @@ export default function MapScreen() {
   useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { routeInfoRef.current = routeInfo; }, [routeInfo]);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -742,7 +857,8 @@ export default function MapScreen() {
             }
 
             // --- Recording: append new coordinate, update distance, calculate speed ---
-            if (isRecordingRef.current) {
+            // (paused trips keep the GPS sub alive but freeze distance/time/speed accrual)
+            if (isRecordingRef.current && !isPausedRef.current) {
               const now = Date.now();
               // Capture the previous fix before setRecordedPath overwrites the ref,
               // so we can derive travel direction for the chase camera.
@@ -768,6 +884,22 @@ export default function MapScreen() {
                   if (speedKmh < 200) {
                     setCurrentSpeed(speedKmh);
                     setTripTopSpeed((m) => Math.max(m, speedKmh));
+
+                    // --- "Smooth Drive" score: penalize harsh accel/braking ---
+                    // Derived from real telemetry (rolling avg of |speed delta|
+                    // between samples) — not a fabricated number, just a simple
+                    // heuristic since there's no accelerometer feed to draw on.
+                    const samples = speedSamplesRef.current;
+                    samples.push(speedKmh);
+                    if (samples.length > 25) samples.shift();
+                    if (samples.length >= 2) {
+                      let deltaSum = 0;
+                      for (let i = 1; i < samples.length; i++) {
+                        deltaSum += Math.abs(samples[i] - samples[i - 1]);
+                      }
+                      const avgDelta = deltaSum / (samples.length - 1);
+                      setSmoothScore(Math.max(0, Math.min(100, Math.round(100 - avgDelta * 6))));
+                    }
                   }
                 }
               }
@@ -841,11 +973,12 @@ export default function MapScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Recording timer ---
+  // --- Recording timer --- (stops ticking while paused; pausedAccumRef keeps the
+  // elapsed clock continuous across a pause/resume cycle)
   useEffect(() => {
-    if (isRecording && tripStartMs != null) {
+    if (isRecording && !isPaused && tripStartMs != null) {
       recordTimerRef.current = setInterval(() => {
-        setElapsedMs(Date.now() - tripStartMs);
+        setElapsedMs(Date.now() - tripStartMs - pausedAccumRef.current);
       }, 200);
     } else {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
@@ -853,7 +986,42 @@ export default function MapScreen() {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     };
-  }, [isRecording, tripStartMs]);
+  }, [isRecording, isPaused, tripStartMs]);
+
+  // --- Pause / resume handler ---
+  const togglePause = useCallback(() => {
+    setIsPaused((prev) => {
+      const next = !prev;
+      if (next) {
+        pauseStartRef.current = Date.now();
+      } else {
+        pausedAccumRef.current += Date.now() - pauseStartRef.current;
+      }
+      return next;
+    });
+  }, []);
+
+  // --- Record button: snap a quick photo of the drive ---
+  const captureDrivePhoto = useCallback(async () => {
+    try {
+      const { status } = await ImagePickerExpo.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Camera permission needed", "Allow camera access to capture drive photos.");
+        return;
+      }
+      const result = await ImagePickerExpo.launchCameraAsync({
+        mediaTypes: ImagePickerExpo.MediaTypeOptions.Images,
+        quality: 0.7,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        if (photoToastTimerRef.current) clearTimeout(photoToastTimerRef.current);
+        setPhotoToast("Photo captured!");
+        photoToastTimerRef.current = setTimeout(() => setPhotoToast(null), 2200);
+      }
+    } catch {
+      Alert.alert("Camera error", "Could not open the camera.");
+    }
+  }, []);
 
   // --- Pulse animation for record button (always subtle, stronger during recording) ---
   useEffect(() => {
@@ -1061,6 +1229,7 @@ export default function MapScreen() {
     setTripStartMs(null);
     setRouteSplitIdx(null);
     setXpEarned(null);
+    setRouteSteps([]);
   }, []);
 
   // --- Toggle pick mode ---
@@ -1174,6 +1343,15 @@ export default function MapScreen() {
     setCurrentSpeed(0);
     setTripTopSpeed(0);
     setRouteSplitIdx(null);
+    setIsPaused(false);
+    setSmoothScore(100);
+    setScenicBonusAwarded(false);
+    setShowScenicToast(false);
+    setPhotoToast(null);
+    isPausedRef.current = false;
+    pauseStartRef.current = 0;
+    pausedAccumRef.current = 0;
+    speedSamplesRef.current = [];
     lastCoordRef.current = userLocation;
     lastCoordTimeRef.current = now;
     navHeadingRef.current = heading;
@@ -1256,7 +1434,7 @@ export default function MapScreen() {
         distance_km: tripDistance / 1000,
         duration_seconds: Math.round(actualDurationSec),
         avg_speed_kmh: avgSpeed,
-        top_speed_kmh: currentSpeed,
+        top_speed_kmh: tripTopSpeed,
         estimated_duration_seconds: Math.round(estSec),
         xp_earned: xpEarned ?? 10,
         was_faster_than_estimation: wasFaster,
@@ -1268,7 +1446,7 @@ export default function MapScreen() {
     }
 
     // Keep path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, xpEarned, wasFaster]);
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster]);
 
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
@@ -1287,6 +1465,96 @@ export default function MapScreen() {
   // cards must yield to it instead of stacking on top and burying its
   // Save & Share / XP buttons.
   const showTripSummary = !isRecording && recordedPath.length > 1 && tripDistance > 0;
+
+  // ─── Driving-mode HUD derived data ───────────────────────
+  // Which turn-by-turn step is the driver currently on, found by comparing
+  // the trip odometer against each step's cumulative distance-from-start.
+  const activeStepIdx = (() => {
+    if (routeSteps.length === 0) return 0;
+    for (let i = 0; i < routeSteps.length; i++) {
+      if (tripDistance < routeSteps[i].cumulativeMeters) return i;
+    }
+    return routeSteps.length - 1;
+  })();
+  const activeStep: RouteStep | null = routeSteps[activeStepIdx] ?? null;
+  const stepDistanceRemaining = activeStep ? Math.max(0, activeStep.cumulativeMeters - tripDistance) : 0;
+  const stepProgress = activeStep && activeStep.distanceMeters > 0
+    ? Math.min(1, Math.max(0, 1 - stepDistanceRemaining / activeStep.distanceMeters))
+    : 0;
+  const stepDurationRemaining = activeStep && activeStep.distanceMeters > 0
+    ? activeStep.durationSeconds * (stepDistanceRemaining / activeStep.distanceMeters)
+    : 0;
+
+  // Overall trip progress along the planned route
+  const tripPercent = routeInfo && routeInfo.distanceMeters > 0
+    ? Math.min(100, Math.round((tripDistance / routeInfo.distanceMeters) * 100))
+    : 0;
+
+  // Live average speed so far this trip
+  const liveAvgSpeed = elapsedMs > 0 ? (tripDistance / 1000) / ((elapsedMs / 1000) / 3600) : 0;
+
+  // Live projected XP: applies the same faster-than-estimate formula stopRecording()
+  // uses at the end, but against a projected finish time based on progress so far —
+  // a real (if approximate) running total rather than a placeholder number.
+  const liveXpEarned = (() => {
+    if (!routeInfo || tripDistance <= 0 || elapsedMs <= 0) return 0;
+    const fractionDone = Math.min(1, tripDistance / routeInfo.distanceMeters);
+    if (fractionDone <= 0) return 0;
+    const projectedTotalSec = (elapsedMs / 1000) / fractionDone;
+    const estimatedSec = routeInfo.durationSeconds;
+    if (projectedTotalSec < estimatedSec) {
+      const timeDiff = estimatedSec - projectedTotalSec;
+      const ratio = Math.min(timeDiff / estimatedSec, 1);
+      return 50 + Math.round(ratio * 200);
+    }
+    return 25;
+  })();
+
+  // Nearest POI per category — same haversine approach as `nearestPoi` below,
+  // fixed to the 4 categories the driving HUD's "Nearby" card shows.
+  const nearestOfCategory = (cat: LandmarkCategory): (CafePOI & { dist: number }) | null => {
+    if (!userLocation) return null;
+    let best: (CafePOI & { dist: number }) | null = null;
+    for (const c of cafes) {
+      if (c.category !== cat) continue;
+      const d = haversineMeters(userLocation, { latitude: c.lat, longitude: c.lng });
+      if (!best || d < best.dist) best = { ...c, dist: d };
+    }
+    return best;
+  };
+  const nearbyCafe = nearestOfCategory("cafe") ?? nearestOfCategory("restaurant");
+  const nearbyWorkshop = nearestOfCategory("workshop");
+  const nearbyFuel = nearestOfCategory("spbu");
+  let nearbyMeet: (DriveEvent & { dist: number }) | null = null;
+  if (userLocation) {
+    for (const e of events) {
+      const d = haversineMeters(userLocation, { latitude: e.latitude, longitude: e.longitude });
+      if (!nearbyMeet || d < nearbyMeet.dist) nearbyMeet = { ...e, dist: d };
+    }
+  }
+
+  // Nearest other online player (for the "Jason Lv.34 600m" style card)
+  let nearestFriend: (OnlineUser & { dist: number }) | null = null;
+  if (userLocation) {
+    for (const ou of onlineUsers) {
+      const d = haversineMeters(userLocation, { latitude: ou.latitude, longitude: ou.longitude });
+      if (!nearestFriend || d < nearestFriend.dist) nearestFriend = { ...ou, dist: d };
+    }
+  }
+
+  // One-time "Scenic Road" bonus toast partway through a sufficiently long
+  // drive. There's no real scenic-route detection in this app (no terrain/
+  // greenery signal to draw on) — this is a lightweight gamification flourish,
+  // not a claim about the actual road. The XP it awards is real (via addXP).
+  useEffect(() => {
+    if (isRecording && !isPaused && !scenicBonusAwarded && tripDistance > 3000) {
+      setScenicBonusAwarded(true);
+      setShowScenicToast(true);
+      addXP(40);
+      if (scenicToastTimerRef.current) clearTimeout(scenicToastTimerRef.current);
+      scenicToastTimerRef.current = setTimeout(() => setShowScenicToast(false), 4000);
+    }
+  }, [isRecording, isPaused, scenicBonusAwarded, tripDistance, addXP]);
 
   // ─── HUD derived data ────────────────────────────────────
   // Idle = no route/recording/cards open; the full homepage chrome shows only then
@@ -1761,69 +2029,316 @@ export default function MapScreen() {
       {/*   RECORDING HUD — Live stats card                     */}
       {/* ===================================================== */}
       {isRecording && (
-        <Animated.View
-          style={[
-            styles.recordingCard,
-            { paddingBottom: insets.bottom + 90, transform: [{ translateY: recSlide }] },
-          ]}
-        >
-          {/* Stop button */}
-          <TouchableOpacity style={styles.stopBtn} onPress={stopRecording} activeOpacity={0.7}>
-            <Square size={18} color="#FFFFFF" fill="#FFFFFF" />
-            <Text style={styles.stopBtnText}>STOP</Text>
-          </TouchableOpacity>
-
-          {/* Stats */}
-          <View style={styles.recordingStats}>
-            {/* Distance */}
-            <View style={styles.recordingStat}>
-              <View style={styles.recordingStatIcon}>
-                <Route size={18} color={RECORD_RED} />
+        <>
+          {/* --- Top-left: profile pill (avatar, level, lifetime XP) --- */}
+          <View style={[styles.drivingProfilePill, { top: insets.top + 10 }]} pointerEvents="none">
+            {user?.profilePicture ? (
+              <Image source={{ uri: user.profilePicture }} style={styles.drivingProfileAvatar} />
+            ) : (
+              <View style={styles.drivingProfileAvatarFallback}>
+                <Text style={styles.drivingProfileAvatarText}>{firstName[0]?.toUpperCase()}</Text>
               </View>
-              <View>
-                <Text style={styles.recordingStatLabel}>Distance</Text>
-                <Text style={styles.recordingStatValue}>{fmtMeters(tripDistance)}</Text>
-              </View>
+            )}
+            <View>
+              <Text style={styles.drivingProfileLevel}>LV. {level}</Text>
+              <Text style={styles.drivingProfileXp}>{fmtThousands(totalXp)} XP</Text>
             </View>
+          </View>
 
-            <View style={styles.recordingDivider} />
+          {/* --- Top-left: turn-by-turn instruction card --- */}
+          {activeStep && (() => {
+            const { Icon: TurnIcon, label } = maneuverMeta(activeStep.maneuver);
+            return (
+              <View style={[styles.turnCard, { top: insets.top + 66 }]}>
+                <View style={styles.turnCardTopRow}>
+                  <View style={styles.turnIconBox}>
+                    <TurnIcon size={26} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.turnTextCol}>
+                    <View style={styles.turnDistanceRow}>
+                      <Text style={styles.turnDistanceText}>
+                        {stepDistanceRemaining < 1000 ? Math.round(stepDistanceRemaining) : (stepDistanceRemaining / 1000).toFixed(1)}
+                      </Text>
+                      <Text style={styles.turnMetersUnit}>{stepDistanceRemaining < 1000 ? "m" : "km"}</Text>
+                    </View>
+                    <Text style={styles.turnInstructionText} numberOfLines={1}>{label}</Text>
+                    {!!activeStep.street && (
+                      <Text style={styles.turnStreetText} numberOfLines={1}>{activeStep.street}</Text>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.turnProgressTrack}>
+                  <View style={[styles.turnProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                </View>
+                <View style={styles.turnBottomRow}>
+                  <Text style={styles.turnBottomText}>{fmtMeters(stepDistanceRemaining)}</Text>
+                  <Text style={styles.turnBottomText}>{fmtDuration(Math.round(stepDurationRemaining))}</Text>
+                </View>
+              </View>
+            );
+          })()}
 
-            {/* Time */}
-            <View style={styles.recordingStat}>
-              <View style={styles.recordingStatIcon}>
-                <Timer size={18} color="#F59E0B" />
-              </View>
-              <View>
-                <Text style={styles.recordingStatLabel}>Time</Text>
-                <Text style={styles.recordingStatValue}>{fmtTimer(elapsedMs)}</Text>
-              </View>
+          {/* --- Top-right: speed limit sign + compass --- */}
+          <View style={[styles.topRightCluster, { top: insets.top + 10 }]}>
+            <View style={styles.speedLimitSign}>
+              <Text style={styles.speedLimitNumber}>{PLACEHOLDER_SPEED_LIMIT_KMH}</Text>
+              <Text style={styles.speedLimitUnit}>km/h</Text>
             </View>
+            <TouchableOpacity
+              style={styles.compassBtn}
+              activeOpacity={0.7}
+              onPress={() => {
+                if (userLocation) {
+                  mapRef.current?.animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
+                }
+              }}
+            >
+              <Navigation size={20} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.recordingDivider} />
-
-            {/* Current Speed */}
-            <View style={styles.recordingStat}>
-              <View style={styles.recordingStatSpeedIcon}>
-                <TrendingUp size={18} color="#3B82F6" />
+          {/* --- Top-right: Nearby card --- */}
+          <View style={[styles.nearbyCard, { top: insets.top + 78 }]}>
+            <Text style={styles.nearbyHeaderText}>NEARBY</Text>
+            {nearbyCafe && (
+              <View style={styles.nearbyRow}>
+                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.cafe}22` }]}>
+                  <Coffee size={14} color={CAT_COLORS.cafe} />
+                </View>
+                <View>
+                  <Text style={styles.nearbyLabel}>Coffee</Text>
+                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyCafe.dist)}</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.recordingStatLabel}>Speed</Text>
-                <View style={styles.speedRow}>
-                  <Text style={styles.recordingStatValue}>{currentSpeed.toFixed(0)}</Text>
-                  <Text style={styles.speedUnit}>km/h</Text>
+            )}
+            {nearbyWorkshop && (
+              <View style={styles.nearbyRow}>
+                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.workshop}22` }]}>
+                  <Wrench size={14} color={CAT_COLORS.workshop} />
+                </View>
+                <View>
+                  <Text style={styles.nearbyLabel}>Workshop</Text>
+                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyWorkshop.dist)}</Text>
+                </View>
+              </View>
+            )}
+            {nearbyMeet && (
+              <View style={styles.nearbyRow}>
+                <View style={[styles.nearbyIconBox, { backgroundColor: "#3B82F622" }]}>
+                  <Car size={14} color="#3B82F6" />
+                </View>
+                <View>
+                  <Text style={styles.nearbyLabel}>Car Meet</Text>
+                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyMeet.dist)}</Text>
+                </View>
+              </View>
+            )}
+            {nearbyFuel && (
+              <View style={styles.nearbyRow}>
+                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.spbu}22` }]}>
+                  <Fuel size={14} color={CAT_COLORS.spbu} />
+                </View>
+                <View>
+                  <Text style={styles.nearbyLabel}>Fuel</Text>
+                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyFuel.dist)}</Text>
+                </View>
+              </View>
+            )}
+            {nearbyExpanded && (
+              <>
+                {(() => {
+                  const second = nearestOfCategory("restaurant");
+                  return second && second.id !== nearbyCafe?.id ? (
+                    <View style={styles.nearbyRow}>
+                      <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.restaurant}22` }]}>
+                        <UtensilsCrossed size={14} color={CAT_COLORS.restaurant} />
+                      </View>
+                      <View>
+                        <Text style={styles.nearbyLabel}>Food</Text>
+                        <Text style={styles.nearbyDist}>{fmtMeters(second.dist)}</Text>
+                      </View>
+                    </View>
+                  ) : null;
+                })()}
+                {(() => {
+                  const charging = nearestOfCategory("charging");
+                  return charging ? (
+                    <View style={styles.nearbyRow}>
+                      <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.charging}22` }]}>
+                        <Zap size={14} color={CAT_COLORS.charging} />
+                      </View>
+                      <View>
+                        <Text style={styles.nearbyLabel}>Charging</Text>
+                        <Text style={styles.nearbyDist}>{fmtMeters(charging.dist)}</Text>
+                      </View>
+                    </View>
+                  ) : null;
+                })()}
+              </>
+            )}
+            <TouchableOpacity
+              style={styles.nearbyChevronBtn}
+              onPress={() => setNearbyExpanded((v) => !v)}
+              activeOpacity={0.7}
+            >
+              {nearbyExpanded ? <ChevronUp size={16} color="#6A6A7E" /> : <ChevronDown size={16} color="#6A6A7E" />}
+            </TouchableOpacity>
+          </View>
+
+          {/* --- Left column: gamification stack --- */}
+          <View style={[styles.achievementStack, { top: insets.top + 240 }]} pointerEvents="box-none">
+            <View style={styles.achievementCard}>
+              <View style={styles.achievementIconBox}>
+                <Leaf size={16} color="#22C55E" />
+              </View>
+              <View style={styles.achievementTextCol}>
+                <Text style={styles.achievementTitle}>Smooth Drive</Text>
+                <Text style={styles.achievementValue}>{smoothScore} Score</Text>
+                <View style={styles.achievementProgressTrack}>
+                  <View style={[styles.achievementProgressFill, { width: `${smoothScore}%` }]} />
                 </View>
               </View>
             </View>
+
+            {liveXpEarned > 0 && (
+              <View style={styles.achievementCard}>
+                <View style={[styles.achievementIconBox, { backgroundColor: "rgba(250, 204, 21, 0.12)" }]}>
+                  <Star size={16} color="#FACC15" fill="#FACC15" />
+                </View>
+                <Text style={styles.achievementInlineText}>XP +{liveXpEarned}</Text>
+              </View>
+            )}
+
+            {showScenicToast && (
+              <View style={styles.achievementCard}>
+                <View style={[styles.achievementIconBox, { backgroundColor: "rgba(167, 139, 250, 0.12)" }]}>
+                  <Mountain size={16} color="#A78BFA" />
+                </View>
+                <View>
+                  <Text style={styles.achievementTitle}>Scenic Road</Text>
+                  <Text style={[styles.achievementValue, { color: "#A78BFA" }]}>+40 XP</Text>
+                </View>
+              </View>
+            )}
+
+            {nearestFriend && (
+              <View style={styles.friendCard}>
+                {nearestFriend.avatar ? (
+                  <Image source={{ uri: nearestFriend.avatar }} style={styles.friendAvatar} />
+                ) : (
+                  <View style={[styles.friendAvatarFallback, { backgroundColor: playerColor(nearestFriend.user_id) }]}>
+                    <Text style={styles.drivingProfileAvatarText}>{nearestFriend.name[0]?.toUpperCase()}</Text>
+                  </View>
+                )}
+                <View>
+                  <Text style={styles.friendName}>{nearestFriend.name}</Text>
+                  <Text style={styles.friendMeta}>Lv. {nearestFriend.level} · {fmtMeters(nearestFriend.dist)}</Text>
+                </View>
+              </View>
+            )}
           </View>
 
-          {/* Recording indicator dot */}
-          <View style={styles.recordingIndicator}>
-            <Animated.View
-              style={[styles.recordingDot, { transform: [{ scale: recPulse }] }]}
-            />
-            <Text style={styles.recordingIndicatorText}>Recording</Text>
-          </View>
-        </Animated.View>
+          {/* --- Photo captured toast --- */}
+          {photoToast && (
+            <View style={[styles.photoToastPill, { top: insets.top + 10 }]} pointerEvents="none">
+              <Camera size={14} color="#FFFFFF" />
+              <Text style={styles.photoToastText}>{photoToast}</Text>
+            </View>
+          )}
+
+          {/* --- Bottom sheet: speedometer, progress, actions, stats --- */}
+          <Animated.View
+            style={[
+              styles.recordingCard,
+              { paddingBottom: insets.bottom + 90, transform: [{ translateY: recSlide }] },
+            ]}
+          >
+            {/* Floating speedometer, overlaps the map above the sheet */}
+            <View style={styles.speedometerWrap}>
+              <View style={styles.speedometerRing}>
+                <Text style={styles.speedometerValue}>{currentSpeed.toFixed(0)}</Text>
+                <Text style={styles.speedometerUnit}>km/h</Text>
+                <View style={styles.speedometerGearRow}>
+                  <Circle size={8} color="#22C55E" fill="#22C55E" />
+                  <Text style={styles.speedometerGearText}>D</Text>
+                </View>
+              </View>
+              {isPaused && (
+                <View style={styles.pausedBadge}>
+                  <Text style={styles.pausedBadgeText}>PAUSED</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Trip progress */}
+            {routeInfo && (
+              <View style={styles.progressSection}>
+                <Text style={styles.progressPercentText}>{tripPercent}%</Text>
+                <Text style={styles.progressPercentLabel}>COMPLETED</Text>
+                <View style={styles.progressTrackWrap}>
+                  <View style={styles.progressTrackLine} />
+                  <View style={[styles.progressTrackFill, { width: `${tripPercent}%` }]} />
+                  <View style={[styles.progressDot, styles.progressDotStart]} />
+                  <View style={[styles.progressDot, styles.progressDotYou, { left: `${tripPercent}%` }]} />
+                  <Flag size={14} color="#8A8A9A" style={styles.progressFlag} />
+                </View>
+                <View style={styles.progressLabelsRow}>
+                  <Text style={styles.progressLabelText}>START</Text>
+                  <Text style={[styles.progressLabelText, styles.progressLabelYou]}>YOU</Text>
+                  <Text style={styles.progressLabelText}>DESTINATION</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Action row: Pause / End Drive / Record */}
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.drivingActionBtn} onPress={togglePause} activeOpacity={0.7}>
+                <View style={styles.actionBtnCircle}>
+                  {isPaused ? <Play size={20} color="#FFFFFF" fill="#FFFFFF" /> : <Pause size={20} color="#FFFFFF" fill="#FFFFFF" />}
+                </View>
+                <Text style={styles.drivingActionBtnLabel}>{isPaused ? "RESUME" : "PAUSE"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.drivingActionBtn} onPress={stopRecording} activeOpacity={0.7}>
+                <View style={styles.actionBtnCircleBig}>
+                  <Square size={22} color="#FFFFFF" fill="#FFFFFF" />
+                </View>
+                <Text style={styles.drivingActionBtnLabel}>END DRIVE</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.drivingActionBtn} onPress={captureDrivePhoto} activeOpacity={0.7}>
+                <View style={styles.actionBtnCircle}>
+                  <Camera size={20} color="#FFFFFF" />
+                </View>
+                <Text style={styles.drivingActionBtnLabel}>RECORD</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Stats row */}
+            <View style={styles.drivingStatsRow}>
+              <View style={styles.drivingStatCol}>
+                <Text style={styles.drivingStatLabel}>Distance</Text>
+                <Text style={styles.drivingStatValue}>{fmtMeters(tripDistance)}</Text>
+              </View>
+              <View style={styles.drivingStatCol}>
+                <Text style={styles.drivingStatLabel}>Time</Text>
+                <Text style={styles.drivingStatValue}>{fmtTimer(elapsedMs)}</Text>
+              </View>
+              <View style={styles.drivingStatCol}>
+                <Text style={styles.drivingStatLabel}>Avg Speed</Text>
+                <Text style={styles.drivingStatValue}>{liveAvgSpeed.toFixed(0)}</Text>
+              </View>
+              <View style={styles.drivingStatCol}>
+                <Text style={styles.drivingStatLabel}>Max Speed</Text>
+                <Text style={styles.drivingStatValue}>{tripTopSpeed.toFixed(0)}</Text>
+              </View>
+              <View style={styles.drivingStatCol}>
+                <Text style={styles.drivingStatLabel}>XP Earned</Text>
+                <Text style={[styles.drivingStatValue, { color: "#FACC15" }]}>+{liveXpEarned}</Text>
+              </View>
+            </View>
+          </Animated.View>
+        </>
       )}
 
       {/* Trip Summary */}
@@ -3490,114 +4005,521 @@ const styles = StyleSheet.create({
     right: 12,
     zIndex: 150,
   },
-  recordingStats: {
+  // --- Top-left profile pill ---
+  drivingProfilePill: {
+    position: "absolute",
+    left: 12,
+    zIndex: 160,
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(14, 14, 24, 0.9)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  drivingProfileAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: "#FF6B35",
+  },
+  drivingProfileAvatarFallback: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: "#FF6B35",
+    backgroundColor: "#2A2A45",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  drivingProfileAvatarText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  drivingProfileLevel: {
+    color: "#FF9F55",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  drivingProfileXp: {
+    color: "#8A8A9A",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  // --- Turn-by-turn instruction card ---
+  turnCard: {
+    position: "absolute",
+    left: 12,
+    width: 220,
+    zIndex: 155,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255, 45, 85, 0.2)",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 12,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
-    marginBottom: 10,
-  },
-  recordingStat: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  recordingStatIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255, 45, 85, 0.08)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  recordingStatSpeedIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(59, 130, 246, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  speedRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 3,
-    marginTop: 2,
-  },
-  speedUnit: {
-    fontSize: 11,
-    color: "#6A6A7E",
-    fontWeight: "600",
-  },
-  recordingStatLabel: {
-    fontSize: 11,
-    color: "#6A6A7E",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  recordingStatValue: {
-    fontSize: 16,
-    color: "#FFFFFF",
-    fontWeight: "800",
-  },
-  recordingDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginHorizontal: 8,
-  },
-  stopBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: RECORD_RED,
-    paddingHorizontal: 24,
-    paddingVertical: 13,
-    borderRadius: 14,
-    alignSelf: "center",
-    marginBottom: 10,
-    shadowColor: RECORD_RED,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 10,
   },
-  stopBtnText: {
+  turnCardTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  turnIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 107, 53, 0.16)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  turnTextCol: {
+    flex: 1,
+  },
+  turnDistanceRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 3,
+  },
+  turnDistanceText: {
     color: "#FFFFFF",
-    fontSize: 14,
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  turnMetersUnit: {
+    color: "#8A8A9A",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  turnInstructionText: {
+    color: "#FF9F55",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  turnStreetText: {
+    color: "#8A8A9A",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  turnProgressTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginTop: 10,
+    overflow: "hidden",
+  },
+  turnProgressFill: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#FF6B35",
+  },
+  turnBottomRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  turnBottomText: {
+    color: "#6A6A7E",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  // --- Speed limit + compass ---
+  topRightCluster: {
+    position: "absolute",
+    right: 12,
+    zIndex: 155,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  speedLimitSign: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 4,
+    borderColor: "#E53935",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  speedLimitNumber: {
+    color: "#111111",
+    fontSize: 17,
+    fontWeight: "800",
+    lineHeight: 19,
+  },
+  speedLimitUnit: {
+    color: "#111111",
+    fontSize: 8,
+    fontWeight: "700",
+  },
+  compassBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(14, 14, 24, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // --- Nearby POI card ---
+  nearbyCard: {
+    position: "absolute",
+    right: 12,
+    width: 140,
+    zIndex: 150,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 10,
+    gap: 8,
+  },
+  nearbyHeaderText: {
+    color: "#6A6A7E",
+    fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1,
   },
-  recordingIndicator: {
+  nearbyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  nearbyIconBox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  nearbyLabel: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  nearbyDist: {
+    color: "#6A6A7E",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  nearbyChevronBtn: {
+    alignSelf: "center",
+    paddingTop: 2,
+  },
+  // --- Left column gamification stack ---
+  achievementStack: {
+    position: "absolute",
+    left: 12,
+    width: 148,
+    zIndex: 150,
+    gap: 8,
+  },
+  achievementCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 10,
+  },
+  achievementIconBox: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  achievementTextCol: {
+    flex: 1,
+  },
+  achievementTitle: {
+    color: "#8A8A9A",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  achievementValue: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 1,
+  },
+  achievementProgressTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  achievementProgressFill: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#22C55E",
+  },
+  achievementInlineText: {
+    color: "#FACC15",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  friendCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: 8,
+  },
+  friendAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  friendAvatarFallback: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  friendName: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  friendMeta: {
+    color: "#8A8A9A",
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 1,
+  },
+  // --- Photo captured toast ---
+  photoToastPill: {
+    position: "absolute",
+    alignSelf: "center",
+    left: 0,
+    right: 0,
+    zIndex: 200,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 6,
+    gap: 6,
+    marginHorizontal: 80,
+    backgroundColor: "rgba(34, 197, 94, 0.95)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  recordingDot: {
+  photoToastText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  // --- Floating speedometer ---
+  speedometerWrap: {
+    position: "absolute",
+    top: -78,
+    right: 4,
+    alignItems: "center",
+  },
+  speedometerRing: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderWidth: 4,
+    borderColor: "#E53935",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  speedometerValue: {
+    color: "#FFFFFF",
+    fontSize: 30,
+    fontWeight: "800",
+    lineHeight: 34,
+  },
+  speedometerUnit: {
+    color: "#6A6A7E",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  speedometerGearRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  speedometerGearText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  pausedBadge: {
+    marginTop: 6,
+    backgroundColor: "#F59E0B",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pausedBadgeText: {
+    color: "#141420",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  // --- Trip progress ---
+  progressSection: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  progressPercentText: {
+    color: "#E53935",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  progressPercentLabel: {
+    color: "#6A6A7E",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  progressTrackWrap: {
+    width: "100%",
+    height: 14,
+    justifyContent: "center",
+  },
+  progressTrackLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+  },
+  progressTrackFill: {
+    position: "absolute",
+    left: 0,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#E53935",
+  },
+  progressDot: {
+    position: "absolute",
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: RECORD_RED,
   },
-  recordingIndicatorText: {
-    color: RECORD_RED,
-    fontSize: 12,
-    fontWeight: "600",
-    letterSpacing: 1,
+  progressDotStart: {
+    left: 0,
+    backgroundColor: "#8A8A9A",
+    marginLeft: -4,
+  },
+  progressDotYou: {
+    backgroundColor: "#E53935",
+    marginLeft: -4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  progressFlag: {
+    position: "absolute",
+    right: -2,
+  },
+  progressLabelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginTop: 4,
+  },
+  progressLabelText: {
+    color: "#6A6A7E",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  progressLabelYou: {
+    color: "#E53935",
+  },
+  // --- Action row ---
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  drivingActionBtn: {
+    alignItems: "center",
+    gap: 6,
+  },
+  actionBtnCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  actionBtnCircleBig: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: RECORD_RED,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: RECORD_RED,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  drivingActionBtnLabel: {
+    color: "#8A8A9A",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  // --- Stats row ---
+  drivingStatsRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(14, 14, 24, 0.96)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 12,
+  },
+  drivingStatCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+  drivingStatLabel: {
+    color: "#6A6A7E",
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  drivingStatValue: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 3,
   },
   // ========================
   //  TRIP SUMMARY
