@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 const ACTIVE_CAR_KEY = "driveverse_active_car";
 
 // ─── Types ─────────────────────────────────────────────────
+export type CarCategory = "sport" | "jdm" | "daily" | "ev";
+
 export interface GarageCar {
   id: string;
   name: string;
@@ -19,6 +21,9 @@ export interface GarageCar {
   license_plate: string;
   is_primary: boolean;
   photo_url?: string | null;
+  category: CarCategory;
+  drivetrain: string;
+  accel_0_100: string;
 }
 
 /**
@@ -131,6 +136,9 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
       year?: string;
       color?: string;
       hp?: number;
+      category?: CarCategory;
+      drivetrain?: string;
+      accel_0_100?: string;
     }): Promise<{ id?: string; error?: string }> => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in" };
@@ -146,6 +154,9 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
           color_name: "Custom",
           hp: input.hp ?? 300,
           mileage_km: 0,
+          category: input.category ?? "daily",
+          drivetrain: input.drivetrain ?? "RWD",
+          accel_0_100: input.accel_0_100 ?? "",
         })
         .select("id")
         .single();

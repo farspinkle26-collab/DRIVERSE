@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -10,6 +10,8 @@ import {
   TextInput,
   Platform,
   Image,
+  Alert,
+  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -17,15 +19,26 @@ import { useRouter } from "expo-router";
 import {
   Car,
   Gauge,
-  Navigation,
+  Rocket,
+  Grid2x2,
   Crown,
   ChevronRight,
   Plus,
   LogIn,
   Sparkles,
+  TrendingUp,
+  Trophy,
+  Flag,
+  Zap,
+  MoreHorizontal,
+  Route as RouteIcon,
+  MapPin,
+  Hexagon,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useActiveCar, GarageCar } from "@/hooks/useActiveCarStore";
+import { useActiveCar, GarageCar, CarCategory } from "@/hooks/useActiveCarStore";
+import { useXP } from "@/hooks/useXPStore";
+import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.76);
@@ -48,10 +61,12 @@ function CarCard({
   car,
   index,
   scrollX,
+  onMenu,
 }: {
   car: GarageCar;
   index: number;
   scrollX: Animated.Value;
+  onMenu: (car: GarageCar) => void;
 }) {
   const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
   const scale = scrollX.interpolate({
@@ -91,6 +106,15 @@ function CarCard({
           </View>
         )}
 
+        {/* Per-car quick menu */}
+        <TouchableOpacity
+          style={styles.menuBtn}
+          onPress={() => onMenu(car)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <MoreHorizontal size={16} color="#FFFFFF" />
+        </TouchableOpacity>
+
         {/* Car visual */}
         <View style={styles.carVisual}>
           <View style={[styles.carGlow, { backgroundColor: hexToRgba(car.color, 0.35) }]} />
@@ -122,17 +146,15 @@ function CarCard({
           </View>
           <View style={styles.specDivider} />
           <View style={styles.spec}>
-            <Navigation size={16} color={car.color} />
-            <Text style={styles.specValue}>
-              {car.mileage_km >= 1000 ? `${(car.mileage_km / 1000).toFixed(0)}k` : Math.round(car.mileage_km)}
-            </Text>
-            <Text style={styles.specLabel}>km</Text>
+            <Rocket size={16} color={car.color} />
+            <Text style={styles.specValue}>{car.accel_0_100 || "—"}</Text>
+            <Text style={styles.specLabel}>0-100 km/h</Text>
           </View>
           <View style={styles.specDivider} />
           <View style={styles.spec}>
-            <View style={[styles.colorDot, { backgroundColor: car.color }]} />
-            <Text style={styles.specValue}>{car.color_name || "Paint"}</Text>
-            <Text style={styles.specLabel}>color</Text>
+            <Grid2x2 size={16} color={car.color} />
+            <Text style={styles.specValue}>{car.drivetrain || "—"}</Text>
+            <Text style={styles.specLabel}>Drivetrain</Text>
           </View>
         </View>
 
@@ -146,17 +168,77 @@ function CarCard({
   );
 }
 
+const CATEGORY_FILTERS: { key: "all" | CarCategory; label: string; icon: React.FC<{ size: number; color: string }> }[] = [
+  { key: "all", label: "All Cars", icon: Car },
+  { key: "sport", label: "Sport", icon: Trophy },
+  { key: "jdm", label: "JDM", icon: Flag },
+  { key: "daily", label: "Daily", icon: Gauge },
+  { key: "ev", label: "EV", icon: Zap },
+];
+
+function formatDistance(km: number): string {
+  return Math.round(km).toLocaleString("en-US");
+}
+
 export default function SelectCarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isAuthenticated, loading: authLoading, user } = useAuth();
   const { cars, loadingCars, selectCar, addCar, activeCarId } = useActiveCar();
+  const { totalXp } = useXP();
 
   const scrollX = useRef(new Animated.Value(0)).current;
   const listRef = useRef<Animated.FlatList<GarageCar>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [entering, setEntering] = useState(false);
   const didInitialScroll = useRef(false);
+  const [category, setCategory] = useState<"all" | CarCategory>("all");
+  const [driveStats, setDriveStats] = useState({ totalDrives: 0, totalDistanceKm: 0 });
+
+  // Garage-wide stats (cars owned / total drives / total distance / XP)
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const [{ count }, { data }] = await Promise.all([
+        supabase.from("trips").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+        supabase.from("trips").select("distance_km").eq("user_id", user.id),
+      ]);
+      if (cancelled) return;
+      const totalDistanceKm = (data ?? []).reduce(
+        (sum: number, t: { distance_km: number }) => sum + (t.distance_km ?? 0),
+        0
+      );
+      setDriveStats({ totalDrives: count ?? 0, totalDistanceKm });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const filteredCars = useMemo(
+    () => (category === "all" ? cars : cars.filter((c) => c.category === category)),
+    [cars, category]
+  );
+
+  const handleCategoryChange = useCallback((next: "all" | CarCategory) => {
+    setCategory(next);
+    setActiveIndex(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, []);
+
+  const handleCarMenu = useCallback(
+    (car: GarageCar) => {
+      const options: { text: string; style?: "cancel" | "destructive"; onPress?: () => void }[] = [];
+      if (!car.is_primary) {
+        options.push({ text: "Set as Primary", onPress: () => selectCar(car.id) });
+      }
+      options.push({ text: "Manage in Garage", onPress: () => router.push("/(tabs)/profile" as any) });
+      options.push({ text: "Cancel", style: "cancel" });
+      Alert.alert(car.name, [car.make, car.year].filter(Boolean).join(" · "), options);
+    },
+    [selectCar, router]
+  );
 
   // Inline add-car form (empty garage)
   const [showAdd, setShowAdd] = useState(false);
@@ -196,7 +278,7 @@ export default function SelectCarScreen() {
       useNativeDriver: true,
       listener: (e: { nativeEvent: { contentOffset: { x: number } } }) => {
         const idx = Math.round(e.nativeEvent.contentOffset.x / SNAP);
-        if (idx !== activeIndex && idx >= 0 && idx < cars.length) setActiveIndex(idx);
+        if (idx !== activeIndex && idx >= 0 && idx < filteredCars.length) setActiveIndex(idx);
       },
     }
   );
@@ -206,12 +288,12 @@ export default function SelectCarScreen() {
   }, [router]);
 
   const handleEnter = useCallback(async () => {
-    const car = cars[activeIndex];
+    const car = filteredCars[activeIndex];
     if (!car) return;
     setEntering(true);
     await selectCar(car.id);
     enterApp();
-  }, [cars, activeIndex, selectCar, enterApp]);
+  }, [filteredCars, activeIndex, selectCar, enterApp]);
 
   const handleAddCar = useCallback(async () => {
     if (!newName.trim()) return;
@@ -230,7 +312,7 @@ export default function SelectCarScreen() {
     }
   }, [newName, newMake, newHp, addCar]);
 
-  const activeColor = cars[activeIndex]?.color ?? "#FF6B35";
+  const activeColor = filteredCars[activeIndex]?.color ?? "#FF6B35";
 
   // ─── Loading ─────────────────────────────────────────────
   if (authLoading || (isAuthenticated && loadingCars && cars.length === 0)) {
@@ -355,11 +437,27 @@ export default function SelectCarScreen() {
         ]}
       />
 
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.brandRow}>
-          <Sparkles size={14} color="#FF6B35" />
-          <Text style={styles.brandLabel}>YOUR GARAGE</Text>
+        <View style={styles.headerTopRow}>
+          <View style={styles.brandRow}>
+            <Sparkles size={14} color="#FF6B35" />
+            <Text style={styles.brandLabel}>YOUR GARAGE</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.statsBtn}
+            onPress={() => router.push("/(tabs)/profile" as any)}
+            activeOpacity={0.75}
+          >
+            <TrendingUp size={14} color="#FFFFFF" />
+            <Text style={styles.statsBtnText}>Garage Stats</Text>
+            <ChevronRight size={14} color="#8A8A9A" />
+          </TouchableOpacity>
         </View>
         <Text style={styles.title}>Choose your ride</Text>
         <Text style={styles.subtitle}>
@@ -370,28 +468,34 @@ export default function SelectCarScreen() {
 
       {/* Carousel */}
       <View style={styles.carouselWrap}>
-        <Animated.FlatList
-          ref={listRef}
-          data={cars}
-          keyExtractor={(item) => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={SNAP}
-          decelerationRate="fast"
-          contentContainerStyle={{ paddingHorizontal: SIDE_PADDING }}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-          renderItem={({ item, index }) => (
-            <View style={{ width: CARD_WIDTH, marginRight: SPACING }}>
-              <CarCard car={item} index={index} scrollX={scrollX} />
-            </View>
-          )}
-        />
+        {filteredCars.length === 0 ? (
+          <View style={styles.center}>
+            <Text style={styles.emptyFilterText}>No cars in this category yet.</Text>
+          </View>
+        ) : (
+          <Animated.FlatList
+            ref={listRef}
+            data={filteredCars}
+            keyExtractor={(item) => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={SNAP}
+            decelerationRate="fast"
+            contentContainerStyle={{ paddingHorizontal: SIDE_PADDING }}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            renderItem={({ item, index }) => (
+              <View style={{ width: CARD_WIDTH, marginRight: SPACING }}>
+                <CarCard car={item} index={index} scrollX={scrollX} onMenu={handleCarMenu} />
+              </View>
+            )}
+          />
+        )}
       </View>
 
       {/* Pagination */}
       <View style={styles.dots}>
-        {cars.map((c, i) => (
+        {filteredCars.map((c, i) => (
           <View
             key={c.id}
             style={[
@@ -402,9 +506,59 @@ export default function SelectCarScreen() {
         ))}
       </View>
 
+      {/* Category filter */}
+      <View style={styles.categoryRow}>
+        {CATEGORY_FILTERS.map((cat) => {
+          const active = category === cat.key;
+          return (
+            <TouchableOpacity
+              key={cat.key}
+              style={[styles.categoryChip, active && styles.categoryChipActive]}
+              onPress={() => handleCategoryChange(cat.key)}
+              activeOpacity={0.75}
+            >
+              <cat.icon size={14} color={active ? "#FF6B35" : "#8A8A9A"} />
+              <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
+                {cat.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Garage-wide stats */}
+      <View style={styles.statsGrid}>
+        <View style={styles.statTile}>
+          <Car size={16} color="#8A8A9A" />
+          <Text style={styles.statValue}>{cars.length}</Text>
+          <Text style={styles.statLabel}>Cars Owned</Text>
+        </View>
+        <View style={styles.statTile}>
+          <RouteIcon size={16} color="#8A8A9A" />
+          <Text style={styles.statValue}>{driveStats.totalDrives}</Text>
+          <Text style={styles.statLabel}>Total Drives</Text>
+        </View>
+        <View style={styles.statTile}>
+          <MapPin size={16} color="#8A8A9A" />
+          <Text style={styles.statValue}>{formatDistance(driveStats.totalDistanceKm)} km</Text>
+          <Text style={styles.statLabel}>Total Distance</Text>
+        </View>
+        <View style={styles.statTile}>
+          <Hexagon size={16} color="#8A8A9A" />
+          <Text style={styles.statValue}>{totalXp.toLocaleString("en-US")}</Text>
+          <Text style={styles.statLabel}>Garage XP</Text>
+        </View>
+      </View>
+      </ScrollView>
+
       {/* Footer actions */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
-        <TouchableOpacity style={styles.cta} onPress={handleEnter} disabled={entering} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.cta}
+          onPress={handleEnter}
+          disabled={entering || !filteredCars[activeIndex]}
+          activeOpacity={0.85}
+        >
           <LinearGradient
             colors={[activeColor, "#FF3B6F"]}
             start={{ x: 0, y: 0 }}
@@ -415,7 +569,9 @@ export default function SelectCarScreen() {
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <>
-                <Text style={styles.ctaText}>Drive the {cars[activeIndex]?.name}</Text>
+                <Text style={styles.ctaText}>
+                  {filteredCars[activeIndex] ? `Drive the ${filteredCars[activeIndex].name}` : "Select a car"}
+                </Text>
                 <ChevronRight size={20} color="#FFFFFF" />
               </>
             )}
@@ -448,13 +604,30 @@ const styles = StyleSheet.create({
     borderRadius: SCREEN_WIDTH * 0.45,
   },
   // Header
+  scrollArea: { flex: 1 },
+  scrollContent: { paddingBottom: 12 },
   header: { paddingHorizontal: 24, paddingBottom: 8 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
   brandLabel: { fontSize: 12, fontWeight: "800", color: "#FF6B35", letterSpacing: 2 },
+  statsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginBottom: 8,
+  },
+  statsBtnText: { fontSize: 12, fontWeight: "700", color: "#FFFFFF" },
   title: { fontSize: 30, fontWeight: "900", color: "#FFFFFF", letterSpacing: -0.5 },
   subtitle: { fontSize: 14, color: "#8A8A9A", marginTop: 6, lineHeight: 20 },
   // Carousel
-  carouselWrap: { flex: 1, justifyContent: "center" },
+  carouselWrap: { justifyContent: "center", paddingVertical: 12 },
+  emptyFilterText: { color: "#8A8A9A", fontSize: 14, paddingVertical: 40 },
   card: {
     height: Math.min(CARD_WIDTH * 1.28, 440),
     borderRadius: 28,
@@ -466,7 +639,7 @@ const styles = StyleSheet.create({
   ribbon: {
     position: "absolute",
     top: 16,
-    right: 16,
+    left: 16,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
@@ -476,6 +649,18 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   ribbonText: { fontSize: 10, fontWeight: "900", color: "#0A0A0F", letterSpacing: 0.5 },
+  menuBtn: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  },
   carVisual: {
     height: 170,
     width: "100%",
@@ -531,6 +716,46 @@ const styles = StyleSheet.create({
   // Dots
   dots: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 18, marginBottom: 4 },
   dot2: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.18)" },
+  // Category filter chips
+  categoryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 24,
+    marginTop: 20,
+  },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  categoryChipActive: {
+    backgroundColor: "rgba(255,107,53,0.14)",
+    borderColor: "rgba(255,107,53,0.4)",
+  },
+  categoryChipText: { fontSize: 13, fontWeight: "600", color: "#8A8A9A" },
+  categoryChipTextActive: { color: "#FF6B35" },
+  // Garage-wide stats grid
+  statsGrid: {
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    marginTop: 20,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    marginHorizontal: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+    paddingVertical: 16,
+  },
+  statTile: { flex: 1, alignItems: "center", gap: 4 },
+  statValue: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
+  statLabel: { fontSize: 10, color: "#8A8A9A", textAlign: "center" },
   // Footer
   footer: { paddingHorizontal: 24, paddingTop: 12 },
   cta: { borderRadius: 18, overflow: "hidden" },
