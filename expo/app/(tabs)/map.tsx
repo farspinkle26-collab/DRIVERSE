@@ -58,6 +58,7 @@ import { useRouter } from "expo-router";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
+import { useParty } from "@/hooks/usePartyStore";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
 import CreateEventModal, {
   EventTypeIcon,
@@ -425,7 +426,9 @@ export default function MapScreen() {
   // Online users system
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
   const { user } = useAuth();
+  const { party, partyMemberIds, inviteFriend } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
+  const [invitingToParty, setInvitingToParty] = useState(false);
   const [addingFriend, setAddingFriend] = useState(false);
 
   // ─── HUD chrome state (GTA-style homepage) ───────────────
@@ -836,6 +839,25 @@ export default function MapScreen() {
       }
     })();
   }, [userLocation]);
+
+  // --- Invite an online friend to my party ---
+  const handleInviteToPartyFromMap = useCallback(async (friendId: string, friendName: string) => {
+    if (!party) {
+      Alert.alert("No Party Yet", "Create a party from your profile first, then invite friends from the map.");
+      return;
+    }
+    setInvitingToParty(true);
+    try {
+      const result = await inviteFriend(friendId);
+      if (result.ok) {
+        Alert.alert("Invite Sent!", `${friendName} was invited to join ${party.name}.`);
+      } else {
+        Alert.alert("Couldn't Invite", result.message ?? "You can only invite accepted friends.");
+      }
+    } finally {
+      setInvitingToParty(false);
+    }
+  }, [party, inviteFriend]);
 
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -1416,7 +1438,8 @@ export default function MapScreen() {
 
         {/* Online player markers — neon ring + car + name/level (design spec) */}
         {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
-          const ringColor = playerColor(onlineUser.user_id);
+          const isPartyMate = partyMemberIds.has(onlineUser.user_id);
+          const ringColor = isPartyMate && party ? party.color : playerColor(onlineUser.user_id);
           return (
             <Marker
               key={`online-${onlineUser.user_id}`}
@@ -1426,13 +1449,25 @@ export default function MapScreen() {
               tracksViewChanges={false}
             >
               <View style={styles.playerMarkerWrap}>
-                <View style={[styles.playerRing, { borderColor: ringColor, shadowColor: ringColor }]}>
+                {isPartyMate && (
+                  <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
+                )}
+                <View style={[
+                  styles.playerRing,
+                  { borderColor: ringColor, shadowColor: ringColor },
+                  isPartyMate && styles.playerRingParty,
+                ]}>
                   {onlineUser.avatar ? (
                     <Image source={{ uri: onlineUser.avatar }} style={styles.playerAvatarImg} />
                   ) : (
                     <Car size={15} color={ringColor} strokeWidth={2.2} />
                   )}
                 </View>
+                {isPartyMate && (
+                  <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
+                    <Users size={9} color="#0A0A0F" strokeWidth={3} />
+                  </View>
+                )}
                 <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
                 <Text style={styles.playerLevel}>Lv. {onlineUser.level}</Text>
               </View>
@@ -2227,6 +2262,16 @@ export default function MapScreen() {
                   {addingFriend ? "Sending..." : "Add Friend"}
                 </Text>
               </TouchableOpacity>
+              {!partyMemberIds.has(selectedOnlineUser.user_id) && (
+                <TouchableOpacity
+                  style={[styles.onlineUserPartyBtn, invitingToParty && { opacity: 0.5 }]}
+                  onPress={() => handleInviteToPartyFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+                  disabled={invitingToParty}
+                  activeOpacity={0.7}
+                >
+                  <Crown size={18} color="#0A0A0F" />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -3962,6 +4007,35 @@ const styles = StyleSheet.create({
     elevation: 8,
     overflow: "hidden",
   },
+  // Party members get a thicker, brighter ring so they stand out from
+  // regular online players on the map.
+  playerRingParty: {
+    borderWidth: 3,
+    shadowOpacity: 0.9,
+    shadowRadius: 14,
+    elevation: 12,
+  },
+  partyOuterRing: {
+    position: "absolute",
+    top: -4,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1.5,
+    opacity: 0.5,
+  },
+  partyBadge: {
+    position: "absolute",
+    top: -3,
+    right: 14,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#0A0A0F",
+  },
   playerAvatarImg: {
     width: 30,
     height: 30,
@@ -4090,6 +4164,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#FFFFFF",
+  },
+  onlineUserPartyBtn: {
+    width: 48,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFD700",
+    borderRadius: 12,
   },
   // ========================
   //  EVENTS
