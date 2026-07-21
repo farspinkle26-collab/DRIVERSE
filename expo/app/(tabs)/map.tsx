@@ -345,6 +345,34 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
 // User/car marker badge — the app's single, official map icon.
 const CAR_MARKER_ICON = require("@/assets/images/map-icons/car-marker.png");
 
+// ─── SettledMarker ───────────────────────────────────────
+// Android draws custom marker views by snapshotting them into a bitmap.
+// Turning tracksViewChanges off in the same frame the content finishes
+// (image onLoadEnd, text layout, size change on select/deselect) can freeze
+// the snapshot mid-paint, which shows up as icons cropped to half their
+// size. This wrapper keeps tracking on until `ready` is true AND a short
+// grace period passes with no appearance change (`settleKey`), then freezes
+// the bitmap for performance. Any settleKey/ready change re-arms tracking.
+const MARKER_SETTLE_MS = 600;
+type SettledMarkerProps = React.ComponentProps<typeof Marker> & {
+  settleKey: string;
+  ready?: boolean;
+};
+function SettledMarker({ settleKey, ready = true, children, ...markerProps }: SettledMarkerProps) {
+  const [tracking, setTracking] = useState(true);
+  useEffect(() => {
+    setTracking(true);
+    if (!ready) return;
+    const t = setTimeout(() => setTracking(false), MARKER_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [settleKey, ready]);
+  return (
+    <Marker {...markerProps} tracksViewChanges={tracking}>
+      {children}
+    </Marker>
+  );
+}
+
 // --- Warm Glow Map Style ---
 const MAP_GLOW = [
   { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
@@ -485,6 +513,13 @@ export default function MapScreen() {
       return changed ? next : prev;
     });
   }, [cafes]);
+
+  // Same load-gating for online player avatars (network images) so their
+  // markers don't freeze before the photo has decoded.
+  const [loadedAvatarIds, setLoadedAvatarIds] = useState<Set<string>>(new Set());
+  const handleAvatarLoaded = useCallback((id: string) => {
+    setLoadedAvatarIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
 
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
@@ -1350,40 +1385,46 @@ export default function MapScreen() {
             ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
             : null;
           return (
-            <Marker
+            <SettledMarker
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
-              tracksViewChanges={isSelected || (!!badgeSrc && !loadedBadgeIds.has(poi.id))}
-              anchor={{ x: 0.5, y: 0.3 }}
+              settleKey={`${isSelected}-${isChosen}-${poi.name}-${distLabel ?? ""}`}
+              ready={!badgeSrc || loadedBadgeIds.has(poi.id)}
+              anchor={{ x: 0.5, y: 0.37 }}
             >
-              <View style={styles.poiMarkerWrap}>
-                {badgeSrc ? (
-                  <Image
-                    source={badgeSrc}
-                    style={[
-                      styles.poiBadge,
-                      isSelected && styles.poiBadgeSelected,
-                      isChosen && styles.poiBadgeChosen,
-                    ]}
-                    resizeMode="contain"
-                    fadeDuration={0}
-                    onLoadEnd={() => handleBadgeLoaded(poi.id)}
-                  />
-                ) : (
-                  <View style={[
-                    styles.landmarkMarker,
-                    { borderColor: `${catColor}70` },
-                    isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
-                    isChosen && styles.landmarkMarkerChosen,
-                  ]}>
-                    {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
-                  </View>
-                )}
+              <View style={styles.poiMarkerWrap} collapsable={false}>
+                {/* Fixed-size box: the marker's outer bounds stay constant across
+                    normal/selected/chosen states so the native snapshot never
+                    clips a badge that grew after capture. */}
+                <View style={styles.poiBadgeBox}>
+                  {badgeSrc ? (
+                    <Image
+                      source={badgeSrc}
+                      style={[
+                        styles.poiBadge,
+                        isSelected && styles.poiBadgeSelected,
+                        isChosen && styles.poiBadgeChosen,
+                      ]}
+                      resizeMode="contain"
+                      fadeDuration={0}
+                      onLoadEnd={() => handleBadgeLoaded(poi.id)}
+                    />
+                  ) : (
+                    <View style={[
+                      styles.landmarkMarker,
+                      { borderColor: `${catColor}70` },
+                      isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+                      isChosen && styles.landmarkMarkerChosen,
+                    ]}>
+                      {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
                 {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
               </View>
-            </Marker>
+            </SettledMarker>
           );
         })}
 
@@ -1501,15 +1542,15 @@ export default function MapScreen() {
 
         {/* Custom location marker (tapped, no route yet) */}
         {selectedDestination && selectedDestination.type === "location" && !routeInfo && (
-          <Marker
+          <SettledMarker
             coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
             anchor={{ x: 0.5, y: 1 }}
-            tracksViewChanges={locationChosen}
+            settleKey={`chosen-${locationChosen}`}
           >
-            <View style={styles.customPin}>
+            <View style={styles.customPin} collapsable={false}>
               <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
             </View>
-          </Marker>
+          </SettledMarker>
         )}
 
         {/* Online player markers — neon ring + car + name/level (design spec) */}
@@ -1517,41 +1558,52 @@ export default function MapScreen() {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
           const ringColor = isPartyMate && party ? party.color : playerColor(onlineUser.user_id);
           return (
-            <Marker
+            <SettledMarker
               key={`online-${onlineUser.user_id}`}
               coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
-              anchor={{ x: 0.5, y: 0.35 }}
+              anchor={{ x: 0.5, y: 0.36 }}
               onPress={() => setSelectedOnlineUser(onlineUser)}
-              tracksViewChanges={false}
+              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${onlineUser.avatar ?? ""}`}
+              ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
             >
-              <View style={styles.playerMarkerWrap}>
-                {isPartyMate && (
-                  <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
-                )}
-                <View style={[
-                  styles.playerRing,
-                  { borderColor: ringColor, shadowColor: ringColor },
-                  isPartyMate && styles.playerRingParty,
-                ]}>
-                  {onlineUser.avatar ? (
-                    <Image source={{ uri: onlineUser.avatar }} style={styles.playerAvatarImg} />
-                  ) : (
-                    <Text style={styles.playerAvatarInitial}>
-                      {(onlineUser.name?.[0] ?? "D").toUpperCase()}
-                    </Text>
+              <View style={styles.playerMarkerWrap} collapsable={false}>
+                {/* Ring box gives the badges room inside the marker bounds —
+                    absolutely-positioned children with negative offsets get
+                    clipped out of the native marker snapshot. */}
+                <View style={styles.playerRingBox}>
+                  {isPartyMate && (
+                    <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
+                  )}
+                  <View style={[
+                    styles.playerRing,
+                    { borderColor: ringColor, shadowColor: ringColor },
+                    isPartyMate && styles.playerRingParty,
+                  ]}>
+                    {onlineUser.avatar ? (
+                      <Image
+                        source={{ uri: onlineUser.avatar }}
+                        style={styles.playerAvatarImg}
+                        fadeDuration={0}
+                        onLoadEnd={() => handleAvatarLoaded(onlineUser.user_id)}
+                      />
+                    ) : (
+                      <Text style={styles.playerAvatarInitial}>
+                        {(onlineUser.name?.[0] ?? "D").toUpperCase()}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
+                    <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
+                  </View>
+                  {isPartyMate && (
+                    <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
+                      <Users size={9} color="#0A0A0F" strokeWidth={3} />
+                    </View>
                   )}
                 </View>
-                <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
-                  <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
-                </View>
-                {isPartyMate && (
-                  <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
-                    <Users size={9} color="#0A0A0F" strokeWidth={3} />
-                  </View>
-                )}
                 <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
               </View>
-            </Marker>
+            </SettledMarker>
           );
         })}
 
@@ -1559,15 +1611,16 @@ export default function MapScreen() {
         {!isRecording && showEventsLayer && events.map((ev) => {
           const evColor = eventTypeColor(ev.event_type);
           const isSelected = selectedEventId === ev.id;
+          const timeLabel = fmtEventTime(ev.starts_at, ev.is_live);
           return (
-            <Marker
+            <SettledMarker
               key={`event-${ev.id}`}
               coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
               anchor={{ x: 0.5, y: 0.22 }}
               onPress={() => setSelectedEventId(ev.id)}
-              tracksViewChanges={isSelected}
+              settleKey={`${isSelected}-${ev.is_live}-${evColor}-${ev.participant_count}-${ev.title}-${timeLabel}-${ev.location_name ?? ""}`}
             >
-              <View style={styles.eventMarkerColumn}>
+              <View style={styles.eventMarkerColumn} collapsable={false}>
                 <View style={styles.eventMarkerWrap}>
                   {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
                   <View style={[
@@ -1584,12 +1637,12 @@ export default function MapScreen() {
                 <View style={[styles.eventMiniCard, { borderColor: `${evColor}55` }]}>
                   <Text style={[styles.eventMiniTitle, { color: evColor }]} numberOfLines={1}>{ev.title}</Text>
                   <Text style={styles.eventMiniMeta} numberOfLines={1}>
-                    {fmtEventTime(ev.starts_at, ev.is_live)}
+                    {timeLabel}
                     {ev.location_name ? ` · ${ev.location_name}` : ""}
                   </Text>
                 </View>
               </View>
-            </Marker>
+            </SettledMarker>
           );
         })}
 
@@ -1610,24 +1663,26 @@ export default function MapScreen() {
             rotation={heading}
             flat
           >
-            <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-              <Image source={CAR_MARKER_ICON} style={styles.carMarkerImage} resizeMode="contain" />
-            </Animated.View>
+            <View style={styles.carMarkerBox} collapsable={false}>
+              <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
+                <Image source={CAR_MARKER_ICON} style={styles.carMarkerImage} resizeMode="contain" />
+              </Animated.View>
+            </View>
           </Marker>
         )}
 
         {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
         {userLocation && !isRecording && (
-          <Marker
+          <SettledMarker
             coordinate={userLocation}
             anchor={{ x: 0.5, y: -0.35 }}
-            tracksViewChanges={false}
+            settleKey={`you-${level}`}
           >
-            <View style={styles.youLabelWrap}>
+            <View style={styles.youLabelWrap} collapsable={false}>
               <Text style={styles.youLabelName}>You</Text>
               <Text style={styles.youLabelLevel}>Lv. {level}</Text>
             </View>
-          </Marker>
+          </SettledMarker>
         )}
       </MapView>
 
@@ -2414,13 +2469,8 @@ export default function MapScreen() {
               <View style={styles.destCardNameRow}>
                 {isCafe && (() => {
                   const catData = (selectedDestination as { type: "cafe"; data: CafePOI }).data;
-                  const catColorMap: Record<LandmarkCategory, string> = {
-                    cafe: "#D4A574", restaurant: "#E53935", spbu: "#F59E0B", shopping: "#00D4AA",
-                    carwash: "#3B82F6", charging: "#A3E635",
-                  };
-                  const cc = catColorMap[catData.category];
                   return (
-                    <View style={[styles.categoryDot, { backgroundColor: cc }]} />
+                    <View style={[styles.categoryDot, { backgroundColor: CAT_COLORS[catData.category] }]} />
                   );
                 })()}
                 <Text style={styles.cafeCardName} numberOfLines={2}>{destName}</Text>
@@ -2794,10 +2844,21 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
-  // POI marker label column (icon chip + name + distance)
+  // POI marker label column (icon chip + name + distance).
+  // Fixed width: the native marker bitmap is sized at capture time, so an
+  // auto-width wrap that grows when the name text lays out gets its icon
+  // cropped. Deterministic bounds = full-size render every time.
   poiMarkerWrap: {
     alignItems: "center",
-    maxWidth: 110,
+    width: 110,
+  },
+  // Constant outer box for the badge across normal (44) / selected (58) /
+  // chosen (66) sizes so the marker bounds never change after capture.
+  poiBadgeBox: {
+    width: 66,
+    height: 66,
+    alignItems: "center",
+    justifyContent: "center",
   },
   // Neon badge image markers (glow is baked into the PNG)
   poiBadge: {
@@ -2817,7 +2878,9 @@ const styles = StyleSheet.create({
     height: 24,
   },
   poiMarkerName: {
-    marginTop: 4,
+    // Pulls the label back up toward the badge: the fixed 66px badge box
+    // leaves 11px of empty space below a normal-size (44px) badge.
+    marginTop: -4,
     fontSize: 10.5,
     fontWeight: "700",
     color: "#E8E8F0",
@@ -2836,7 +2899,14 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
-  // Car marker
+  // Car marker — outer box leaves headroom for the ±4px float animation so
+  // the icon never translates outside the marker bounds (which would clip it).
+  carMarkerBox: {
+    width: 68,
+    height: 74,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   carMarker: {
     alignItems: "center",
     justifyContent: "center",
@@ -4076,7 +4146,16 @@ const styles = StyleSheet.create({
   // ─── Online player markers on map ────────────────────
   playerMarkerWrap: {
     alignItems: "center",
-    maxWidth: 96,
+    width: 96,
+  },
+  // Box around the ring sized to contain the outer party ring and the
+  // level/party badges — keeping them inside the marker bounds so the
+  // native snapshot doesn't clip them.
+  playerRingBox: {
+    width: 46,
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
   },
   playerRing: {
     width: 34,
@@ -4102,7 +4181,7 @@ const styles = StyleSheet.create({
   },
   partyOuterRing: {
     position: "absolute",
-    top: -4,
+    top: 2,
     width: 42,
     height: 42,
     borderRadius: 21,
@@ -4111,8 +4190,8 @@ const styles = StyleSheet.create({
   },
   partyBadge: {
     position: "absolute",
-    top: -3,
-    right: 14,
+    top: 3,
+    right: 20,
     width: 16,
     height: 16,
     borderRadius: 8,
@@ -4133,8 +4212,8 @@ const styles = StyleSheet.create({
   },
   playerLevelBadge: {
     position: "absolute",
-    top: -5,
-    right: -5,
+    top: 1,
+    right: 1,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -4150,7 +4229,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   playerName: {
-    marginTop: 4,
+    marginTop: 0,
     fontSize: 10.5,
     fontWeight: "700",
     color: "#E8E8F0",
