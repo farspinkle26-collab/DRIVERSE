@@ -313,7 +313,7 @@ export default function DriveScreen() {
       <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + 40,
+          paddingBottom: Platform.OS === "android" ? 90 + insets.bottom + 20 : 110,
           paddingTop: insets.top + 70,
         }}
         showsVerticalScrollIndicator={false}
