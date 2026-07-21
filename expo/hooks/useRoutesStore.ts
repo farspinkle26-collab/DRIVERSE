@@ -27,6 +27,7 @@ export interface SavedRoute {
   visibility: RouteVisibility;
   kudos_count: number;
   comments_count: number;
+  car_id: string | null;
   recorded_at: string;
   created_at: string;
   // Derived
@@ -61,6 +62,7 @@ export interface SaveRouteInput {
   top_speed_kmh: number;
   xp_earned?: number;
   visibility?: RouteVisibility;
+  car_id?: string | null;
   recorded_at?: Date;
 }
 
@@ -85,6 +87,7 @@ interface RouteRow {
   visibility: RouteVisibility;
   kudos_count: number;
   comments_count: number;
+  car_id: string | null;
   recorded_at: string;
   created_at: string;
 }
@@ -216,6 +219,7 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
           top_speed_kmh: input.top_speed_kmh,
           xp_earned: input.xp_earned ?? 0,
           visibility: input.visibility ?? "public",
+          car_id: input.car_id ?? null,
           recorded_at: (input.recorded_at ?? new Date()).toISOString(),
         })
         .select("id")

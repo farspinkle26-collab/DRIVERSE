@@ -91,6 +91,7 @@ import CreateEventModal, {
   eventTypeLabel,
 } from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 
@@ -578,6 +579,7 @@ export default function MapScreen() {
   // Online users system
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
   const { user } = useAuth();
+  const { activeCar } = useActiveCar();
   const { party, partyMemberIds, inviteFriend } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
@@ -1416,6 +1418,7 @@ export default function MapScreen() {
         estimated_duration_seconds: Math.round(estSec),
         xp_earned: xpEarned ?? 10,
         was_faster_than_estimation: wasFaster,
+        car_id: activeCar?.id ?? null,
         started_at: new Date(tripStartMs ?? now).toISOString(),
         completed_at: new Date(now).toISOString(),
       }).then(({ error }) => {
@@ -1424,7 +1427,7 @@ export default function MapScreen() {
     }
 
     // Keep path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster]);
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar]);
 
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
@@ -3247,6 +3250,7 @@ export default function MapScreen() {
         }
         topSpeedKmh={tripTopSpeed}
         xpEarned={xpEarned ?? 0}
+        carId={activeCar?.id ?? null}
         originName="Current Location"
         destinationName={
           selectedDestination?.type === "cafe"

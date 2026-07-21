@@ -42,6 +42,7 @@ interface SaveRouteModalProps {
   xpEarned?: number;
   originName?: string;
   destinationName?: string;
+  carId?: string | null;
 }
 
 const ACTIVITY_OPTIONS: { key: ActivityType; label: string; icon: React.FC<{ size: number; color: string }>; color: string }[] = [
@@ -84,6 +85,7 @@ export default function SaveRouteModal({
   xpEarned = 0,
   originName,
   destinationName,
+  carId,
 }: SaveRouteModalProps) {
   const insets = useSafeAreaInsets();
   const { saveRoute } = useRoutes();
@@ -133,6 +135,7 @@ export default function SaveRouteModal({
       top_speed_kmh: topSpeedKmh,
       xp_earned: xpEarned,
       visibility,
+      car_id: carId ?? null,
     });
 
     setSaving(false);

@@ -58,6 +58,7 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
+import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
@@ -200,6 +201,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
   const isSelf = !userId || userId === user?.id;
   const targetId = isSelf ? user?.id : userId;
+  const { statsByCarId } = useCarDriveStats(targetId);
 
   // ─── Target profile + stats ────────────────────────────────
   const [profileName, setProfileName] = useState<string>(user?.name ?? "Driver");
@@ -936,6 +938,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 isSelf={isSelf}
                 onGenerate={() => openPremium(primaryCar)}
                 onDelete={() => handleDeleteCar(primaryCar.id)}
+                driveStats={statsByCarId[primaryCar.id]}
               />
             ) : (
               <View style={styles.emptyState}>
@@ -963,6 +966,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     <Text style={styles.carMetaDot}>•</Text>
                     <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
                   </View>
+                  <CarDriveDataRow stats={statsByCarId[car.id]} />
                 </View>
                 {isSelf && (
                   <TouchableOpacity onPress={() => handleSetPrimary(car.id)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -1348,16 +1352,38 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 }
 
 // ─── Featured car card (premium showcase) ──────────────────
+function CarDriveDataRow({ stats }: { stats?: CarDriveStats }) {
+  if (!stats || stats.tripCount === 0) return null;
+  return (
+    <View style={styles.driveDataRow}>
+      <View style={styles.driveDataItem}>
+        <RouteIcon size={13} color="#FF6B35" />
+        <Text style={styles.driveDataText}>{Math.round(stats.totalDistanceKm).toLocaleString("en-US")} km</Text>
+      </View>
+      <View style={styles.driveDataItem}>
+        <Gauge size={13} color="#FF6B35" />
+        <Text style={styles.driveDataText}>{stats.avgSpeedKmh.toFixed(0)} km/h avg</Text>
+      </View>
+      <View style={styles.driveDataItem}>
+        <Trophy size={13} color="#FFD700" />
+        <Text style={styles.driveDataText}>{stats.totalXp.toLocaleString("en-US")} XP</Text>
+      </View>
+    </View>
+  );
+}
+
 function FeaturedCar({
   car,
   isSelf,
   onGenerate,
   onDelete,
+  driveStats,
 }: {
   car: CarItem;
   isSelf: boolean;
   onGenerate: () => void;
   onDelete: () => void;
+  driveStats?: CarDriveStats;
 }) {
   const hasRender = !!car.photo_url;
   return (
@@ -1408,6 +1434,7 @@ function FeaturedCar({
             )}
           </View>
         )}
+        <CarDriveDataRow stats={driveStats} />
       </LinearGradient>
     </View>
   );
@@ -1545,6 +1572,19 @@ const styles = StyleSheet.create({
   generateGrad: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, height: 44 },
   generateText: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
   featuredLockedNote: { fontSize: 13, color: "#5A5A6E", fontWeight: "600" },
+
+  // Per-car drive data (distance / avg speed / XP earned in this car)
+  driveDataRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+  driveDataItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  driveDataText: { fontSize: 12, fontWeight: "700", color: "#CACAD5" },
 
   // Garage secondary cards
   garageCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
