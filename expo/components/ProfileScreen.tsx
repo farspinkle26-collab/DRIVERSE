@@ -751,6 +751,14 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               )}
             </View>
             <Text style={styles.rankSubtitle}>{rank.name}</Text>
+            {primaryCar && (
+              <View style={styles.drivingChip}>
+                <Car size={12} color="#FF6B35" />
+                <Text style={styles.drivingChipText} numberOfLines={1}>
+                  Driving <Text style={styles.drivingChipCar}>{primaryCar.name}</Text>
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Current rank card */}
@@ -1383,6 +1391,21 @@ const styles = StyleSheet.create({
   userName: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
   nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
   rankSubtitle: { fontSize: 14, color: "#FF6B35", fontWeight: "700", marginTop: 2 },
+  drivingChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,107,53,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,107,53,0.25)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 6,
+    alignSelf: "flex-start",
+  },
+  drivingChipText: { fontSize: 11, color: "#C9C9D4", fontWeight: "500" },
+  drivingChipCar: { color: "#FFFFFF", fontWeight: "700" },
 
   // Current rank card
   rankCard: { width: 108, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", alignItems: "center", paddingVertical: 10, paddingHorizontal: 6 },
