@@ -16,7 +16,6 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
-  Navigation,
   UtensilsCrossed,
   MapPin,
   X,
@@ -46,6 +45,8 @@ import {
   MessageCircle,
   ChevronDown,
   Car,
+  User,
+  Handshake,
   Sun,
   Cloud,
   CloudRain,
@@ -430,6 +431,7 @@ export default function MapScreen() {
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
   const [addingFriend, setAddingFriend] = useState(false);
+  const [askingMeetup, setAskingMeetup] = useState(false);
 
   // ─── HUD chrome state (GTA-style homepage) ───────────────
   const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null);
@@ -858,6 +860,28 @@ export default function MapScreen() {
       setInvitingToParty(false);
     }
   }, [party, inviteFriend]);
+
+  // --- Ask a meetup from map marker ---
+  const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
+    if (!user) return;
+    setAskingMeetup(true);
+    try {
+      const { error } = await supabase.from("direct_messages").insert({
+        sender_id: user.id,
+        receiver_id: friendId,
+        content: `👋 ${user.name ?? "A driver"} wants to meet up nearby! Are you free to link up?`,
+      });
+      if (error) {
+        Alert.alert("Error", error.message);
+      } else {
+        Alert.alert("Meetup Request Sent!", `${friendName} will see your message in their inbox.`);
+      }
+    } catch {
+      // Silent
+    } finally {
+      setAskingMeetup(false);
+    }
+  }, [user]);
 
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -1460,8 +1484,13 @@ export default function MapScreen() {
                   {onlineUser.avatar ? (
                     <Image source={{ uri: onlineUser.avatar }} style={styles.playerAvatarImg} />
                   ) : (
-                    <Car size={15} color={ringColor} strokeWidth={2.2} />
+                    <Text style={styles.playerAvatarInitial}>
+                      {(onlineUser.name?.[0] ?? "D").toUpperCase()}
+                    </Text>
                   )}
+                </View>
+                <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
+                  <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
                 </View>
                 {isPartyMate && (
                   <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
@@ -1469,7 +1498,6 @@ export default function MapScreen() {
                   </View>
                 )}
                 <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
-                <Text style={styles.playerLevel}>Lv. {onlineUser.level}</Text>
               </View>
             </Marker>
           );
@@ -1522,7 +1550,7 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker — green "You" ring + level label (design spec) */}
+        {/* User car marker — blue "You" ring + level label (design spec) */}
         {userLocation && (
           <Marker
             coordinate={userLocation}
@@ -1531,15 +1559,20 @@ export default function MapScreen() {
             flat
           >
             <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-              <View style={styles.carGlow} />
+              <View style={[styles.carGlow, isRecording && styles.carGlowRecording]} />
               <View style={[styles.carRing, isRecording && styles.carRingRecording]}>
-                <Navigation
-                  size={16}
-                  color={isRecording ? "#FF2D55" : "#22C55E"}
-                  fill={isRecording ? "rgba(255,45,85,0.15)" : "rgba(34,197,94,0.15)"}
-                  strokeWidth={2.5}
+                <Car
+                  size={18}
+                  color={isRecording ? "#FF2D55" : "#38BDF8"}
+                  strokeWidth={2.2}
                 />
               </View>
+              <ChevronDown
+                size={13}
+                color={isRecording ? "#FF2D55" : "#38BDF8"}
+                strokeWidth={3}
+                style={styles.carPinTail}
+              />
             </Animated.View>
           </Marker>
         )}
@@ -2233,45 +2266,82 @@ export default function MapScreen() {
                   {selectedOnlineUser.name}
                 </Text>
                 <Text style={styles.onlineUserCardLevel}>
-                  Level {selectedOnlineUser.level} · Online now
+                  Level {selectedOnlineUser.level}
+                  {userLocation
+                    ? ` · ${fmtMeters(Math.round(haversineMeters(userLocation, selectedOnlineUser)))} away`
+                    : " · Online now"}
                 </Text>
               </View>
               <ChevronRight size={22} color="#8A8A9A" />
             </TouchableOpacity>
             <View style={styles.onlineUserCardActions}>
               <TouchableOpacity
-                style={styles.onlineUserProfileBtn}
+                style={styles.onlineUserActionRow}
                 onPress={() => {
                   const uid = selectedOnlineUser.user_id;
                   setSelectedOnlineUser(null);
                   router.push(`/user/${uid}` as any);
                 }}
-                activeOpacity={0.8}
+                activeOpacity={0.75}
               >
-                <Users size={18} color="#FFFFFF" />
-                <Text style={styles.onlineUserProfileBtnText}>View Profile</Text>
+                <View style={styles.onlineUserActionIcon}>
+                  <User size={18} color="#38BDF8" strokeWidth={2.2} />
+                </View>
+                <Text style={styles.onlineUserActionLabel}>See Profile</Text>
+                <ChevronRight size={20} color="#6B6B7D" />
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={[styles.onlineUserAddBtn, addingFriend && { opacity: 0.5 }]}
+                style={[styles.onlineUserActionRow, askingMeetup && { opacity: 0.5 }]}
+                onPress={() => handleAskMeetupFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+                disabled={askingMeetup}
+                activeOpacity={0.75}
+              >
+                <View style={styles.onlineUserActionIcon}>
+                  <Handshake size={18} color="#38BDF8" strokeWidth={2.2} />
+                </View>
+                <Text style={styles.onlineUserActionLabel}>
+                  {askingMeetup ? "Sending..." : "Ask a Meetup"}
+                </Text>
+                <ChevronRight size={20} color="#6B6B7D" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.onlineUserActionRow, addingFriend && { opacity: 0.5 }]}
                 onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
                 disabled={addingFriend}
-                activeOpacity={0.7}
+                activeOpacity={0.75}
               >
-                <UserPlus size={18} color="#FFFFFF" />
-                <Text style={styles.onlineUserAddBtnText}>
+                <View style={styles.onlineUserActionIcon}>
+                  <UserPlus size={18} color="#38BDF8" strokeWidth={2.2} />
+                </View>
+                <Text style={styles.onlineUserActionLabel}>
                   {addingFriend ? "Sending..." : "Add Friend"}
                 </Text>
+                <ChevronRight size={20} color="#6B6B7D" />
               </TouchableOpacity>
-              {!partyMemberIds.has(selectedOnlineUser.user_id) && (
-                <TouchableOpacity
-                  style={[styles.onlineUserPartyBtn, invitingToParty && { opacity: 0.5 }]}
-                  onPress={() => handleInviteToPartyFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-                  disabled={invitingToParty}
-                  activeOpacity={0.7}
-                >
-                  <Crown size={18} color="#0A0A0F" />
-                </TouchableOpacity>
-              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.onlineUserActionRow,
+                  (invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)) && { opacity: 0.5 },
+                ]}
+                onPress={() => handleInviteToPartyFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+                disabled={invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)}
+                activeOpacity={0.75}
+              >
+                <View style={styles.onlineUserActionIcon}>
+                  <Crown size={18} color="#38BDF8" strokeWidth={2.2} />
+                </View>
+                <Text style={styles.onlineUserActionLabel}>
+                  {invitingToParty
+                    ? "Inviting..."
+                    : partyMemberIds.has(selectedOnlineUser.user_id)
+                    ? "Already in Party"
+                    : "Invite to Party"}
+                </Text>
+                <ChevronRight size={20} color="#6B6B7D" />
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -2734,25 +2804,31 @@ const styles = StyleSheet.create({
   },
   carGlow: {
     position: "absolute",
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(56, 189, 248, 0.14)",
+  },
+  carGlowRecording: {
+    backgroundColor: "rgba(255, 45, 85, 0.14)",
   },
   carRing: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#0A0A14",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#0A0F1A",
     borderWidth: 2,
-    borderColor: "#22C55E",
+    borderColor: "#38BDF8",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#22C55E",
+    shadowColor: "#38BDF8",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.55,
     shadowRadius: 14,
     elevation: 10,
+  },
+  carPinTail: {
+    marginTop: -3,
   },
   // "You / Lv." label under the player's own marker
   youLabelWrap: {
@@ -4041,6 +4117,29 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
   },
+  playerAvatarInitial: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#E8E8F0",
+  },
+  playerLevelBadge: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: "#12141C",
+    borderWidth: 1.5,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  playerLevelBadgeText: {
+    fontSize: 8.5,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
   playerName: {
     marginTop: 4,
     fontSize: 10.5,
@@ -4051,15 +4150,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
     maxWidth: 92,
-  },
-  playerLevel: {
-    marginTop: 1,
-    fontSize: 9.5,
-    fontWeight: "600",
-    color: "#9A9AB0",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
   // ─── Online user profile card ─────────────────────────
   onlineUserCard: {
@@ -4073,7 +4163,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(18, 22, 32, 0.97)",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.2)",
+    borderColor: "rgba(56, 189, 248, 0.2)",
     padding: 18,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -6 },
@@ -4128,49 +4218,34 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   onlineUserCardActions: {
-    flexDirection: "row",
     gap: 10,
   },
-  onlineUserProfileBtn: {
-    flex: 1,
+  onlineUserActionRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "rgba(34, 197, 94, 0.16)",
+    gap: 12,
+    backgroundColor: "rgba(56, 189, 248, 0.08)",
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.35)",
+    borderColor: "rgba(56, 189, 248, 0.25)",
+    borderRadius: 14,
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingHorizontal: 14,
   },
-  onlineUserProfileBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FFFFFF",
+  onlineUserActionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(56, 189, 248, 0.14)",
+    borderWidth: 1.5,
+    borderColor: "rgba(56, 189, 248, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  onlineUserAddBtn: {
+  onlineUserActionLabel: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#FF6B35",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-  },
-  onlineUserAddBtnText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
     color: "#FFFFFF",
-  },
-  onlineUserPartyBtn: {
-    width: 48,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#FFD700",
-    borderRadius: 12,
   },
   // ========================
   //  EVENTS
