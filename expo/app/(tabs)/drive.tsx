@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -78,6 +79,8 @@ const FEATURE_IMAGES: Record<string, number> = {
   events: require("@/assets/images/features/events.png"),
   cafe: require("@/assets/images/features/cafe.png"),
   workshop: require("@/assets/images/features/workshop.png"),
+  garage: require("@/assets/images/features/garage.png"),
+  community: require("@/assets/images/features/community.png"),
 };
 
 type DriveFeature = {
@@ -118,6 +121,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#8B5CF6",
     bgColor: "#8B5CF615",
     image: FEATURE_IMAGES.cafe,
+    route: "/(tabs)/map?focus=cafe",
   },
   {
     id: "workshop",
@@ -127,6 +131,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#F59E0B",
     bgColor: "#F59E0B15",
     image: FEATURE_IMAGES.workshop,
+    route: "/(tabs)/map?focus=workshop",
   },
   {
     id: "garage",
@@ -135,14 +140,18 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Car,
     color: "#00D4AA",
     bgColor: "#00D4AA15",
+    image: FEATURE_IMAGES.garage,
+    route: "/select-car",
   },
   {
     id: "community",
     title: "Community",
-    subtitle: "Clubs & meetups",
+    subtitle: "Convoy & meetups",
     icon: Users,
     color: "#3B82F6",
     bgColor: "#3B82F615",
+    image: FEATURE_IMAGES.community,
+    route: "/(tabs)/map",
   },
   {
     id: "marketplace",
@@ -296,17 +305,16 @@ export default function DriveScreen() {
   } = useQuests();
 
   const handleFeaturePress = (feature: DriveFeature) => {
-    if (feature.route) {
-      router.push(feature.route as any);
-    } else if (feature.id === "quests") {
+    if (feature.id === "quests") {
       setActiveView("quests");
     } else if (feature.id === "events") {
       setActiveView("events");
+    } else if (feature.route) {
+      router.push(feature.route as any);
+    } else {
+      // No destination built yet (e.g. Marketplace)
+      Alert.alert(feature.title, "Coming soon.");
     }
-  };
-
-  const handleNavigateMap = (_feature: DriveFeature) => {
-    router.push("/(tabs)/map" as any);
   };
 
   const sheetTranslateY = scrollY.interpolate({

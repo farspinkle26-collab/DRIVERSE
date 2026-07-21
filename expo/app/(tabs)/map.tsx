@@ -63,7 +63,7 @@ import {
   CloudFog,
   Check,
 } from "lucide-react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
@@ -438,6 +438,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
+  const params = useLocalSearchParams<{ focus?: string }>();
 
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -527,6 +528,26 @@ export default function MapScreen() {
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showDriversLayer, setShowDriversLayer] = useState(true);
   const weatherFetchedRef = useRef(false);
+
+  // When opened with a ?focus=<category> param (e.g. from the Drive screen's
+  // "Café Finder" / "Workshops" cards) isolate that POI category so the user
+  // lands straight on the places they came looking for.
+  useEffect(() => {
+    const focus = params.focus;
+    if (!focus) return;
+    const allOff: Record<LandmarkCategory, boolean> = {
+      cafe: false,
+      restaurant: false,
+      spbu: false,
+      shopping: false,
+      carwash: false,
+      charging: false,
+      workshop: false,
+    };
+    if (focus in allOff) {
+      setVisibleCats({ ...allOff, [focus as LandmarkCategory]: true });
+    }
+  }, [params.focus]);
 
   // Keep each badge marker re-rendering (tracksViewChanges) until its Image has
   // actually finished decoding, so the native Android marker snapshot isn't taken
