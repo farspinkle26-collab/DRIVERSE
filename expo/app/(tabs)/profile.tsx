@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import {
   Car,
@@ -52,10 +52,13 @@ import {
   Plus,
   Trash2,
   Camera,
+  Crown,
+  LogOut as LeaveIcon,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
+import { useParty } from "@/hooks/usePartyStore";
 import { rankForLevel } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
@@ -111,17 +114,33 @@ interface MessageItem {
   sender_name?: string;
 }
 
-type ProfileTab = "garage" | "trips" | "friends" | "messages";
+type ProfileTab = "garage" | "trips" | "friends" | "party" | "messages";
 
 // ─── Main Component ─────────────────────────────────────────
 export default function ProfileScreen() {
   const router = useRouter();
+  const { openChatWith } = useLocalSearchParams<{ openChatWith?: string }>();
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated, logout, loading: authLoading, updateProfilePicture } = useAuth();
   const { level, xp, xpProgress, xpCurrentLevel, xpRequired, totalXp, addXP } = useXP();
   const { activeCar } = useActiveCar();
+  const {
+    party,
+    members: partyMembers,
+    invites: partyInvites,
+    isLeader: isPartyLeader,
+    loading: partyLoading,
+    createParty,
+    inviteFriend: invitePartyFriend,
+    acceptInvite: acceptPartyInvite,
+    declineInvite: declinePartyInvite,
+    leaveParty,
+    kickMember,
+  } = useParty();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("garage");
+  const [newPartyName, setNewPartyName] = useState("");
+  const [creatingParty, setCreatingParty] = useState(false);
 
   // ─── Car Collections state ─────────────────────────────
   const [cars, setCars] = useState<CarItem[]>([]);
@@ -271,6 +290,34 @@ export default function ProfileScreen() {
     }
   }, [isAuthenticated, loadCars, loadTrips, loadFriends, loadMessages]);
 
+  // ─── Realtime: live-update messages as they arrive ──────────
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    const channel = supabase
+      .channel(`direct_messages_${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "direct_messages" },
+        (payload) => {
+          const msg = payload.new as MessageItem;
+          if (msg.sender_id !== user.id && msg.receiver_id !== user.id) return;
+
+          setMessages((prev) => [msg, ...prev]);
+          setConversationMessages((prev) => {
+            const partnerId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+            if (selectedConversation !== partnerId) return prev;
+            return [...prev, msg];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, user, selectedConversation]);
+
   // ─── Pull to refresh ───────────────────────────────────────
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -402,6 +449,54 @@ export default function ProfileScreen() {
     loadFriends();
   };
 
+  // ─── Party actions ──────────────────────────────────────────
+  const handleCreateParty = async () => {
+    setCreatingParty(true);
+    const ok = await createParty(newPartyName.trim() || `${user?.name ?? "Driver"}'s Party`);
+    setCreatingParty(false);
+    if (ok) {
+      setNewPartyName("");
+    } else {
+      Alert.alert("Error", "Could not create party. Please try again.");
+    }
+  };
+
+  const handleInvitePartyFriend = async (friendId: string, friendName: string) => {
+    const result = await invitePartyFriend(friendId);
+    if (result.ok) {
+      Alert.alert("Invite Sent!", `${friendName} was invited to your party.`);
+    } else {
+      Alert.alert("Couldn't Invite", result.message ?? "Something went wrong.");
+    }
+  };
+
+  const handleAcceptPartyInvite = async (partyId: string) => {
+    const result = await acceptPartyInvite(partyId);
+    if (!result.ok) {
+      Alert.alert("Couldn't Join", result.message ?? "Something went wrong.");
+    }
+  };
+
+  const handleLeaveParty = () => {
+    Alert.alert(
+      isPartyLeader ? "Disband Party" : "Leave Party",
+      isPartyLeader
+        ? "This will remove everyone from the party. Continue?"
+        : "Are you sure you want to leave this party?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: isPartyLeader ? "Disband" : "Leave", style: "destructive", onPress: leaveParty },
+      ]
+    );
+  };
+
+  const handleKickMember = (memberId: string, memberName: string) => {
+    Alert.alert("Remove Member", `Remove ${memberName} from the party?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: () => kickMember(memberId) },
+    ]);
+  };
+
   // ─── Open conversation ─────────────────────────────────────
   const handleOpenConversation = async (friendId: string) => {
     if (!user) return;
@@ -422,6 +517,15 @@ export default function ProfileScreen() {
       console.error("Load conversation error:", err);
     }
   };
+
+  // ─── Deep link: /profile?openChatWith=<userId> jumps straight into a thread ──
+  const openedChatWithRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isAuthenticated || !openChatWith || openedChatWithRef.current === openChatWith) return;
+    openedChatWithRef.current = openChatWith;
+    setActiveTab("messages");
+    handleOpenConversation(openChatWith);
+  }, [isAuthenticated, openChatWith]);
 
   // ─── Send message ──────────────────────────────────────────
   const handleSendMessage = async () => {
@@ -522,6 +626,14 @@ export default function ProfileScreen() {
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   };
+
+  // Resolve a conversation partner's name/avatar from the already-loaded
+  // friends list, so message threads show real people instead of "Friend".
+  const getFriendInfo = useCallback((partnerId: string): { name: string; avatar?: string } => {
+    const f = friends.find((fr) => fr.user_id === partnerId || fr.friend_id === partnerId);
+    if (f?.friend_profile?.name) return { name: f.friend_profile.name, avatar: f.friend_profile.avatar };
+    return { name: "Driver" };
+  }, [friends]);
 
 
   // ─── Not logged in view ────────────────────────────────────
@@ -670,6 +782,7 @@ export default function ProfileScreen() {
               { key: "garage" as ProfileTab, label: "Garage", icon: Car },
               { key: "trips" as ProfileTab, label: "Trips", icon: Route },
               { key: "friends" as ProfileTab, label: "Friends", icon: Users },
+              { key: "party" as ProfileTab, label: "Party", icon: Crown },
               { key: "messages" as ProfileTab, label: "Messages", icon: MessageCircle },
             ] as const
           ).map((tab) => (
@@ -1008,6 +1121,156 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* ═══ PARTY ═══ */}
+        {activeTab === "party" && (
+          <View style={styles.section}>
+            {/* Pending invites addressed to me */}
+            {partyInvites.length > 0 && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={styles.partySectionLabel}>Invites</Text>
+                {partyInvites.map((inv) => (
+                  <View key={inv.id} style={styles.friendCard}>
+                    <View style={styles.friendInfo}>
+                      <View style={[styles.friendAvatar, { borderWidth: 2, borderColor: inv.party_color }]}>
+                        {inv.leader_avatar ? (
+                          <Image source={{ uri: inv.leader_avatar }} style={styles.friendAvatarImg} />
+                        ) : (
+                          <Text style={styles.friendAvatarText}>{inv.leader_name[0]?.toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>{inv.party_name}</Text>
+                        <Text style={styles.friendStatus}>{inv.leader_name} invited you</Text>
+                      </View>
+                    </View>
+                    <View style={styles.friendActions}>
+                      <TouchableOpacity style={styles.friendAcceptBtn} onPress={() => handleAcceptPartyInvite(inv.party_id)}>
+                        <CheckCircle2 size={20} color="#22C55E" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.friendRejectBtn} onPress={() => declinePartyInvite(inv.party_id)}>
+                        <X size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {partyLoading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : !party ? (
+              <>
+                <View style={styles.emptyState}>
+                  <Crown size={40} color="#3A3A4E" />
+                  <Text style={styles.emptyText}>No party yet</Text>
+                  <Text style={styles.emptySubtext}>
+                    Start a party to give your friends a special glowing border on the map
+                  </Text>
+                </View>
+                <View style={styles.friendSearchRow}>
+                  <View style={styles.friendSearchInputWrapper}>
+                    <TextInput
+                      style={styles.friendSearchInput}
+                      placeholder="Party name (optional)"
+                      placeholderTextColor="#5A5A6E"
+                      value={newPartyName}
+                      onChangeText={setNewPartyName}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.friendSearchBtn, creatingParty && { opacity: 0.5 }]}
+                    onPress={handleCreateParty}
+                    disabled={creatingParty}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.friendSearchBtnText}>{creatingParty ? "..." : "Create"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.partyHeaderCard}>
+                  <View style={[styles.partyColorDot, { backgroundColor: party.color }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.partyHeaderName}>{party.name}</Text>
+                    <Text style={styles.friendStatus}>
+                      {partyMembers.filter((m) => m.status === "accepted").length} member
+                      {partyMembers.filter((m) => m.status === "accepted").length === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={styles.partyLeaveBtn} onPress={handleLeaveParty} activeOpacity={0.7}>
+                    <LeaveIcon size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+
+                {partyMembers.filter((m) => m.status === "accepted").map((m) => (
+                  <View key={m.id} style={styles.friendCard}>
+                    <View style={styles.friendInfo}>
+                      <View style={[styles.friendAvatar, { borderWidth: 2, borderColor: party.color }]}>
+                        {m.avatar ? (
+                          <Image source={{ uri: m.avatar }} style={styles.friendAvatarImg} />
+                        ) : (
+                          <Text style={styles.friendAvatarText}>{m.name[0]?.toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>
+                          {m.user_id === user?.id ? "You" : m.name}
+                          {m.role === "leader" ? "  👑" : ""}
+                        </Text>
+                        <Text style={styles.friendStatus}>Level {m.level}</Text>
+                      </View>
+                    </View>
+                    {isPartyLeader && m.user_id !== user?.id && (
+                      <TouchableOpacity style={styles.friendRejectBtn} onPress={() => handleKickMember(m.user_id, m.name)}>
+                        <X size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+
+                {/* Invite friends who aren't already partied up */}
+                {friends.filter(
+                  (f) =>
+                    f.status === "accepted" &&
+                    !partyMembers.some((m) => m.user_id === (f.user_id === user?.id ? f.friend_id : f.user_id))
+                ).length > 0 && (
+                  <View style={{ marginTop: 16 }}>
+                    <Text style={styles.partySectionLabel}>Invite friends</Text>
+                    {friends
+                      .filter(
+                        (f) =>
+                          f.status === "accepted" &&
+                          !partyMembers.some((m) => m.user_id === (f.user_id === user?.id ? f.friend_id : f.user_id))
+                      )
+                      .map((f) => {
+                        const fid = f.user_id === user?.id ? f.friend_id : f.user_id;
+                        const fname = f.friend_profile?.name ?? "Friend";
+                        return (
+                          <View key={f.id} style={styles.friendCard}>
+                            <View style={styles.friendInfo}>
+                              <View style={styles.friendAvatar}>
+                                {f.friend_profile?.avatar ? (
+                                  <Image source={{ uri: f.friend_profile.avatar }} style={styles.friendAvatarImg} />
+                                ) : (
+                                  <Text style={styles.friendAvatarText}>{fname[0]?.toUpperCase()}</Text>
+                                )}
+                              </View>
+                              <Text style={styles.friendName}>{fname}</Text>
+                            </View>
+                            <TouchableOpacity style={styles.friendAddBtn} onPress={() => handleInvitePartyFriend(fid, fname)}>
+                              <UserPlus size={16} color="#FFFFFF" />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
         {/* ═══ MESSAGES ═══ */}
         {activeTab === "messages" && (
           <View style={styles.section}>
@@ -1019,7 +1282,7 @@ export default function ProfileScreen() {
                   onPress={() => { setSelectedConversation(null); setConversationMessages([]); }}
                 >
                   <ArrowLeft size={20} color="#FFFFFF" />
-                  <Text style={styles.conversationBackText}>Back</Text>
+                  <Text style={styles.conversationBackText}>{getFriendInfo(selectedConversation).name}</Text>
                 </TouchableOpacity>
 
                 {/* Messages */}
@@ -1082,7 +1345,9 @@ export default function ProfileScreen() {
                         convos.set(partnerId, m);
                       }
                     });
-                    return Array.from(convos.entries()).map(([partnerId, lastMsg]) => (
+                    return Array.from(convos.entries()).map(([partnerId, lastMsg]) => {
+                      const partner = getFriendInfo(partnerId);
+                      return (
                       <TouchableOpacity
                         key={partnerId}
                         style={styles.msgConvoRow}
@@ -1090,16 +1355,20 @@ export default function ProfileScreen() {
                         activeOpacity={0.7}
                       >
                         <View style={styles.msgConvoAvatar}>
-                          <Text style={styles.msgConvoAvatarText}>
-                            {(partnerId.slice(0, 1)).toUpperCase()}
-                          </Text>
+                          {partner.avatar ? (
+                            <Image source={{ uri: partner.avatar }} style={styles.friendAvatarImg} />
+                          ) : (
+                            <Text style={styles.msgConvoAvatarText}>
+                              {partner.name[0]?.toUpperCase()}
+                            </Text>
+                          )}
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.msgConvoName}>
-                            {lastMsg.sender_id === user?.id ? "You" : "Friend"}
+                            {partner.name}
                           </Text>
                           <Text style={styles.msgConvoPreview} numberOfLines={1}>
-                            {lastMsg.content}
+                            {lastMsg.sender_id === user?.id ? "You: " : ""}{lastMsg.content}
                           </Text>
                         </View>
                         <View style={{ alignItems: "flex-end" }}>
@@ -1111,7 +1380,7 @@ export default function ProfileScreen() {
                           )}
                         </View>
                       </TouchableOpacity>
-                    ));
+                    );});
                   })()
                 )}
               </>
@@ -1834,6 +2103,39 @@ const styles = StyleSheet.create({
   friendMsgBtn: {
     padding: 4,
   },
+  // ─── Party ──────────────────────────────────────────────
+  partySectionLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#8A8A9A",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  partyHeaderCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255, 215, 0, 0.08)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 215, 0, 0.25)",
+  },
+  partyColorDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  partyHeaderName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  partyLeaveBtn: {
+    padding: 6,
+  },
   // ─── Messages ───────────────────────────────────────────
   msgConvoRow: {
     flexDirection: "row",
@@ -1853,6 +2155,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 107, 53, 0.12)",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
   msgConvoAvatarText: {
     fontSize: 17,

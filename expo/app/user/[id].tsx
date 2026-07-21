@@ -21,6 +21,7 @@ import {
   UserCheck,
   Clock,
   ChevronRight,
+  MessageCircle,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import {
@@ -327,10 +328,20 @@ export default function UserProfileScreen() {
               </View>
             )}
             {friendState === "friends" && (
-              <View style={[styles.statusPill, { borderColor: "rgba(34,197,94,0.3)" }]}>
-                <UserCheck size={16} color="#22C55E" />
-                <Text style={[styles.statusPillText, { color: "#22C55E" }]}>Friends</Text>
-              </View>
+              <>
+                <View style={[styles.statusPill, { borderColor: "rgba(34,197,94,0.3)" }]}>
+                  <UserCheck size={16} color="#22C55E" />
+                  <Text style={[styles.statusPillText, { color: "#22C55E" }]}>Friends</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.messageBtn}
+                  onPress={() => router.push(`/(tabs)/profile?openChatWith=${id}` as any)}
+                  activeOpacity={0.85}
+                >
+                  <MessageCircle size={18} color="#FFFFFF" />
+                  <Text style={styles.addFriendText}>Message</Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         )}
@@ -482,6 +493,18 @@ const styles = StyleSheet.create({
     height: 52,
   },
   addFriendText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  messageBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    marginTop: 10,
+  },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",

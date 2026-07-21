@@ -17,6 +17,7 @@ import { XPProvider } from "@/hooks/useXPStore";
 import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
+import { PartyProvider } from "@/hooks/usePartyStore";
 import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
@@ -95,14 +96,16 @@ export default function RootLayout() {
                         <XPProvider>
                           <QuestsProvider>
                             <OnlineUsersProvider>
-                              <EventsProvider>
-                                <RoutesProvider>
-                                  <ActiveCarProvider>
-                                    <RootLayoutNav />
-                                    <NotificationBanner />
-                                  </ActiveCarProvider>
-                                </RoutesProvider>
-                              </EventsProvider>
+                              <PartyProvider>
+                                <EventsProvider>
+                                  <RoutesProvider>
+                                    <ActiveCarProvider>
+                                      <RootLayoutNav />
+                                      <NotificationBanner />
+                                    </ActiveCarProvider>
+                                  </RoutesProvider>
+                                </EventsProvider>
+                              </PartyProvider>
                             </OnlineUsersProvider>
                           </QuestsProvider>
                         </XPProvider>
