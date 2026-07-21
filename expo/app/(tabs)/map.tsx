@@ -13,6 +13,13 @@ import {
   Keyboard,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import Svg, {
+  Circle as SvgCircle,
+  Path as SvgPath,
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Stop,
+} from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
@@ -342,8 +349,37 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
   workshop: require("@/assets/images/map-icons/workshop.png"),
 };
 
-// User/car marker badge — the app's single, official map icon.
-const CAR_MARKER_ICON = require("@/assets/images/map-icons/car-marker.png");
+// ─── PlayerPuck ──────────────────────────────────────────
+// The player's own map marker, drawn entirely in code (SVG) instead of a
+// bitmap asset, so it can never ship cropped, half-loaded, or missing.
+// A neon heading arrow on a dark puck: the arrow points up and the parent
+// Marker's `rotation={heading}` + `flat` steer it with the vehicle.
+const PLAYER_PUCK_SIZE = 64;
+function PlayerPuck() {
+  return (
+    <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 64 64">
+      <Defs>
+        <SvgLinearGradient id="playerPuckArrow" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FF8A50" />
+          <Stop offset="1" stopColor="#E55A2A" />
+        </SvgLinearGradient>
+      </Defs>
+      {/* soft neon halo */}
+      <SvgCircle cx="32" cy="32" r="30" fill="#FF6B35" opacity={0.1} />
+      <SvgCircle cx="32" cy="32" r="24" fill="#FF6B35" opacity={0.15} />
+      {/* dark puck with orange rim */}
+      <SvgCircle cx="32" cy="32" r="19" fill="#12121A" stroke="#FF6B35" strokeWidth={2} />
+      {/* heading arrow (notched navigation chevron) */}
+      <SvgPath
+        d="M32 18.5 L43 43 L32 37 L21 43 Z"
+        fill="url(#playerPuckArrow)"
+        stroke="#FFD9C4"
+        strokeWidth={1}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
 
 // ─── SettledMarker ───────────────────────────────────────
 // Android draws custom marker views by snapshotting them into a bitmap.
@@ -1655,7 +1691,7 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker — official app icon (design spec) */}
+        {/* User marker — coded SVG puck (no bitmap asset) */}
         {userLocation && (
           <Marker
             coordinate={userLocation}
@@ -1665,7 +1701,7 @@ export default function MapScreen() {
           >
             <View style={styles.carMarkerBox} collapsable={false}>
               <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-                <Image source={CAR_MARKER_ICON} style={styles.carMarkerImage} resizeMode="contain" />
+                <PlayerPuck />
               </Animated.View>
             </View>
           </Marker>
@@ -2910,10 +2946,6 @@ const styles = StyleSheet.create({
   carMarker: {
     alignItems: "center",
     justifyContent: "center",
-  },
-  carMarkerImage: {
-    width: 64,
-    height: 65,
   },
   // "You / Lv." label under the player's own marker
   youLabelWrap: {
