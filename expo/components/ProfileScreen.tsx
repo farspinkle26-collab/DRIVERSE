@@ -1,0 +1,1592 @@
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+  Platform,
+  Image,
+  Modal,
+  Pressable,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
+import * as ImagePickerExpo from "expo-image-picker";
+import {
+  Car,
+  Route as RouteIcon,
+  Users,
+  MessageCircle,
+  Bell,
+  Flame,
+  Pencil,
+  Info,
+  ChevronRight,
+  Plus,
+  Sparkles,
+  Lock,
+  Check,
+  X,
+  Send,
+  ArrowLeft,
+  UserPlus,
+  UserCheck,
+  Clock,
+  Search,
+  CheckCircle2,
+  Circle,
+  Trash2,
+  Zap,
+  Timer,
+  Gauge,
+  Trophy,
+  MapPin,
+  Star,
+  Radio,
+  MailOpen,
+  Shield,
+  HelpCircle,
+} from "lucide-react-native";
+import { useAuth } from "@/hooks/useAuthStore";
+import { useXP } from "@/hooks/useXPStore";
+import { useQuests } from "@/hooks/useQuestStore";
+import { useEvents } from "@/hooks/useEventsStore";
+import { rankForLevel } from "@/constants/ranks";
+import { seasonRankForXp, SEASON_NUMBER } from "@/constants/season";
+import RankBadge from "@/components/RankBadge";
+import { supabase } from "@/lib/supabase";
+
+// Price for the premium car render, in IDR.
+const PREMIUM_CAR_PRICE = 49000;
+
+// XP curve mirror of useXPStore so we can render other users' level bars.
+function xpForLevel(level: number): number {
+  return Math.round(100 * Math.pow(1.6, level - 1));
+}
+
+// ─── Types ─────────────────────────────────────────────────
+interface CarItem {
+  id: string;
+  name: string;
+  make: string;
+  model: string;
+  year: string;
+  color: string;
+  color_name: string;
+  hp: number;
+  mileage_km: number;
+  license_plate: string;
+  is_primary: boolean;
+  photo_url?: string | null;
+}
+
+interface TripItem {
+  id: string;
+  destination_name: string;
+  origin_name: string;
+  distance_km: number;
+  duration_seconds: number;
+  avg_speed_kmh: number;
+  xp_earned: number;
+  was_faster_than_estimation: boolean;
+  completed_at: string;
+}
+
+interface FriendItem {
+  id: string;
+  user_id: string;
+  friend_id: string;
+  status: "pending" | "accepted" | "blocked";
+  friend_profile?: { name: string; avatar?: string };
+}
+
+interface MessageItem {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+type FriendState = "none" | "pending_sent" | "pending_received" | "friends" | "self";
+type ProfileTab = "garage" | "trips" | "friends" | "messages";
+
+/**
+ * The unified Driveverse profile page. Renders the exact same layout for
+ * the signed-in user and for any other driver — the only differences are
+ * which actions are enabled (editing, add-car, premium generation and the
+ * notification/message inboxes belong to the signed-in viewer). Pass a
+ * `userId` to view someone else; omit it for the current user.
+ */
+export default function ProfileScreen({ userId }: { userId?: string }) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { user, isAuthenticated, updateProfilePicture } = useAuth();
+  const selfXP = useXP();
+  const { streak: selfStreak } = useQuests();
+  const { events } = useEvents();
+
+  const isSelf = !userId || userId === user?.id;
+  const targetId = isSelf ? user?.id : userId;
+
+  // ─── Target profile + stats ────────────────────────────────
+  const [profileName, setProfileName] = useState<string>(user?.name ?? "Driver");
+  const [profileAvatar, setProfileAvatar] = useState<string | undefined>(user?.profilePicture);
+  const [otherLevel, setOtherLevel] = useState(1);
+  const [otherXp, setOtherXp] = useState(0);
+  const [otherTotalXp, setOtherTotalXp] = useState(0);
+  const [otherStreak, setOtherStreak] = useState(0);
+
+  const [cars, setCars] = useState<CarItem[]>([]);
+  const [trips, setTrips] = useState<TripItem[]>([]);
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ─── Signed-in viewer's inboxes ────────────────────────────
+  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<FriendItem[]>([]);
+
+  // ─── Friendship vs viewed user ─────────────────────────────
+  const [friendState, setFriendState] = useState<FriendState>(isSelf ? "self" : "none");
+  const [friendActionLoading, setFriendActionLoading] = useState(false);
+
+  // ─── UI state ──────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<ProfileTab>("garage");
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [premiumOpen, setPremiumOpen] = useState(false);
+  const [premiumTargetCar, setPremiumTargetCar] = useState<CarItem | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  // ─── Add-car form ──────────────────────────────────────────
+  const [showAddCar, setShowAddCar] = useState(false);
+  const [newCarName, setNewCarName] = useState("");
+  const [newCarMake, setNewCarMake] = useState("");
+  const [newCarYear, setNewCarYear] = useState("2024");
+  const [newCarHP, setNewCarHP] = useState("300");
+
+  // ─── Friend search (self) ──────────────────────────────────
+  const [friendQuery, setFriendQuery] = useState("");
+  const [friendResults, setFriendResults] = useState<Array<{ id: string; name: string; level: number; avatar?: string }>>([]);
+
+  // ─── Messages thread ───────────────────────────────────────
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<MessageItem[]>([]);
+  const [messageInput, setMessageInput] = useState("");
+
+  // ─── Data loaders ──────────────────────────────────────────
+  const loadTargetProfile = useCallback(async () => {
+    if (!targetId) return;
+    if (isSelf) {
+      setProfileName(user?.name ?? "Driver");
+      setProfileAvatar(user?.profilePicture);
+      return;
+    }
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, name, avatar")
+      .eq("id", targetId)
+      .single();
+    if (data) {
+      setProfileName(data.name ?? "Driver");
+      setProfileAvatar(data.avatar ?? undefined);
+    }
+    const { data: xp } = await supabase
+      .from("user_xp")
+      .select("level, xp, total_xp")
+      .eq("user_id", targetId)
+      .single();
+    if (xp) {
+      setOtherLevel(xp.level ?? 1);
+      setOtherXp(xp.xp ?? 0);
+      setOtherTotalXp(xp.total_xp ?? 0);
+    }
+    const { data: stats } = await supabase
+      .from("user_quest_stats")
+      .select("current_streak")
+      .eq("user_id", targetId)
+      .single();
+    if (stats) setOtherStreak(stats.current_streak ?? 0);
+  }, [targetId, isSelf, user]);
+
+  const loadCars = useCallback(async () => {
+    if (!targetId) return;
+    const { data } = await supabase
+      .from("car_collections")
+      .select("*")
+      .eq("user_id", targetId)
+      .order("is_primary", { ascending: false });
+    if (data) setCars(data as CarItem[]);
+  }, [targetId]);
+
+  const loadTrips = useCallback(async () => {
+    if (!targetId) return;
+    const { data } = await supabase
+      .from("trips")
+      .select("*")
+      .eq("user_id", targetId)
+      .order("completed_at", { ascending: false })
+      .limit(20);
+    if (data) setTrips(data as TripItem[]);
+  }, [targetId]);
+
+  const loadFriends = useCallback(async () => {
+    if (!targetId) return;
+    const { data: sent } = await supabase
+      .from("friends")
+      .select("*, profiles!friends_friend_id_fkey(name, avatar)")
+      .eq("user_id", targetId);
+    const { data: received } = await supabase
+      .from("friends")
+      .select("*, profiles!friends_user_id_fkey(name, avatar)")
+      .eq("friend_id", targetId);
+    const normalize = (rows: any[]): FriendItem[] =>
+      (rows ?? []).map((row) => {
+        const p = row.profiles ?? {};
+        return { ...row, friend_profile: { name: p.name, avatar: p.avatar } } as FriendItem;
+      });
+    const all = [...normalize(sent ?? []), ...normalize(received ?? [])].filter(
+      (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i
+    );
+    setFriends(all);
+  }, [targetId]);
+
+  // Signed-in viewer's private inboxes (always about `user`, not target).
+  const loadInboxes = useCallback(async () => {
+    if (!isAuthenticated || !user) return;
+    const { data: dms } = await supabase
+      .from("direct_messages")
+      .select("*")
+      .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (dms) setMessages(dms as MessageItem[]);
+
+    // Incoming friend requests → the notifications bell.
+    const { data: reqs } = await supabase
+      .from("friends")
+      .select("*, profiles!friends_user_id_fkey(name, avatar)")
+      .eq("friend_id", user.id)
+      .eq("status", "pending");
+    const normalized = (reqs ?? []).map((row: any) => ({
+      ...row,
+      friend_profile: { name: row.profiles?.name, avatar: row.profiles?.avatar },
+    })) as FriendItem[];
+    setPendingRequests(normalized);
+  }, [isAuthenticated, user]);
+
+  const loadFriendState = useCallback(async () => {
+    if (isSelf) {
+      setFriendState("self");
+      return;
+    }
+    if (!user || !targetId) return;
+    const { data } = await supabase
+      .from("friends")
+      .select("*")
+      .or(
+        `and(user_id.eq.${user.id},friend_id.eq.${targetId}),and(user_id.eq.${targetId},friend_id.eq.${user.id})`
+      )
+      .limit(1);
+    const r = data?.[0];
+    if (!r) setFriendState("none");
+    else if (r.status === "accepted") setFriendState("friends");
+    else if (r.user_id === user.id) setFriendState("pending_sent");
+    else setFriendState("pending_received");
+  }, [isSelf, user, targetId]);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      loadTargetProfile(),
+      loadCars(),
+      loadTrips(),
+      loadFriends(),
+      loadFriendState(),
+      // The bell + messages inboxes always belong to the signed-in viewer,
+      // so they load even while viewing another driver's profile.
+      loadInboxes(),
+    ]);
+    setLoading(false);
+  }, [loadTargetProfile, loadCars, loadTrips, loadFriends, loadFriendState, loadInboxes]);
+
+  useEffect(() => {
+    if (isAuthenticated) loadAll();
+  }, [isAuthenticated, targetId, loadAll]);
+
+  // Live-update the viewer's messages as they arrive.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const channel = supabase
+      .channel(`dm_${user.id}_${targetId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "direct_messages" },
+        (payload) => {
+          const msg = payload.new as MessageItem;
+          if (msg.sender_id !== user.id && msg.receiver_id !== user.id) return;
+          setMessages((prev) => [msg, ...prev]);
+          setConversationMessages((prev) => {
+            const partner = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+            if (selectedConversation !== partner) return prev;
+            return [...prev, msg];
+          });
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, user, targetId, selectedConversation]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadAll();
+    setRefreshing(false);
+  }, [loadAll]);
+
+  // ─── Derived rank / xp values ──────────────────────────────
+  const level = isSelf ? selfXP.level : otherLevel;
+  const totalXp = isSelf ? selfXP.totalXp : otherTotalXp;
+  const xpCurrentLevel = isSelf ? selfXP.xpCurrentLevel : otherXp;
+  const xpRequired = isSelf ? selfXP.xpRequired : xpForLevel(otherLevel);
+  const xpProgress = xpRequired > 0 ? xpCurrentLevel / xpRequired : 0;
+  const streak = isSelf ? selfStreak : otherStreak;
+
+  const rank = rankForLevel(level);
+  const season = seasonRankForXp(totalXp);
+  const seasonProgress = season.xpForTier > 0 ? season.xpIntoTier / season.xpForTier : 0;
+
+  const acceptedFriends = friends.filter((f) => f.status === "accepted");
+  const primaryCar = cars.find((c) => c.is_primary) ?? cars[0] ?? null;
+  const otherCars = cars.filter((c) => c.id !== primaryCar?.id);
+
+  const unreadMessages = messages.filter((m) => !m.is_read && m.receiver_id === user?.id).length;
+  const notifCount = pendingRequests.length;
+
+  // ─── Actions: avatar / name (self) ─────────────────────────
+  const pickAndSetAvatar = useCallback(async (useCamera: boolean) => {
+    try {
+      if (Platform.OS !== "web") {
+        const perm = useCamera
+          ? await ImagePickerExpo.requestCameraPermissionsAsync()
+          : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== "granted") {
+          Alert.alert("Permission needed", "We need access to update your profile picture.");
+          return;
+        }
+      }
+      const result = useCamera
+        ? await ImagePickerExpo.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 })
+        : await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 });
+      if (result.canceled || !result.assets?.[0]) return;
+      setUploadingAvatar(true);
+      const ok = await updateProfilePicture(result.assets[0].uri);
+      if (ok) setProfileAvatar(result.assets[0].uri);
+      else Alert.alert("Error", "Could not update your profile picture.");
+    } catch {
+      Alert.alert("Error", "Something went wrong updating your photo.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }, [updateProfilePicture]);
+
+  const handleChangeAvatar = useCallback(() => {
+    if (!isSelf) return;
+    Alert.alert("Profile Picture", "Choose a new profile picture", [
+      { text: "Take Photo", onPress: () => pickAndSetAvatar(true) },
+      { text: "Choose from Library", onPress: () => pickAndSetAvatar(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [isSelf, pickAndSetAvatar]);
+
+  const saveName = useCallback(async () => {
+    const next = nameDraft.trim();
+    if (!user || !next) {
+      setEditingName(false);
+      return;
+    }
+    setProfileName(next);
+    setEditingName(false);
+    await supabase.from("profiles").update({ name: next }).eq("id", user.id);
+  }, [nameDraft, user]);
+
+  // ─── Actions: garage ───────────────────────────────────────
+  const handleAddCar = useCallback(async () => {
+    if (!user || !newCarName.trim()) return;
+    const { error } = await supabase.from("car_collections").insert({
+      user_id: user.id,
+      name: newCarName.trim(),
+      make: newCarMake.trim() || "Custom",
+      model: "",
+      year: newCarYear || "2024",
+      color: "#FF6B35",
+      color_name: "Custom",
+      hp: parseInt(newCarHP, 10) || 300,
+      mileage_km: 0,
+      is_primary: cars.length === 0,
+    });
+    if (!error) {
+      setNewCarName("");
+      setNewCarMake("");
+      setShowAddCar(false);
+      loadCars();
+    }
+  }, [user, newCarName, newCarMake, newCarYear, newCarHP, cars.length, loadCars]);
+
+  const handleDeleteCar = useCallback((carId: string) => {
+    Alert.alert("Remove Car", "Are you sure you want to remove this car?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          await supabase.from("car_collections").delete().eq("id", carId);
+          loadCars();
+        },
+      },
+    ]);
+  }, [loadCars]);
+
+  const handleSetPrimary = useCallback(async (carId: string) => {
+    if (!user) return;
+    await supabase.from("car_collections").update({ is_primary: false }).eq("user_id", user.id);
+    await supabase.from("car_collections").update({ is_primary: true }).eq("id", carId);
+    loadCars();
+  }, [user, loadCars]);
+
+  // ─── Premium car generation (paywalled) ────────────────────
+  const openPremium = useCallback((car: CarItem) => {
+    setPremiumTargetCar(car);
+    setPremiumOpen(true);
+  }, []);
+
+  // After a successful (simulated) payment, let the driver attach the
+  // generated render. Storing a photo_url marks the car as premium.
+  const runGeneration = useCallback(async (car: CarItem) => {
+    try {
+      if (Platform.OS !== "web") {
+        const perm = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== "granted") {
+          Alert.alert("Permission needed", "We need photo access to save your generated car.");
+          return;
+        }
+      }
+      const result = await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect: [16, 10], quality: 0.9 });
+      if (result.canceled || !result.assets?.[0]) return;
+      const uri = result.assets[0].uri;
+      const { error } = await supabase.from("car_collections").update({ photo_url: uri }).eq("id", car.id);
+      if (error) Alert.alert("Error", error.message);
+      else {
+        await loadCars();
+        Alert.alert("Unlocked!", `${car.name} has been generated and added to your garage.`);
+      }
+    } catch {
+      Alert.alert("Error", "Could not save your generated car.");
+    }
+  }, [loadCars]);
+
+  const handlePayPremium = useCallback(async () => {
+    if (!premiumTargetCar) return;
+    setPurchasing(true);
+    // Simulate the payment authorization round-trip.
+    setTimeout(async () => {
+      setPurchasing(false);
+      setPremiumOpen(false);
+      const car = premiumTargetCar;
+      setPremiumTargetCar(null);
+      await runGeneration(car);
+    }, 1400);
+  }, [premiumTargetCar, runGeneration]);
+
+  // ─── Actions: friends ──────────────────────────────────────
+  const handleAddFriendById = useCallback(async () => {
+    if (!user || !targetId) return;
+    setFriendActionLoading(true);
+    const { error } = await supabase.from("friends").insert({ user_id: user.id, friend_id: targetId, status: "pending" });
+    setFriendActionLoading(false);
+    if (error) Alert.alert("Error", error.message);
+    else {
+      setFriendState("pending_sent");
+      Alert.alert("Sent!", `Friend request sent to ${profileName}.`);
+    }
+  }, [user, targetId, profileName]);
+
+  const handleAcceptRequest = useCallback(async (friendshipId: string) => {
+    await supabase.from("friends").update({ status: "accepted" }).eq("id", friendshipId);
+    await Promise.all([loadInboxes(), loadFriends(), loadFriendState()]);
+  }, [loadInboxes, loadFriends, loadFriendState]);
+
+  const handleDeclineRequest = useCallback(async (friendshipId: string) => {
+    await supabase.from("friends").delete().eq("id", friendshipId);
+    await Promise.all([loadInboxes(), loadFriends(), loadFriendState()]);
+  }, [loadInboxes, loadFriends, loadFriendState]);
+
+  const handleSearchFriends = useCallback(async () => {
+    if (!friendQuery.trim() || !user) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, name, avatar")
+      .ilike("name", `%${friendQuery.trim()}%`)
+      .neq("id", user.id)
+      .limit(10);
+    if (data) {
+      const ids = data.map((p: { id: string }) => p.id);
+      const levelMap: Record<string, number> = {};
+      if (ids.length > 0) {
+        const { data: xpData } = await supabase.from("user_xp").select("user_id, level").in("user_id", ids);
+        (xpData ?? []).forEach((x: { user_id: string; level: number }) => { levelMap[x.user_id] = x.level; });
+      }
+      setFriendResults(
+        data.map((p: { id: string; name: string; avatar?: string }) => ({
+          id: p.id, name: p.name, level: levelMap[p.id] ?? 1, avatar: p.avatar,
+        }))
+      );
+    }
+  }, [friendQuery, user]);
+
+  const handleAddSearchFriend = useCallback(async (friendId: string, name: string) => {
+    if (!user) return;
+    const { error } = await supabase.from("friends").insert({ user_id: user.id, friend_id: friendId, status: "pending" });
+    if (error) Alert.alert("Error", error.message);
+    else {
+      Alert.alert("Sent!", `Friend request sent to ${name}`);
+      loadFriends();
+    }
+  }, [user, loadFriends]);
+
+  // ─── Actions: messages ─────────────────────────────────────
+  const openConversation = useCallback(async (partnerId: string) => {
+    if (!user) return;
+    setSelectedConversation(partnerId);
+    const { data } = await supabase
+      .from("direct_messages")
+      .select("*")
+      .or(
+        `and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`
+      )
+      .order("created_at", { ascending: true });
+    if (data) setConversationMessages(data as MessageItem[]);
+  }, [user]);
+
+  const sendMessage = useCallback(async () => {
+    if (!user || !selectedConversation || !messageInput.trim()) return;
+    const { error } = await supabase.from("direct_messages").insert({
+      sender_id: user.id,
+      receiver_id: selectedConversation,
+      content: messageInput.trim(),
+    });
+    if (!error) {
+      setMessageInput("");
+      openConversation(selectedConversation);
+      loadInboxes();
+    }
+  }, [user, selectedConversation, messageInput, openConversation, loadInboxes]);
+
+  const getFriendInfo = useCallback((partnerId: string): { name: string; avatar?: string } => {
+    const f = friends.find((fr) => fr.user_id === partnerId || fr.friend_id === partnerId);
+    if (f?.friend_profile?.name) return { name: f.friend_profile.name, avatar: f.friend_profile.avatar };
+    const req = pendingRequests.find((r) => r.user_id === partnerId);
+    if (req?.friend_profile?.name) return { name: req.friend_profile.name, avatar: req.friend_profile.avatar };
+    return { name: "Driver" };
+  }, [friends, pendingRequests]);
+
+  // ─── Header message button jumps to Messages tab ───────────
+  const openMessages = useCallback(() => {
+    setActiveTab("messages");
+    if (!isSelf && targetId) openConversation(targetId);
+  }, [isSelf, targetId, openConversation]);
+
+  // ─── Helpers ───────────────────────────────────────────────
+  const formatDuration = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+  const timeAgo = (dateStr: string): string => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
+  // ─── Not authenticated ─────────────────────────────────────
+  if (!isAuthenticated && isSelf) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
+        <View style={[styles.loginPrompt, { paddingTop: insets.top + 100 }]}>
+          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.loginIcon}>
+            <Car size={40} color="#FFFFFF" />
+          </LinearGradient>
+          <Text style={styles.loginTitle}>Join the Drive</Text>
+          <Text style={styles.loginDesc}>
+            Sign up to track your rides, collect cars, earn XP, and connect with fellow drivers.
+          </Text>
+          <TouchableOpacity style={styles.loginBtn} onPress={() => router.push("/login" as any)} activeOpacity={0.85}>
+            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.loginBtnGrad}>
+              <Text style={styles.loginBtnText}>Sign In</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.loginBtnSecondary} onPress={() => router.push("/signup" as any)} activeOpacity={0.7}>
+            <Text style={styles.loginBtnSecondaryText}>Create Account</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  const stats = [
+    { icon: Car, value: cars.length, label: "Cars", color: "#FF6B35" },
+    { icon: Users, value: acceptedFriends.length, label: "Friends", color: "#FF6B35" },
+    { icon: RouteIcon, value: trips.length, label: "Trips", color: "#FF6B35" },
+    { icon: Flame, value: streak, label: "Day Streak", color: "#FF6B35" },
+  ];
+
+  const TABS: { key: ProfileTab; label: string; icon: typeof Car; badge?: number }[] = [
+    { key: "garage", label: "Garage", icon: Car },
+    { key: "trips", label: "Trips", icon: RouteIcon },
+    { key: "friends", label: "Friends", icon: Users },
+    { key: "messages", label: "Messages", icon: MessageCircle, badge: unreadMessages },
+  ];
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 120, paddingTop: insets.top + 8 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
+      >
+        {/* ═══ TOP BAR: back (other) + bell + messages ═══ */}
+        <View style={styles.topBar}>
+          {!isSelf ? (
+            <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} activeOpacity={0.7}>
+              <ArrowLeft size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 42 }} />
+          )}
+          <View style={styles.topBarActions}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setNotifOpen(true)} activeOpacity={0.7}>
+              <Bell size={20} color="#FFFFFF" />
+              {notifCount > 0 && (
+                <View style={styles.iconBadge}>
+                  <Text style={styles.iconBadgeText}>{notifCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn} onPress={openMessages} activeOpacity={0.7}>
+              <MessageCircle size={20} color="#FFFFFF" />
+              {unreadMessages > 0 && (
+                <View style={styles.iconBadge}>
+                  <Text style={styles.iconBadgeText}>{unreadMessages}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ═══ IDENTITY + CURRENT RANK ═══ */}
+        <View style={styles.identityRow}>
+          <TouchableOpacity
+            style={styles.avatarSection}
+            onPress={handleChangeAvatar}
+            activeOpacity={isSelf ? 0.85 : 1}
+            disabled={!isSelf || uploadingAvatar}
+          >
+            <LinearGradient colors={["#FF6B35", "#FF8A50"]} style={styles.avatarRing}>
+              <View style={styles.avatarInner}>
+                {uploadingAvatar ? (
+                  <ActivityIndicator color="#FF6B35" />
+                ) : profileAvatar ? (
+                  <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
+                )}
+              </View>
+            </LinearGradient>
+            <View style={styles.levelBadge}>
+              <Text style={styles.levelBadgeText}>{level}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.identityInfo}>
+            <View style={styles.nameRow}>
+              {editingName ? (
+                <TextInput
+                  style={styles.nameInput}
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  autoFocus
+                  onBlur={saveName}
+                  onSubmitEditing={saveName}
+                  placeholderTextColor="#5A5A6E"
+                />
+              ) : (
+                <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
+              )}
+              {isSelf && !editingName && (
+                <TouchableOpacity
+                  onPress={() => { setNameDraft(profileName); setEditingName(true); }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Pencil size={15} color="#8A8A9A" />
+                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={styles.rankSubtitle}>{rank.name}</Text>
+          </View>
+
+          {/* Current rank card */}
+          <TouchableOpacity style={styles.rankCard} activeOpacity={0.85} onPress={() => router.push("/ranks" as any)}>
+            <Text style={styles.rankCardLabel}>CURRENT RANK</Text>
+            <RankBadge rank={rank} size={54} />
+            <Text style={styles.rankCardName}>{season.name}</Text>
+            <View style={styles.rankDivisionRow}>
+              <Text style={[styles.rankDivision, { color: season.color }]}>{season.division}</Text>
+              <Info size={11} color="#5A5A6E" />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* ═══ LEVEL / XP BAR ═══ */}
+        <View style={styles.xpBlock}>
+          <View style={styles.xpRow}>
+            <Text style={styles.xpLevelLabel}>LEVEL {level}</Text>
+            <Text style={styles.xpValue}>{xpCurrentLevel} / {xpRequired} XP</Text>
+          </View>
+          <View style={styles.xpTrack}>
+            <LinearGradient
+              colors={["#FF6B35", "#FFD700"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[styles.xpFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]}
+            />
+          </View>
+          <Text style={styles.xpToNext}>{Math.max(xpRequired - xpCurrentLevel, 0)} XP to next level</Text>
+        </View>
+
+        {/* ═══ FRIEND ACTION (other user) ═══ */}
+        {!isSelf && (
+          <View style={styles.friendActionRow}>
+            {friendState === "none" && (
+              <TouchableOpacity style={styles.primaryAction} onPress={handleAddFriendById} disabled={friendActionLoading} activeOpacity={0.85}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primaryActionGrad}>
+                  {friendActionLoading ? <ActivityIndicator color="#FFFFFF" /> : (<><UserPlus size={17} color="#FFFFFF" /><Text style={styles.primaryActionText}>Add Friend</Text></>)}
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            {friendState === "pending_sent" && (
+              <View style={[styles.statusPill, { borderColor: "rgba(255,215,0,0.3)" }]}>
+                <Clock size={15} color="#FFD700" /><Text style={[styles.statusPillText, { color: "#FFD700" }]}>Request Pending</Text>
+              </View>
+            )}
+            {friendState === "pending_received" && pendingRequests.find((r) => r.user_id === targetId) && (
+              <View style={styles.friendActionSplit}>
+                <TouchableOpacity
+                  style={[styles.primaryAction, { flex: 1 }]}
+                  onPress={() => { const req = pendingRequests.find((r) => r.user_id === targetId); if (req) handleAcceptRequest(req.id); }}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient colors={["#22C55E", "#16A34A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primaryActionGrad}>
+                    <UserCheck size={17} color="#FFFFFF" /><Text style={styles.primaryActionText}>Accept</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )}
+            {friendState === "friends" && (
+              <View style={[styles.statusPill, { borderColor: "rgba(34,197,94,0.3)", flex: 1 }]}>
+                <UserCheck size={15} color="#22C55E" /><Text style={[styles.statusPillText, { color: "#22C55E" }]}>Friends</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.secondaryAction} onPress={() => { if (targetId) { setActiveTab("messages"); openConversation(targetId); } }} activeOpacity={0.85}>
+              <MessageCircle size={17} color="#FF6B35" /><Text style={styles.secondaryActionText}>Message</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ═══ STAT CARDS ═══ */}
+        <View style={styles.statsRow}>
+          {stats.map((s) => (
+            <View key={s.label} style={styles.statCard}>
+              <View style={styles.statIconCircle}>
+                <s.icon size={16} color={s.color} />
+              </View>
+              <Text style={styles.statValue}>{s.value}</Text>
+              <Text style={styles.statLabel}>{s.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* ═══ CONTENT TABS ═══ */}
+        <View style={styles.contentTabs}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.contentTab, activeTab === tab.key && styles.contentTabActive]}
+              onPress={() => setActiveTab(tab.key)}
+              activeOpacity={0.7}
+            >
+              <tab.icon size={15} color={activeTab === tab.key ? "#FF6B35" : "#5A5A6E"} />
+              <Text style={[styles.contentTabText, activeTab === tab.key && styles.contentTabTextActive]}>{tab.label}</Text>
+              {tab.badge ? (
+                <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{tab.badge}</Text></View>
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ═══ GARAGE TAB ═══ */}
+        {activeTab === "garage" && (
+          <View style={styles.section}>
+            {loading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : primaryCar ? (
+              <FeaturedCar
+                car={primaryCar}
+                isSelf={isSelf}
+                onGenerate={() => openPremium(primaryCar)}
+                onDelete={() => handleDeleteCar(primaryCar.id)}
+              />
+            ) : (
+              <View style={styles.emptyState}>
+                <Car size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No cars yet</Text>
+                <Text style={styles.emptySub}>{isSelf ? "Add your first ride to the garage" : "This driver hasn't added a car"}</Text>
+              </View>
+            )}
+
+            {/* Secondary cars */}
+            {otherCars.map((car) => (
+              <TouchableOpacity
+                key={car.id}
+                style={styles.garageCard}
+                activeOpacity={0.8}
+                onLongPress={isSelf ? () => handleDeleteCar(car.id) : undefined}
+              >
+                <View style={[styles.carColorBar, { backgroundColor: car.color }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.carName}>{car.name}</Text>
+                  <View style={styles.carMeta}>
+                    <Text style={styles.carMetaText}>{car.make}</Text>
+                    <Text style={styles.carMetaDot}>•</Text>
+                    <Text style={styles.carMetaText}>{car.year}</Text>
+                    <Text style={styles.carMetaDot}>•</Text>
+                    <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
+                  </View>
+                </View>
+                {isSelf && (
+                  <TouchableOpacity onPress={() => handleSetPrimary(car.id)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    {car.is_primary ? <CheckCircle2 size={18} color="#FF6B35" /> : <Circle size={18} color="#5A5A6E" />}
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            ))}
+
+            {/* Add a car (self only) */}
+            {isSelf && (showAddCar ? (
+              <View style={styles.addCarForm}>
+                <TextInput style={styles.addCarInput} placeholder="Car name (e.g. Night Fury)" placeholderTextColor="#5A5A6E" value={newCarName} onChangeText={setNewCarName} />
+                <View style={styles.addCarFormRow}>
+                  <TextInput style={[styles.addCarInput, { flex: 1 }]} placeholder="Make (e.g. BMW)" placeholderTextColor="#5A5A6E" value={newCarMake} onChangeText={setNewCarMake} />
+                  <TextInput style={[styles.addCarInput, { flex: 1, marginLeft: 8 }]} placeholder="Year" placeholderTextColor="#5A5A6E" value={newCarYear} onChangeText={setNewCarYear} keyboardType="number-pad" />
+                </View>
+                <TextInput style={styles.addCarInput} placeholder="HP" placeholderTextColor="#5A5A6E" value={newCarHP} onChangeText={setNewCarHP} keyboardType="number-pad" />
+                <View style={styles.addCarActions}>
+                  <TouchableOpacity style={styles.addCarCancel} onPress={() => setShowAddCar(false)}><Text style={styles.addCarCancelText}>Cancel</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.addCarSubmit} onPress={handleAddCar}><Text style={styles.addCarSubmitText}>Add Car</Text></TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addCarButton} onPress={() => setShowAddCar(true)} activeOpacity={0.7}>
+                <View style={styles.addCarIcon}><Plus size={20} color="#FF6B35" /></View>
+                <Text style={styles.addCarText}>Add a car to your garage</Text>
+              </TouchableOpacity>
+            ))}
+
+            {/* Season card */}
+            <TouchableOpacity style={styles.seasonCard} activeOpacity={0.9} onPress={() => router.push("/ranks" as any)}>
+              <View style={styles.seasonBadgeWrap}>
+                <RankBadge rank={rank} size={54} />
+              </View>
+              <View style={styles.seasonMiddle}>
+                <Text style={styles.seasonLabel}>SEASON {SEASON_NUMBER}</Text>
+                <Text style={styles.seasonName}>{season.name}</Text>
+                <View style={styles.seasonTrack}>
+                  <LinearGradient colors={[season.color, "#FFD700"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.seasonFill, { width: `${Math.min(seasonProgress * 100, 100)}%` }]} />
+                </View>
+                <Text style={styles.seasonXp}>{season.xpIntoTier} / {season.xpForTier} XP</Text>
+              </View>
+              <View style={styles.seasonDivider} />
+              <View style={styles.seasonNext}>
+                <Text style={styles.seasonNextLabel}>NEXT RANK</Text>
+                {season.next && (
+                  <>
+                    <RankBadge rank={rank} size={30} />
+                    <Text style={styles.seasonNextName}>{season.next.name}</Text>
+                    <Text style={styles.seasonNextXp}>{season.next.requiredTotalXp} XP</Text>
+                  </>
+                )}
+                <ChevronRight size={16} color="#5A5A6E" style={{ position: "absolute", right: 0, top: "50%" }} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Live Feed + Inbox */}
+            <View style={styles.feedRow}>
+              <View style={styles.feedCol}>
+                <View style={styles.feedHeader}>
+                  <View style={styles.feedTitleRow}>
+                    <View style={styles.liveDot} />
+                    <Text style={styles.feedTitle}>LIVE FEED</Text>
+                  </View>
+                  <Text style={styles.feedSeeAll}>See All</Text>
+                </View>
+                {events.slice(0, 3).map((e) => (
+                  <TouchableOpacity key={e.id} style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push("/(tabs)/map" as any)}>
+                    <View style={[styles.feedIcon, { backgroundColor: "rgba(139,92,246,0.15)" }]}>
+                      {e.is_live ? <Radio size={13} color="#8B5CF6" /> : <MapPin size={13} color="#8B5CF6" />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.feedItemTitle} numberOfLines={1}>{e.title}</Text>
+                      <Text style={styles.feedItemSub} numberOfLines={1}>
+                        {e.is_live ? "Live now" : `${e.participant_count} joined`}
+                      </Text>
+                    </View>
+                    <Text style={styles.feedTime}>{timeAgo(e.starts_at)}</Text>
+                  </TouchableOpacity>
+                ))}
+                {events.length === 0 && <Text style={styles.feedEmpty}>No nearby activity</Text>}
+              </View>
+
+              <View style={styles.feedCol}>
+                <View style={styles.feedHeader}>
+                  <Text style={styles.feedTitle}>INBOX</Text>
+                  <View style={styles.feedHeaderRight}>
+                    {unreadMessages > 0 && <View style={styles.feedHeaderBadge}><Text style={styles.feedHeaderBadgeText}>{unreadMessages}</Text></View>}
+                    <TouchableOpacity onPress={() => setActiveTab("messages")}><Text style={styles.feedSeeAll}>See All</Text></TouchableOpacity>
+                  </View>
+                </View>
+                {/* Reward notification */}
+                <TouchableOpacity style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
+                  <View style={[styles.feedIcon, { backgroundColor: "rgba(255,215,0,0.15)" }]}><Trophy size={13} color="#FFD700" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.feedItemTitle} numberOfLines={1}>Season Rewards</Text>
+                    <Text style={styles.feedItemSub} numberOfLines={1}>You&apos;ve earned {totalXp} XP!</Text>
+                  </View>
+                </TouchableOpacity>
+                {inboxConversations(messages, user?.id).slice(0, 2).map(([partnerId, last]) => {
+                  const p = getFriendInfo(partnerId);
+                  return (
+                    <TouchableOpacity key={partnerId} style={styles.feedItem} activeOpacity={0.7} onPress={() => { setActiveTab("messages"); openConversation(partnerId); }}>
+                      <View style={[styles.feedIcon, { backgroundColor: "rgba(59,130,246,0.15)" }]}><MessageCircle size={13} color="#3B82F6" /></View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.feedItemTitle} numberOfLines={1}>{p.name}</Text>
+                        <Text style={styles.feedItemSub} numberOfLines={1}>{last.sender_id === user?.id ? "You: " : ""}{last.content}</Text>
+                      </View>
+                      <Text style={styles.feedTime}>{timeAgo(last.created_at)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {messages.length === 0 && <Text style={styles.feedEmpty}>No messages yet</Text>}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* ═══ TRIPS TAB ═══ */}
+        {activeTab === "trips" && (
+          <View style={styles.section}>
+            {loading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : trips.length === 0 ? (
+              <View style={styles.emptyState}>
+                <RouteIcon size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No trips recorded</Text>
+                <Text style={styles.emptySub}>{isSelf ? "Start recording a drive to see it here" : "This driver has no trips yet"}</Text>
+              </View>
+            ) : (
+              trips.map((trip) => (
+                <View key={trip.id} style={styles.tripCard}>
+                  <View style={styles.tripHeader}>
+                    <View style={styles.tripRoute}>
+                      <MapPin size={14} color="#8A8A9A" />
+                      <Text style={styles.tripDest} numberOfLines={1}>{trip.destination_name || trip.origin_name || "Unknown"}</Text>
+                    </View>
+                    {trip.was_faster_than_estimation && (
+                      <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>
+                    )}
+                  </View>
+                  <View style={styles.tripStats}>
+                    <View style={styles.tripStat}><RouteIcon size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.distance_km.toFixed(1)} km</Text></View>
+                    <View style={styles.tripStat}><Timer size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{formatDuration(trip.duration_seconds)}</Text></View>
+                    <View style={styles.tripStat}><Gauge size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.avg_speed_kmh.toFixed(0)} km/h</Text></View>
+                    <View style={styles.tripStat}><Trophy size={13} color="#FFD700" /><Text style={styles.tripStatText}>+{trip.xp_earned}</Text></View>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ═══ FRIENDS TAB ═══ */}
+        {activeTab === "friends" && (
+          <View style={styles.section}>
+            {isSelf && (
+              <>
+                <View style={styles.searchRow}>
+                  <View style={styles.searchInputWrap}>
+                    <Search size={16} color="#5A5A6E" style={{ marginRight: 8 }} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search drivers by name..."
+                      placeholderTextColor="#5A5A6E"
+                      value={friendQuery}
+                      onChangeText={setFriendQuery}
+                      onSubmitEditing={handleSearchFriends}
+                      returnKeyType="search"
+                    />
+                    {friendQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => { setFriendQuery(""); setFriendResults([]); }}><X size={16} color="#5A5A6E" /></TouchableOpacity>
+                    )}
+                  </View>
+                  <TouchableOpacity style={styles.searchBtn} onPress={handleSearchFriends} activeOpacity={0.7}><Text style={styles.searchBtnText}>Find</Text></TouchableOpacity>
+                </View>
+                {friendResults.map((r) => (
+                  <View key={r.id} style={styles.friendCard}>
+                    <TouchableOpacity style={styles.friendInfo} onPress={() => router.push(`/user/${r.id}` as any)} activeOpacity={0.7}>
+                      <View style={styles.friendAvatar}>
+                        {r.avatar ? <Image source={{ uri: r.avatar }} style={styles.friendAvatarImg} /> : <Text style={styles.friendAvatarText}>{r.name[0]?.toUpperCase()}</Text>}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>{r.name}</Text>
+                        <Text style={styles.friendStatus}>{rankForLevel(r.level).name} · Level {r.level}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.friendAddBtn} onPress={() => handleAddSearchFriend(r.id, r.name)} activeOpacity={0.7}><UserPlus size={16} color="#FFFFFF" /></TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            )}
+
+            {loading ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+            ) : acceptedFriends.length === 0 && friendResults.length === 0 ? (
+              <View style={[styles.emptyState, { marginTop: 20 }]}>
+                <Users size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No friends yet</Text>
+                <Text style={styles.emptySub}>{isSelf ? "Search for drivers and add them" : "This driver has no friends yet"}</Text>
+              </View>
+            ) : (
+              acceptedFriends.map((f) => {
+                const otherId = f.user_id === targetId ? f.friend_id : f.user_id;
+                return (
+                  <View key={f.id} style={styles.friendCard}>
+                    <TouchableOpacity style={styles.friendInfo} onPress={() => router.push(`/user/${otherId}` as any)} activeOpacity={0.7}>
+                      <View style={styles.friendAvatar}>
+                        {f.friend_profile?.avatar ? <Image source={{ uri: f.friend_profile.avatar }} style={styles.friendAvatarImg} /> : <Text style={styles.friendAvatarText}>{(f.friend_profile?.name ?? "?")[0]?.toUpperCase()}</Text>}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>{f.friend_profile?.name ?? "Unknown"}</Text>
+                        <Text style={styles.friendStatus}>Friend</Text>
+                      </View>
+                    </TouchableOpacity>
+                    {isSelf && (
+                      <TouchableOpacity style={styles.friendMsgBtn} onPress={() => { setActiveTab("messages"); openConversation(otherId); }}><MessageCircle size={17} color="#FF6B35" /></TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
+        {/* ═══ MESSAGES TAB ═══ */}
+        {activeTab === "messages" && (
+          <View style={styles.section}>
+            {!isSelf && !selectedConversation && targetId ? (
+              <View style={styles.emptyState}>
+                <MessageCircle size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>Message {profileName}</Text>
+                <TouchableOpacity style={[styles.searchBtn, { marginTop: 12 }]} onPress={() => openConversation(targetId)}><Text style={styles.searchBtnText}>Open Chat</Text></TouchableOpacity>
+              </View>
+            ) : selectedConversation ? (
+              <View>
+                <TouchableOpacity style={styles.convoBack} onPress={() => { setSelectedConversation(null); setConversationMessages([]); }}>
+                  <ArrowLeft size={20} color="#FFFFFF" />
+                  <Text style={styles.convoBackText}>{getFriendInfo(selectedConversation).name}</Text>
+                </TouchableOpacity>
+                <View style={styles.convoMessages}>
+                  {conversationMessages.map((msg) => (
+                    <View key={msg.id} style={[styles.msgBubble, msg.sender_id === user?.id ? styles.msgSent : styles.msgReceived]}>
+                      <Text style={styles.msgText}>{msg.content}</Text>
+                      <Text style={styles.msgTime}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text>
+                    </View>
+                  ))}
+                  {conversationMessages.length === 0 && <Text style={styles.feedEmpty}>No messages yet. Say hello!</Text>}
+                </View>
+                <View style={styles.msgInputRow}>
+                  <TextInput style={styles.msgInput} placeholder="Type a message..." placeholderTextColor="#5A5A6E" value={messageInput} onChangeText={setMessageInput} multiline />
+                  <TouchableOpacity style={[styles.msgSendBtn, !messageInput.trim() && { opacity: 0.4 }]} onPress={sendMessage} disabled={!messageInput.trim()}><Send size={18} color="#FFFFFF" /></TouchableOpacity>
+                </View>
+              </View>
+            ) : messages.length === 0 ? (
+              <View style={styles.emptyState}>
+                <MessageCircle size={40} color="#3A3A4E" />
+                <Text style={styles.emptyText}>No messages</Text>
+                <Text style={styles.emptySub}>Chat with your friends here</Text>
+              </View>
+            ) : (
+              inboxConversations(messages, user?.id).map(([partnerId, last]) => {
+                const p = getFriendInfo(partnerId);
+                return (
+                  <TouchableOpacity key={partnerId} style={styles.convoRow} onPress={() => openConversation(partnerId)} activeOpacity={0.7}>
+                    <View style={styles.convoAvatar}>
+                      {p.avatar ? <Image source={{ uri: p.avatar }} style={styles.friendAvatarImg} /> : <Text style={styles.friendAvatarText}>{p.name[0]?.toUpperCase()}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>{p.name}</Text>
+                      <Text style={styles.convoPreview} numberOfLines={1}>{last.sender_id === user?.id ? "You: " : ""}{last.content}</Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.feedTime}>{timeAgo(last.created_at)}</Text>
+                      {!last.is_read && last.receiver_id === user?.id && <View style={styles.unreadDot} />}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
+        )}
+
+        {/* ═══ SETTINGS (self only) ═══ */}
+        {isSelf && (
+          <View style={styles.settingsSection}>
+            <Text style={styles.settingsTitle}>Settings</Text>
+            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
+              <View style={styles.settingLeft}><Trophy size={18} color="#FFD700" /><Text style={styles.settingText}>Levels & Ranks</Text></View>
+              <ChevronRight size={16} color="#5A5A6E" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/terms-and-conditions" as any)}>
+              <View style={styles.settingLeft}><Shield size={18} color="#8A8A9A" /><Text style={styles.settingText}>Privacy & Terms</Text></View>
+              <ChevronRight size={16} color="#5A5A6E" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
+              <View style={styles.settingLeft}><HelpCircle size={18} color="#8A8A9A" /><Text style={styles.settingText}>Help & Support</Text></View>
+              <ChevronRight size={16} color="#5A5A6E" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* ═══ NOTIFICATIONS MODAL ═══ */}
+      <Modal visible={notifOpen} transparent animationType="slide" onRequestClose={() => setNotifOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setNotifOpen(false)} />
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <View style={styles.modalTitleRow}><Bell size={18} color="#FF6B35" /><Text style={styles.modalTitle}>Notifications</Text></View>
+            <TouchableOpacity onPress={() => setNotifOpen(false)}><X size={20} color="#8A8A9A" /></TouchableOpacity>
+          </View>
+          <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalSection}>Friend Requests</Text>
+            {pendingRequests.length === 0 ? (
+              <View style={styles.notifEmpty}>
+                <MailOpen size={32} color="#3A3A4E" />
+                <Text style={styles.emptySub}>No pending friend requests</Text>
+              </View>
+            ) : (
+              pendingRequests.map((req) => (
+                <View key={req.id} style={styles.notifRow}>
+                  <TouchableOpacity style={styles.friendInfo} activeOpacity={0.7} onPress={() => { setNotifOpen(false); router.push(`/user/${req.user_id}` as any); }}>
+                    <View style={styles.friendAvatar}>
+                      {req.friend_profile?.avatar ? <Image source={{ uri: req.friend_profile.avatar }} style={styles.friendAvatarImg} /> : <Text style={styles.friendAvatarText}>{(req.friend_profile?.name ?? "?")[0]?.toUpperCase()}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>{req.friend_profile?.name ?? "A driver"}</Text>
+                      <Text style={styles.friendStatus}>wants to be friends</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <View style={styles.notifActions}>
+                    <TouchableOpacity style={styles.notifAccept} onPress={() => handleAcceptRequest(req.id)}><Check size={18} color="#FFFFFF" /></TouchableOpacity>
+                    <TouchableOpacity style={styles.notifDecline} onPress={() => handleDeclineRequest(req.id)}><X size={18} color="#EF4444" /></TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ═══ PREMIUM PAYWALL MODAL ═══ */}
+      <Modal visible={premiumOpen} transparent animationType="slide" onRequestClose={() => setPremiumOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => !purchasing && setPremiumOpen(false)} />
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+          <LinearGradient colors={["rgba(255,107,53,0.18)", "rgba(255,59,111,0.06)"]} style={styles.premiumHero}>
+            <View style={styles.premiumBadge}><Sparkles size={14} color="#FFD700" /><Text style={styles.premiumBadgeText}>PREMIUM</Text></View>
+            <Text style={styles.premiumTitle}>Generate Your Car</Text>
+            <Text style={styles.premiumDesc}>
+              Turn {premiumTargetCar?.name ?? "your car"} into a stunning, photorealistic render for your garage and profile — visible to every driver who views your page.
+            </Text>
+          </LinearGradient>
+          <View style={styles.premiumPerks}>
+            {["Photorealistic AI car render", "Featured on your public profile", "Premium showcase card"].map((perk) => (
+              <View key={perk} style={styles.premiumPerkRow}><Check size={16} color="#22C55E" /><Text style={styles.premiumPerkText}>{perk}</Text></View>
+            ))}
+          </View>
+          <View style={styles.premiumPriceRow}>
+            <Text style={styles.premiumPriceLabel}>One-time</Text>
+            <Text style={styles.premiumPrice}>Rp {PREMIUM_CAR_PRICE.toLocaleString("id-ID")}</Text>
+          </View>
+          <TouchableOpacity style={styles.premiumPayBtn} onPress={handlePayPremium} disabled={purchasing} activeOpacity={0.85}>
+            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.premiumPayGrad}>
+              {purchasing ? <ActivityIndicator color="#FFFFFF" /> : (<><Lock size={16} color="#FFFFFF" /><Text style={styles.premiumPayText}>Pay & Generate</Text></>)}
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => !purchasing && setPremiumOpen(false)} disabled={purchasing}>
+            <Text style={styles.premiumCancel}>Maybe later</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+// ─── Featured car card (premium showcase) ──────────────────
+function FeaturedCar({
+  car,
+  isSelf,
+  onGenerate,
+  onDelete,
+}: {
+  car: CarItem;
+  isSelf: boolean;
+  onGenerate: () => void;
+  onDelete: () => void;
+}) {
+  const hasRender = !!car.photo_url;
+  return (
+    <View style={styles.featuredCard}>
+      <LinearGradient colors={["#1A1206", "#0D0A08"]} style={styles.featuredBg}>
+        <View style={[styles.featuredAccent, { backgroundColor: car.color }]} />
+        <View style={styles.featuredTop}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.featuredNameRow}>
+              <Text style={styles.featuredName} numberOfLines={1}>{car.name}</Text>
+              {hasRender && <Star size={15} color="#FFD700" fill="#FFD700" />}
+            </View>
+            <View style={styles.carMeta}>
+              <Text style={styles.carMetaText}>{car.make}</Text>
+              <Text style={styles.carMetaDot}>•</Text>
+              <Text style={styles.carMetaText}>{car.year}</Text>
+              <Text style={styles.carMetaDot}>•</Text>
+              <Text style={[styles.carMetaText, { color: "#FF6B35" }]}>{car.hp} HP</Text>
+            </View>
+          </View>
+          {isSelf && (
+            <TouchableOpacity onPress={onDelete} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Trash2 size={16} color="#5A5A6E" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {hasRender ? (
+          <Image source={{ uri: car.photo_url as string }} style={styles.featuredImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.featuredLocked}>
+            <View style={styles.featuredCarSilhouette}>
+              <Car size={64} color="#2A2A38" />
+            </View>
+            <View style={styles.premiumLockPill}>
+              <Sparkles size={12} color="#FFD700" />
+              <Text style={styles.premiumLockText}>PREMIUM</Text>
+            </View>
+            {isSelf ? (
+              <TouchableOpacity style={styles.generateBtn} onPress={onGenerate} activeOpacity={0.85}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.generateGrad}>
+                  <Sparkles size={15} color="#FFFFFF" />
+                  <Text style={styles.generateText}>Generate My Car</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.featuredLockedNote}>Not generated yet</Text>
+            )}
+          </View>
+        )}
+      </LinearGradient>
+    </View>
+  );
+}
+
+// Group DMs into latest-per-partner conversations, newest first.
+function inboxConversations(messages: MessageItem[], myId?: string): Array<[string, MessageItem]> {
+  const convos = new Map<string, MessageItem>();
+  messages.forEach((m) => {
+    const partnerId = m.sender_id === myId ? m.receiver_id : m.sender_id;
+    const existing = convos.get(partnerId);
+    if (!existing || new Date(m.created_at) > new Date(existing.created_at)) convos.set(partnerId, m);
+  });
+  return Array.from(convos.entries()).sort(
+    (a, b) => new Date(b[1].created_at).getTime() - new Date(a[1].created_at).getTime()
+  );
+}
+
+// ─── Styles ─────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#060609" },
+  bg: { ...StyleSheet.absoluteFillObject },
+
+  // Login prompt
+  loginPrompt: { flex: 1, alignItems: "center", paddingHorizontal: 32 },
+  loginIcon: { width: 80, height: 80, borderRadius: 24, justifyContent: "center", alignItems: "center", marginBottom: 24 },
+  loginTitle: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", marginBottom: 8 },
+  loginDesc: { fontSize: 15, color: "#8A8A9A", textAlign: "center", lineHeight: 22, marginBottom: 32 },
+  loginBtn: { width: "100%", borderRadius: 14, overflow: "hidden", marginBottom: 12 },
+  loginBtnGrad: { height: 52, justifyContent: "center", alignItems: "center" },
+  loginBtnText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  loginBtnSecondary: { width: "100%", height: 52, borderRadius: 14, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  loginBtnSecondaryText: { fontSize: 16, fontWeight: "600", color: "#FFFFFF" },
+
+  // Top bar
+  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 8 },
+  topBarActions: { flexDirection: "row", gap: 10 },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
+  iconBadge: { position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#060609" },
+  iconBadgeText: { fontSize: 10, fontWeight: "800", color: "#FFFFFF" },
+
+  // Identity
+  identityRow: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, gap: 12, marginBottom: 14 },
+  avatarSection: { position: "relative" },
+  avatarRing: { width: 70, height: 70, borderRadius: 35, justifyContent: "center", alignItems: "center", padding: 3 },
+  avatarInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#0A0A0F", justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  avatarLetter: { fontSize: 26, fontWeight: "800", color: "#FF6B35" },
+  avatarImage: { width: 64, height: 64, borderRadius: 32 },
+  levelBadge: { position: "absolute", bottom: -2, right: -2, minWidth: 24, height: 24, paddingHorizontal: 5, borderRadius: 12, backgroundColor: "#FFD700", justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: "#060609" },
+  levelBadgeText: { fontSize: 12, fontWeight: "800", color: "#000" },
+  identityInfo: { flex: 1, paddingTop: 6 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  userName: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
+  nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
+  rankSubtitle: { fontSize: 14, color: "#FF6B35", fontWeight: "700", marginTop: 2 },
+
+  // Current rank card
+  rankCard: { width: 108, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", alignItems: "center", paddingVertical: 10, paddingHorizontal: 6 },
+  rankCardLabel: { fontSize: 8, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.8, marginBottom: 4 },
+  rankCardName: { fontSize: 13, fontWeight: "800", color: "#FFFFFF", marginTop: 4 },
+  rankDivisionRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  rankDivision: { fontSize: 9, fontWeight: "800", letterSpacing: 0.8 },
+
+  // XP block
+  xpBlock: { paddingHorizontal: 16, marginBottom: 16 },
+  xpRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  xpLevelLabel: { fontSize: 12, fontWeight: "800", color: "#B0B0BE", letterSpacing: 0.5 },
+  xpValue: { fontSize: 12, fontWeight: "700", color: "#8A8A9A" },
+  xpTrack: { height: 7, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
+  xpFill: { height: "100%", borderRadius: 4 },
+  xpToNext: { fontSize: 11, color: "#FF6B35", fontWeight: "700", marginTop: 6 },
+
+  // Friend action row
+  friendActionRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 16 },
+  friendActionSplit: { flex: 1, flexDirection: "row", gap: 8 },
+  primaryAction: { flex: 1, borderRadius: 14, overflow: "hidden" },
+  primaryActionGrad: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48 },
+  primaryActionText: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  secondaryAction: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, paddingHorizontal: 18, borderRadius: 14, backgroundColor: "rgba(255,107,53,0.1)", borderWidth: 1, borderColor: "rgba(255,107,53,0.3)" },
+  secondaryActionText: { fontSize: 15, fontWeight: "700", color: "#FF6B35" },
+  statusPill: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, paddingHorizontal: 16, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.03)", borderWidth: 1 },
+  statusPillText: { fontSize: 14, fontWeight: "700" },
+
+  // Stat cards
+  statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 16 },
+  statCard: { flex: 1, alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  statIconCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center", marginBottom: 6 },
+  statValue: { fontSize: 19, fontWeight: "800", color: "#FFFFFF" },
+  statLabel: { fontSize: 10, color: "#8A8A9A", marginTop: 1 },
+
+  // Content tabs
+  contentTabs: { flexDirection: "row", gap: 6, paddingHorizontal: 16, marginBottom: 12 },
+  contentTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.03)" },
+  contentTabActive: { backgroundColor: "rgba(255,107,53,0.14)", borderWidth: 1, borderColor: "rgba(255,107,53,0.3)" },
+  contentTabText: { fontSize: 12, fontWeight: "700", color: "#5A5A6E" },
+  contentTabTextActive: { color: "#FF6B35" },
+  tabBadge: { minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
+  tabBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
+
+  section: { paddingHorizontal: 16 },
+
+  // Empty states
+  emptyState: { alignItems: "center", paddingVertical: 40 },
+  emptyText: { fontSize: 16, fontWeight: "700", color: "#8A8A9A", marginTop: 12 },
+  emptySub: { fontSize: 13, color: "#5A5A6E", textAlign: "center", marginTop: 6 },
+
+  // Featured car
+  featuredCard: { borderRadius: 20, overflow: "hidden", marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,107,53,0.25)" },
+  featuredBg: { padding: 16 },
+  featuredAccent: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  featuredTop: { flexDirection: "row", alignItems: "flex-start", marginBottom: 12 },
+  featuredNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  featuredName: { fontSize: 20, fontWeight: "800", color: "#FFFFFF" },
+  featuredImage: { width: "100%", height: 170, borderRadius: 14, backgroundColor: "#000" },
+  featuredLocked: { height: 170, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  featuredCarSilhouette: { position: "absolute", opacity: 0.5 },
+  premiumLockPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,215,0,0.4)", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 14 },
+  premiumLockText: { fontSize: 10, fontWeight: "800", color: "#FFD700", letterSpacing: 1 },
+  generateBtn: { borderRadius: 12, overflow: "hidden" },
+  generateGrad: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, height: 44 },
+  generateText: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  featuredLockedNote: { fontSize: 13, color: "#5A5A6E", fontWeight: "600" },
+
+  // Garage secondary cards
+  garageCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
+  carColorBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  carName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  carMeta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
+  carMetaText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
+  carMetaDot: { fontSize: 12, color: "#3A3A4E" },
+
+  // Add car
+  addCarButton: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderStyle: "dashed", marginBottom: 16 },
+  addCarIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center" },
+  addCarText: { fontSize: 14, color: "#8A8A9A", fontWeight: "600" },
+  addCarForm: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 16, gap: 10 },
+  addCarFormRow: { flexDirection: "row" },
+  addCarInput: { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: "#FFFFFF", fontSize: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  addCarActions: { flexDirection: "row", gap: 10, marginTop: 2 },
+  addCarCancel: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)" },
+  addCarCancelText: { color: "#8A8A9A", fontWeight: "700" },
+  addCarSubmit: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#FF6B35" },
+  addCarSubmitText: { color: "#FFFFFF", fontWeight: "700" },
+
+  // Season card
+  seasonCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 18, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  seasonBadgeWrap: { marginRight: 12 },
+  seasonMiddle: { flex: 1 },
+  seasonLabel: { fontSize: 10, fontWeight: "800", color: "#FF6B35", letterSpacing: 1 },
+  seasonName: { fontSize: 17, fontWeight: "800", color: "#FFFFFF", marginTop: 2, marginBottom: 8 },
+  seasonTrack: { height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", overflow: "hidden" },
+  seasonFill: { height: "100%", borderRadius: 3 },
+  seasonXp: { fontSize: 11, color: "#8A8A9A", fontWeight: "700", marginTop: 6 },
+  seasonDivider: { width: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginHorizontal: 12 },
+  seasonNext: { width: 88, alignItems: "center", justifyContent: "center" },
+  seasonNextLabel: { fontSize: 8, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.6, marginBottom: 4 },
+  seasonNextName: { fontSize: 12, fontWeight: "800", color: "#FFFFFF", marginTop: 3 },
+  seasonNextXp: { fontSize: 10, color: "#3B82F6", fontWeight: "700", marginTop: 1 },
+
+  // Live feed + inbox
+  feedRow: { flexDirection: "row", gap: 10, marginBottom: 8 },
+  feedCol: { flex: 1, backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 16, padding: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  feedHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  feedTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#22C55E" },
+  feedTitle: { fontSize: 10, fontWeight: "800", color: "#B0B0BE", letterSpacing: 0.5 },
+  feedHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  feedHeaderBadge: { minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
+  feedHeaderBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
+  feedSeeAll: { fontSize: 10, fontWeight: "700", color: "#FF6B35" },
+  feedItem: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  feedIcon: { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  feedItemTitle: { fontSize: 11, fontWeight: "700", color: "#FFFFFF" },
+  feedItemSub: { fontSize: 10, color: "#8A8A9A", marginTop: 1 },
+  feedTime: { fontSize: 9, color: "#5A5A6E", fontWeight: "600" },
+  feedEmpty: { fontSize: 11, color: "#5A5A6E", textAlign: "center", paddingVertical: 12 },
+
+  // Trips
+  tripCard: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  tripHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  tripRoute: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
+  tripDest: { fontSize: 14, fontWeight: "700", color: "#FFFFFF", flex: 1 },
+  tripFast: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(255,215,0,0.12)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  tripFastText: { fontSize: 9, fontWeight: "800", color: "#FFD700" },
+  tripStats: { flexDirection: "row", justifyContent: "space-between" },
+  tripStat: { flexDirection: "row", alignItems: "center", gap: 4 },
+  tripStatText: { fontSize: 12, fontWeight: "700", color: "#B0B0BE" },
+
+  // Friend search + cards
+  searchRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  searchInputWrap: { flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  searchInput: { flex: 1, color: "#FFFFFF", fontSize: 14, paddingVertical: 11 },
+  searchBtn: { paddingHorizontal: 18, justifyContent: "center", borderRadius: 12, backgroundColor: "#FF6B35" },
+  searchBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  friendCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  friendInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  friendAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  friendAvatarImg: { width: 44, height: 44, borderRadius: 22 },
+  friendAvatarText: { fontSize: 17, fontWeight: "800", color: "#FF6B35" },
+  friendName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  friendStatus: { fontSize: 12, color: "#8A8A9A", marginTop: 1 },
+  friendAddBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  friendMsgBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center" },
+
+  // Conversation
+  convoBack: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, marginBottom: 8 },
+  convoBackText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  convoMessages: { minHeight: 120, marginBottom: 12 },
+  msgBubble: { maxWidth: "78%", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
+  msgSent: { alignSelf: "flex-end", backgroundColor: "#FF6B35" },
+  msgReceived: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.08)" },
+  msgText: { fontSize: 14, color: "#FFFFFF" },
+  msgTime: { fontSize: 9, color: "rgba(255,255,255,0.6)", marginTop: 3, alignSelf: "flex-end" },
+  msgInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  msgInput: { flex: 1, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: "#FFFFFF", fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  msgSendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  convoRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  convoAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(59,130,246,0.15)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  convoPreview: { fontSize: 12, color: "#8A8A9A", marginTop: 2 },
+  unreadDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#FF3B6F", marginTop: 5 },
+
+  // Settings
+  settingsSection: { paddingHorizontal: 16, marginTop: 20 },
+  settingsTitle: { fontSize: 13, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.5, marginBottom: 12, textTransform: "uppercase" },
+  settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  settingText: { fontSize: 15, color: "#FFFFFF", fontWeight: "600" },
+
+  // Modals
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)" },
+  modalSheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#12121A", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", alignSelf: "center", marginBottom: 14 },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
+  modalTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
+  modalSection: { fontSize: 11, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.5, marginBottom: 10, textTransform: "uppercase" },
+  notifEmpty: { alignItems: "center", paddingVertical: 30, gap: 10 },
+  notifRow: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 12, marginBottom: 10 },
+  notifActions: { flexDirection: "row", gap: 8 },
+  notifAccept: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#22C55E", alignItems: "center", justifyContent: "center" },
+  notifDecline: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(239,68,68,0.14)", alignItems: "center", justifyContent: "center" },
+
+  // Premium modal
+  premiumHero: { borderRadius: 18, padding: 18, marginBottom: 16, alignItems: "center" },
+  premiumBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,215,0,0.4)" },
+  premiumBadgeText: { fontSize: 10, fontWeight: "800", color: "#FFD700", letterSpacing: 1 },
+  premiumTitle: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", marginBottom: 8 },
+  premiumDesc: { fontSize: 13, color: "#B0B0BE", textAlign: "center", lineHeight: 19 },
+  premiumPerks: { gap: 10, marginBottom: 18 },
+  premiumPerkRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  premiumPerkText: { fontSize: 14, color: "#FFFFFF", fontWeight: "600" },
+  premiumPriceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)", marginBottom: 16 },
+  premiumPriceLabel: { fontSize: 14, color: "#8A8A9A", fontWeight: "600" },
+  premiumPrice: { fontSize: 22, fontWeight: "800", color: "#FF6B35" },
+  premiumPayBtn: { borderRadius: 14, overflow: "hidden", marginBottom: 12 },
+  premiumPayGrad: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 52 },
+  premiumPayText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  premiumCancel: { fontSize: 14, color: "#8A8A9A", fontWeight: "600", textAlign: "center", paddingVertical: 6 },
+});
