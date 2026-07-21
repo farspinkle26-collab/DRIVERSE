@@ -53,6 +53,7 @@ import {
   Shield,
   HelpCircle,
 } from "lucide-react-native";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -60,6 +61,73 @@ import { useEvents } from "@/hooks/useEventsStore";
 import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
+import { decodePolyline, regionForPath } from "@/lib/polyline";
+
+const TRIP_MAP_STYLE = [
+  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+];
+
+function TripMiniMap({ trip }: { trip: TripItem }) {
+  const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
+  const hasPath = coords.length > 1;
+  const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
+  if (!hasPoints) return null;
+
+  const region = hasPath
+    ? regionForPath(coords)
+    : regionForPath(
+        [
+          { latitude: trip.origin_lat, longitude: trip.origin_lng },
+          { latitude: trip.destination_lat || trip.origin_lat, longitude: trip.destination_lng || trip.origin_lng },
+        ],
+        1.8
+      );
+
+  return (
+    <View style={styles.tripMapWrap} pointerEvents="none">
+      <MapView
+        style={StyleSheet.absoluteFill}
+        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+        initialRegion={region}
+        customMapStyle={TRIP_MAP_STYLE}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        pitchEnabled={false}
+        rotateEnabled={false}
+        liteMode={Platform.OS === "android"}
+      >
+        {hasPath ? (
+          <>
+            <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF6B35" lineCap="round" />
+            <Marker coordinate={coords[0]} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
+            </Marker>
+            <Marker coordinate={coords[coords.length - 1]} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
+            </Marker>
+          </>
+        ) : (
+          <>
+            <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
+            </Marker>
+            {trip.destination_lat && trip.destination_lng ? (
+              <Marker coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }} anchor={{ x: 0.5, y: 0.5 }}>
+                <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
+              </Marker>
+            ) : null}
+          </>
+        )}
+      </MapView>
+    </View>
+  );
+}
 
 // Price for the premium car render, in IDR.
 const PREMIUM_CAR_PRICE = 49000;
@@ -89,6 +157,11 @@ interface TripItem {
   id: string;
   destination_name: string;
   origin_name: string;
+  origin_lat: number;
+  origin_lng: number;
+  destination_lat: number;
+  destination_lng: number;
+  route_polyline: string;
   distance_km: number;
   duration_seconds: number;
   avg_speed_kmh: number;
@@ -1029,7 +1102,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               </View>
             ) : (
               trips.map((trip) => (
-                <View key={trip.id} style={styles.tripCard}>
+                <TouchableOpacity
+                  key={trip.id}
+                  style={styles.tripCard}
+                  activeOpacity={0.85}
+                  onPress={() => router.push(`/trip/${trip.id}` as any)}
+                >
                   <View style={styles.tripHeader}>
                     <View style={styles.tripRoute}>
                       <MapPin size={14} color="#8A8A9A" />
@@ -1039,13 +1117,14 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                       <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>
                     )}
                   </View>
+                  <TripMiniMap trip={trip} />
                   <View style={styles.tripStats}>
                     <View style={styles.tripStat}><RouteIcon size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.distance_km.toFixed(1)} km</Text></View>
                     <View style={styles.tripStat}><Timer size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{formatDuration(trip.duration_seconds)}</Text></View>
                     <View style={styles.tripStat}><Gauge size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.avg_speed_kmh.toFixed(0)} km/h</Text></View>
                     <View style={styles.tripStat}><Trophy size={13} color="#FFD700" /><Text style={styles.tripStatText}>+{trip.xp_earned}</Text></View>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))
             )}
           </View>
@@ -1538,6 +1617,8 @@ const styles = StyleSheet.create({
   tripStats: { flexDirection: "row", justifyContent: "space-between" },
   tripStat: { flexDirection: "row", alignItems: "center", gap: 4 },
   tripStatText: { fontSize: 12, fontWeight: "700", color: "#B0B0BE" },
+  tripMapWrap: { height: 120, borderRadius: 12, overflow: "hidden", marginBottom: 10, backgroundColor: "#12121C" },
+  tripMapDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: "#0A0A0F" },
 
   // Friend search + cards
   searchRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
