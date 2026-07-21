@@ -8,15 +8,8 @@ import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, F
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 
-const MAP_GLOW = [
-  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-];
+// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
+const MAP_GLOW: any[] = [];
 
 interface TripDetail {
   id: string;

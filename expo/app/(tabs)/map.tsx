@@ -491,30 +491,8 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
-// --- Warm Glow Map Style ---
-const MAP_GLOW = [
-  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.icon", stylers: [{ saturation: 30, lightness: 20 }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#2A2A45" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2E2E4A" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#353550" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#222238" }] },
-  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#1E1E34" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
-  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
-  // Hide all default Google POI icons/labels — only our custom cafe/restaurant/SPBU/shopping markers should show
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#1E2E24" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ visibility: "on" }, { color: "#6A8A6A" }] },
-  { featureType: "transit", stylers: [{ visibility: "simplified" }] },
-  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
-  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
-];
+// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
+const MAP_GLOW: any[] = [];
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
