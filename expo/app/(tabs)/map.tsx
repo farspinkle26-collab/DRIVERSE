@@ -44,7 +44,6 @@ import {
   Plus,
   MessageCircle,
   ChevronDown,
-  Car,
   User,
   Handshake,
   Sun,
@@ -335,6 +334,9 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
   carwash: require("@/assets/images/map-icons/carwash.png"),
   charging: require("@/assets/images/map-icons/charging.png"),
 };
+
+// User/car marker badge — the app's single, official map icon.
+const CAR_MARKER_ICON = require("@/assets/images/map-icons/car-marker.png");
 
 // --- Warm Glow Map Style ---
 const MAP_GLOW = [
@@ -1550,7 +1552,7 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker — blue "You" ring + level label (design spec) */}
+        {/* User car marker — official app icon (design spec) */}
         {userLocation && (
           <Marker
             coordinate={userLocation}
@@ -1559,20 +1561,7 @@ export default function MapScreen() {
             flat
           >
             <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-              <View style={[styles.carGlow, isRecording && styles.carGlowRecording]} />
-              <View style={[styles.carRing, isRecording && styles.carRingRecording]}>
-                <Car
-                  size={18}
-                  color={isRecording ? "#FF2D55" : "#38BDF8"}
-                  strokeWidth={2.2}
-                />
-              </View>
-              <ChevronDown
-                size={13}
-                color={isRecording ? "#FF2D55" : "#38BDF8"}
-                strokeWidth={3}
-                style={styles.carPinTail}
-              />
+              <Image source={CAR_MARKER_ICON} style={styles.carMarkerImage} resizeMode="contain" />
             </Animated.View>
           </Marker>
         )}
@@ -2802,33 +2791,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  carGlow: {
-    position: "absolute",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(56, 189, 248, 0.14)",
-  },
-  carGlowRecording: {
-    backgroundColor: "rgba(255, 45, 85, 0.14)",
-  },
-  carRing: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#0A0F1A",
-    borderWidth: 2,
-    borderColor: "#38BDF8",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#38BDF8",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 14,
-    elevation: 10,
-  },
-  carPinTail: {
-    marginTop: -3,
+  carMarkerImage: {
+    width: 64,
+    height: 65,
   },
   // "You / Lv." label under the player's own marker
   youLabelWrap: {
@@ -2850,12 +2815,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.9)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-  carRingRecording: {
-    borderColor: "#FF2D55",
-    shadowColor: "#FF2D55",
-    shadowOpacity: 0.6,
-    shadowRadius: 18,
   },
   // Destination pin
   destPin: {
