@@ -70,14 +70,16 @@ function questIcon(name: string): IconCmp {
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
 
-// Photographic backgrounds for the feature cards (see prototype). Only the
-// images we currently have are wired up; the rest fall back to a tinted
-// gradient until their artwork is added to assets/images/features.
+// Photographic backgrounds for the feature cards (see prototype). Cards
+// without an entry here fall back to a tinted gradient until their artwork
+// is added to assets/images/features.
 const FEATURE_IMAGES: Record<string, number> = {
   quests: require("@/assets/images/features/quests.png"),
   events: require("@/assets/images/features/events.png"),
   cafe: require("@/assets/images/features/cafe.png"),
   workshop: require("@/assets/images/features/workshop.png"),
+  garage: require("@/assets/images/features/garage.png"),
+  community: require("@/assets/images/features/community.png"),
 };
 
 type DriveFeature = {
@@ -135,6 +137,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Car,
     color: "#00D4AA",
     bgColor: "#00D4AA15",
+    image: FEATURE_IMAGES.garage,
   },
   {
     id: "community",
@@ -143,6 +146,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Users,
     color: "#3B82F6",
     bgColor: "#3B82F615",
+    image: FEATURE_IMAGES.community,
     route: "/community",
   },
   {
