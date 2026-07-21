@@ -13,13 +13,6 @@ import {
   Keyboard,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import Svg, {
-  Circle as SvgCircle,
-  Path as SvgPath,
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  Stop,
-} from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
@@ -431,91 +424,6 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
   workshop: require("@/assets/images/map-icons/workshop.png"),
 };
 
-// ─── PlayerPuck ──────────────────────────────────────────
-// The player's own map marker, drawn entirely in code (SVG) instead of a
-// bitmap asset, so it can never ship cropped, half-loaded, or missing.
-// A neon heading arrow on a dark puck: the arrow points up and the parent
-// Marker's `rotation={heading}` + `flat` steer it with the vehicle.
-const PLAYER_PUCK_SIZE = 64;
-function PlayerPuck() {
-  return (
-    <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 64 64">
-      <Defs>
-        <SvgLinearGradient id="playerPuckArrow" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#FF8A50" />
-          <Stop offset="1" stopColor="#E55A2A" />
-        </SvgLinearGradient>
-      </Defs>
-      {/* soft neon halo */}
-      <SvgCircle cx="32" cy="32" r="30" fill="#FF6B35" opacity={0.1} />
-      <SvgCircle cx="32" cy="32" r="24" fill="#FF6B35" opacity={0.15} />
-      {/* dark puck with orange rim */}
-      <SvgCircle cx="32" cy="32" r="19" fill="#12121A" stroke="#FF6B35" strokeWidth={2} />
-      {/* heading arrow (notched navigation chevron) */}
-      <SvgPath
-        d="M32 18.5 L43 43 L32 37 L21 43 Z"
-        fill="url(#playerPuckArrow)"
-        stroke="#FFD9C4"
-        strokeWidth={1}
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
-// ─── SettledMarker ───────────────────────────────────────
-// Android draws custom marker views by snapshotting them into a bitmap.
-// Turning tracksViewChanges off in the same frame the content finishes
-// (image onLoadEnd, text layout, size change on select/deselect) can freeze
-// the snapshot mid-paint, which shows up as icons cropped to half their
-// size. This wrapper keeps tracking on until `ready` is true AND a short
-// grace period passes with no appearance change (`settleKey`), then freezes
-// the bitmap for performance. Any settleKey/ready change re-arms tracking.
-const MARKER_SETTLE_MS = 600;
-type SettledMarkerProps = React.ComponentProps<typeof Marker> & {
-  settleKey: string;
-  ready?: boolean;
-};
-function SettledMarker({ settleKey, ready = true, children, ...markerProps }: SettledMarkerProps) {
-  const [tracking, setTracking] = useState(true);
-  useEffect(() => {
-    setTracking(true);
-    if (!ready) return;
-    const t = setTimeout(() => setTracking(false), MARKER_SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [settleKey, ready]);
-  return (
-    <Marker {...markerProps} tracksViewChanges={tracking}>
-      {children}
-    </Marker>
-  );
-}
-
-// --- Warm Glow Map Style ---
-const MAP_GLOW = [
-  { elementType: "geometry", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A8A9A" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1A1A2E" }] },
-  { elementType: "labels.icon", stylers: [{ saturation: 30, lightness: 20 }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#252540" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#2A2A45" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2E2E4A" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#353550" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#222238" }] },
-  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#1E1E34" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#161628" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#5A5A8A" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#141420" }] },
-  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#1A2028" }] },
-  // Hide all default Google POI icons/labels — only our custom cafe/restaurant/SPBU/shopping markers should show
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#1E2E24" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ visibility: "on" }, { color: "#6A8A6A" }] },
-  { featureType: "transit", stylers: [{ visibility: "simplified" }] },
-  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
-  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
-];
-
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -625,35 +533,6 @@ export default function MapScreen() {
   const [showDriversLayer, setShowDriversLayer] = useState(true);
   const weatherFetchedRef = useRef(false);
 
-  // Keep each badge marker re-rendering (tracksViewChanges) until its Image has
-  // actually finished decoding, so the native Android marker snapshot isn't taken
-  // mid-load (which is what produced icons frozen at half-drawn/cropped size).
-  // A blind timeout can't guarantee the image is ready by the time it fires, so
-  // we track load completion per-marker instead.
-  const [loadedBadgeIds, setLoadedBadgeIds] = useState<Set<string>>(new Set());
-  const handleBadgeLoaded = useCallback((id: string) => {
-    setLoadedBadgeIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-  }, []);
-  useEffect(() => {
-    const currentIds = new Set(cafes.map((poi) => poi.id));
-    setLoadedBadgeIds((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (currentIds.has(id)) next.add(id);
-        else changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [cafes]);
-
-  // Same load-gating for online player avatars (network images) so their
-  // markers don't freeze before the photo has decoded.
-  const [loadedAvatarIds, setLoadedAvatarIds] = useState<Set<string>>(new Set());
-  const handleAvatarLoaded = useCallback((id: string) => {
-    setLoadedAvatarIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-  }, []);
-
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
   const [isEventPickMode, setIsEventPickMode] = useState(false);
@@ -666,7 +545,6 @@ export default function MapScreen() {
     events.find((e) => e.id === selectedEventId) ?? null;
 
   // Animations
-  const carFloat = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const cardSlide = useRef(new Animated.Value(200)).current;
   const recPulse = useRef(new Animated.Value(1)).current;
@@ -1034,16 +912,6 @@ export default function MapScreen() {
     pulse.start();
     return () => pulse.stop();
   }, [isRecording, recPulse]);
-
-  // --- Car float ---
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(carFloat, { toValue: -4, duration: 1200, useNativeDriver: true }),
-        Animated.timing(carFloat, { toValue: 0, duration: 1200, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [carFloat]);
 
   // Slide card when route info changes
   useEffect(() => {
@@ -1654,81 +1522,34 @@ export default function MapScreen() {
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={initialRegion}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+        showsCompass={true}
+        showsPointsOfInterest={true}
+        showsBuildings={true}
+        showsTraffic={false}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={MAP_GLOW}
         onPress={handleMapPress}
         followsUserLocation={false}
       >
-        {/* Landmark Markers — neon badge image + name + distance label (design spec).
-            Always rendered, regardless of recording/online/party/chat state, so the
-            map's POI layer never disappears mid-session. */}
+        {/* Landmark markers — plain default Google Maps pins, always
+            rendered regardless of recording/online/party/chat state so the
+            POI layer never disappears mid-session. */}
         {cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
-          const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
-          const cat = poi.category;
-          const catColor = CAT_COLORS[cat];
-          const badgeSrc = CAT_ICONS[cat];
-          const catIcon = (s: number, c: string) => {
-            switch (cat) {
-              case "cafe": return <Coffee size={s} color={c} strokeWidth={2.2} />;
-              case "spbu": return <Fuel size={s} color={c} strokeWidth={2.2} />;
-              case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2.2} />;
-              case "carwash": return <Car size={s} color={c} strokeWidth={2.2} />;
-              case "charging": return <Zap size={s} color={c} strokeWidth={2.2} />;
-              case "workshop": return <Wrench size={s} color={c} strokeWidth={2.2} />;
-              default: return <UtensilsCrossed size={s} color={c} strokeWidth={2.2} />;
-            }
-          };
-          const isChosen = isSelected && locationChosen;
           const distLabel = userLocation
             ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
             : null;
           return (
-            <SettledMarker
+            <Marker
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
-              settleKey={`${isSelected}-${isChosen}-${poi.name}-${distLabel ?? ""}`}
-              ready={!badgeSrc || loadedBadgeIds.has(poi.id)}
-              anchor={{ x: 0.5, y: 0.37 }}
-            >
-              <View style={styles.poiMarkerWrap} collapsable={false}>
-                {/* Fixed-size box: the marker's outer bounds stay constant across
-                    normal/selected/chosen states so the native snapshot never
-                    clips a badge that grew after capture. */}
-                <View style={styles.poiBadgeBox}>
-                  {badgeSrc ? (
-                    <Image
-                      source={badgeSrc}
-                      style={[
-                        styles.poiBadge,
-                        isSelected && styles.poiBadgeSelected,
-                        isChosen && styles.poiBadgeChosen,
-                      ]}
-                      resizeMode="contain"
-                      fadeDuration={0}
-                      onLoadEnd={() => handleBadgeLoaded(poi.id)}
-                    />
-                  ) : (
-                    <View style={[
-                      styles.landmarkMarker,
-                      { borderColor: `${catColor}70` },
-                      isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
-                      isChosen && styles.landmarkMarkerChosen,
-                    ]}>
-                      {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
-                {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
-              </View>
-            </SettledMarker>
+              title={poi.name}
+              description={[CAT_LABELS[poi.category], distLabel].filter(Boolean).join(" · ")}
+            />
           );
         })}
 
@@ -1832,161 +1653,44 @@ export default function MapScreen() {
           );
         })()}
 
-        {/* Destination marker (when navigating) */}
+        {/* Destination marker (when navigating) — plain default pin */}
         {selectedDestination && routeInfo && destCoords() && (
-          <Marker
-            coordinate={destCoords()!}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.destPin}>
-              <MapPin size={28} color={ROUTE_RED} fill={ROUTE_RED} />
-            </View>
-          </Marker>
+          <Marker coordinate={destCoords()!} title="Destination" />
         )}
 
-        {/* Custom location marker (tapped, no route yet) */}
+        {/* Custom location marker (tapped, no route yet) — plain default pin */}
         {selectedDestination && selectedDestination.type === "location" && !routeInfo && (
-          <SettledMarker
+          <Marker
             coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
-            anchor={{ x: 0.5, y: 1 }}
-            settleKey={`chosen-${locationChosen}`}
-          >
-            <View style={styles.customPin} collapsable={false}>
-              <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
-            </View>
-          </SettledMarker>
+            title="Selected location"
+          />
         )}
 
-        {/* Online player markers — neon ring + car + name/level (design spec) */}
-        {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
-          const isPartyMate = partyMemberIds.has(onlineUser.user_id);
-          const ringColor = isPartyMate && party ? party.color : playerColor(onlineUser.user_id);
-          return (
-            <SettledMarker
-              key={`online-${onlineUser.user_id}`}
-              coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
-              anchor={{ x: 0.5, y: 0.36 }}
-              onPress={() => setSelectedOnlineUser(onlineUser)}
-              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${onlineUser.avatar ?? ""}`}
-              ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
-            >
-              <View style={styles.playerMarkerWrap} collapsable={false}>
-                {/* Ring box gives the badges room inside the marker bounds —
-                    absolutely-positioned children with negative offsets get
-                    clipped out of the native marker snapshot. */}
-                <View style={styles.playerRingBox}>
-                  {isPartyMate && (
-                    <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
-                  )}
-                  <View style={[
-                    styles.playerRing,
-                    { borderColor: ringColor, shadowColor: ringColor },
-                    isPartyMate && styles.playerRingParty,
-                  ]}>
-                    {onlineUser.avatar ? (
-                      <Image
-                        source={{ uri: onlineUser.avatar }}
-                        style={styles.playerAvatarImg}
-                        fadeDuration={0}
-                        onLoadEnd={() => handleAvatarLoaded(onlineUser.user_id)}
-                      />
-                    ) : (
-                      <Text style={styles.playerAvatarInitial}>
-                        {(onlineUser.name?.[0] ?? "D").toUpperCase()}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
-                    <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
-                  </View>
-                  {isPartyMate && (
-                    <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
-                      <Users size={9} color="#0A0A0F" strokeWidth={3} />
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
-              </View>
-            </SettledMarker>
-          );
-        })}
+        {/* Online player markers — plain default pins */}
+        {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => (
+          <Marker
+            key={`online-${onlineUser.user_id}`}
+            coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
+            onPress={() => setSelectedOnlineUser(onlineUser)}
+            title={onlineUser.name}
+            description={`Lv. ${onlineUser.level}`}
+          />
+        ))}
 
-        {/* Event markers — pin + mini info card (design spec) */}
-        {!isRecording && showEventsLayer && events.map((ev) => {
-          const evColor = eventTypeColor(ev.event_type);
-          const isSelected = selectedEventId === ev.id;
-          const timeLabel = fmtEventTime(ev.starts_at, ev.is_live);
-          return (
-            <SettledMarker
-              key={`event-${ev.id}`}
-              coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
-              anchor={{ x: 0.5, y: 0.22 }}
-              onPress={() => setSelectedEventId(ev.id)}
-              settleKey={`${isSelected}-${ev.is_live}-${evColor}-${ev.participant_count}-${ev.title}-${timeLabel}-${ev.location_name ?? ""}`}
-            >
-              <View style={styles.eventMarkerColumn} collapsable={false}>
-                <View style={styles.eventMarkerWrap}>
-                  {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
-                  <View style={[
-                    styles.eventMarker,
-                    { borderColor: evColor, shadowColor: evColor },
-                    isSelected && styles.eventMarkerSelected,
-                  ]}>
-                    <EventTypeIcon type={ev.event_type} size={isSelected ? 18 : 15} color={evColor} />
-                  </View>
-                  <View style={[styles.eventMarkerBadge, { backgroundColor: evColor }]}>
-                    <Text style={styles.eventMarkerBadgeText}>{ev.participant_count}</Text>
-                  </View>
-                </View>
-                <View style={[styles.eventMiniCard, { borderColor: `${evColor}55` }]}>
-                  <Text style={[styles.eventMiniTitle, { color: evColor }]} numberOfLines={1}>{ev.title}</Text>
-                  <Text style={styles.eventMiniMeta} numberOfLines={1}>
-                    {timeLabel}
-                    {ev.location_name ? ` · ${ev.location_name}` : ""}
-                  </Text>
-                </View>
-              </View>
-            </SettledMarker>
-          );
-        })}
+        {/* Event markers — plain default pins */}
+        {!isRecording && showEventsLayer && events.map((ev) => (
+          <Marker
+            key={`event-${ev.id}`}
+            coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
+            onPress={() => setSelectedEventId(ev.id)}
+            title={ev.title}
+            description={[fmtEventTime(ev.starts_at, ev.is_live), ev.location_name].filter(Boolean).join(" · ")}
+          />
+        ))}
 
         {/* Pending event pin (placed, builder open) */}
         {eventCoordinate && showCreateEvent && (
-          <Marker coordinate={eventCoordinate} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.customPin}>
-              <Flag size={30} color="#FF6B35" fill="#FF6B3530" />
-            </View>
-          </Marker>
-        )}
-
-        {/* User marker — coded SVG puck (no bitmap asset) */}
-        {userLocation && (
-          <Marker
-            coordinate={userLocation}
-            anchor={{ x: 0.5, y: 0.5 }}
-            rotation={heading}
-            flat
-          >
-            <View style={styles.carMarkerBox} collapsable={false}>
-              <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-                <PlayerPuck />
-              </Animated.View>
-            </View>
-          </Marker>
-        )}
-
-        {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
-        {userLocation && !isRecording && (
-          <SettledMarker
-            coordinate={userLocation}
-            anchor={{ x: 0.5, y: -0.35 }}
-            settleKey={`you-${level}`}
-          >
-            <View style={styles.youLabelWrap} collapsable={false}>
-              <Text style={styles.youLabelName}>You</Text>
-              <Text style={styles.youLabelLevel}>Lv. {level}</Text>
-            </View>
-          </SettledMarker>
+          <Marker coordinate={eventCoordinate} title="New event location" />
         )}
       </MapView>
 
