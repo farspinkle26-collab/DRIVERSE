@@ -92,7 +92,7 @@ const INDONESIAN_CITIES = [
   { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
 ];
 
-type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash";
+type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "ev" | "workshop";
 
 interface CafePOI {
   id: string;
@@ -108,8 +108,10 @@ interface CafePOI {
 /** Detect landmark category from Google Places types */
 function detectCategory(placeTypes: string[]): LandmarkCategory {
   const t = placeTypes.map((s) => s.toLowerCase());
+  if (t.some((s) => s.includes("charg") || s.includes("electric_vehicle"))) return "ev";
   if (t.some((s) => s.includes("gas") || s === "gas_station")) return "spbu";
   if (t.some((s) => s.includes("car_wash"))) return "carwash";
+  if (t.some((s) => s.includes("car_repair") || s.includes("car_dealer"))) return "workshop";
   if (t.some((s) => s.includes("restaurant") || s.includes("food"))) return "restaurant";
   if (t.some((s) => s.includes("cafe"))) return "cafe";
   if (t.some((s) => s.includes("store") || s.includes("shop") || s.includes("mall") || s === "shopping_mall")) return "shopping";
@@ -308,14 +310,18 @@ const CAT_COLORS: Record<LandmarkCategory, string> = {
   spbu: "#FF8A2A",
   shopping: "#E06BFF",
   carwash: "#4FC3F7",
+  ev: "#B4E845",
+  workshop: "#FF7A2A",
 };
 
 const CAT_LABELS: Record<LandmarkCategory, string> = {
   cafe: "Cafes",
   restaurant: "Food",
-  spbu: "Fuel",
+  spbu: "Gas Station",
   shopping: "Shops",
   carwash: "Car Wash",
+  ev: "EV Charging",
+  workshop: "Workshop",
 };
 
 // Neon badge marker artwork (prototype icons). More categories land here
@@ -326,6 +332,8 @@ const CAT_ICONS: Record<LandmarkCategory, ReturnType<typeof require>> = {
   spbu: require("@/assets/images/map-icons/fuel.png"),
   shopping: require("@/assets/images/map-icons/shopping.png"),
   carwash: require("@/assets/images/map-icons/carwash.png"),
+  ev: require("@/assets/images/map-icons/ev.png"),
+  workshop: require("@/assets/images/map-icons/workshop.png"),
 };
 
 // --- Warm Glow Map Style ---
@@ -352,6 +360,75 @@ const MAP_GLOW = [
   { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#252540" }] },
   { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: "#7A7A8E" }] },
 ];
+
+/**
+ * A landmark marker that renders the neon badge artwork reliably.
+ *
+ * react-native-maps rasterizes a custom marker view into a static bitmap.
+ * If that snapshot is taken before the <Image> has finished decoding, the
+ * marker shows a blank/gray square — and with tracksViewChanges off it never
+ * re-captures, so the icon "vanishes". We keep tracksViewChanges ON until the
+ * image's onLoad fires (plus a safety timeout), then turn it OFF for
+ * performance. Selection changes re-arm tracking so the resize is captured.
+ */
+function PoiBadgeMarker({
+  poi,
+  isSelected,
+  isChosen,
+  distLabel,
+  onPress,
+}: {
+  poi: CafePOI;
+  isSelected: boolean;
+  isChosen: boolean;
+  distLabel: string | null;
+  onPress: () => void;
+}) {
+  const [tracking, setTracking] = useState(true);
+  const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Re-arm tracking whenever the badge size changes so the new frame is captured
+  useEffect(() => {
+    setTracking(true);
+    if (settleRef.current) clearTimeout(settleRef.current);
+    settleRef.current = setTimeout(() => setTracking(false), 800);
+    return () => {
+      if (settleRef.current) clearTimeout(settleRef.current);
+    };
+  }, [isSelected, isChosen]);
+
+  const stopTrackingSoon = useCallback(() => {
+    if (settleRef.current) clearTimeout(settleRef.current);
+    // A couple frames after the bitmap is ready, freeze the marker
+    settleRef.current = setTimeout(() => setTracking(false), 120);
+  }, []);
+
+  return (
+    <Marker
+      coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+      onPress={onPress}
+      tracksViewChanges={tracking}
+      anchor={{ x: 0.5, y: 0.3 }}
+    >
+      <View style={styles.poiMarkerWrap}>
+        <Image
+          source={CAT_ICONS[poi.category]}
+          style={[
+            styles.poiBadge,
+            isSelected && styles.poiBadgeSelected,
+            isChosen && styles.poiBadgeChosen,
+          ]}
+          resizeMode="contain"
+          fadeDuration={0}
+          onLoad={stopTrackingSoon}
+          onLoadEnd={stopTrackingSoon}
+        />
+        <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
+        {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
+      </View>
+    </Marker>
+  );
+}
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -434,6 +511,8 @@ export default function MapScreen() {
     spbu: true,
     shopping: true,
     carwash: true,
+    ev: true,
+    workshop: true,
   });
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showDriversLayer, setShowDriversLayer] = useState(true);
@@ -462,7 +541,7 @@ export default function MapScreen() {
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
     if (!GOOGLE_API_KEY) return [];
-    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash"];
+    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash", "car_repair", "electric_vehicle_charging_station"];
     const allResults: CafePOI[] = [];
     const seen = new Set<string>();
 
@@ -1231,33 +1310,19 @@ export default function MapScreen() {
         {/* Landmark Markers — neon badge artwork + name + distance label (prototype icons) */}
         {!isRecording && cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
-          const cat = poi.category;
           const isChosen = isSelected && locationChosen;
           const distLabel = userLocation
             ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
             : null;
           return (
-            <Marker
+            <PoiBadgeMarker
               key={poi.id}
-              coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+              poi={poi}
+              isSelected={isSelected}
+              isChosen={isChosen}
+              distLabel={distLabel}
               onPress={() => handleCafePress(poi)}
-              tracksViewChanges={isSelected}
-              anchor={{ x: 0.5, y: 0.3 }}
-            >
-              <View style={styles.poiMarkerWrap}>
-                <Image
-                  source={CAT_ICONS[cat]}
-                  style={[
-                    styles.poiBadge,
-                    isSelected && styles.poiBadgeSelected,
-                    isChosen && styles.poiBadgeChosen,
-                  ]}
-                  resizeMode="contain"
-                />
-                <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
-                {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
-              </View>
-            </Marker>
+            />
           );
         })}
 
