@@ -424,6 +424,9 @@ export default function MapScreen() {
   // Refs for GPS watcher to read live state without restarting the effect
   const routeInfoRef = useRef<RouteInfo | null>(null);
   const destCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  // Always points at the latest stopRecording, so the mount-once GPS watcher
+  // can trigger a full trip completion (XP + save) instead of a stale closure.
+  const stopRecordingRef = useRef<() => void>(() => {});
 
   // XP reward display state
   const [xpEarned, setXpEarned] = useState<number | null>(null);
@@ -741,9 +744,11 @@ export default function MapScreen() {
                 setRouteSplitIdx(closestIdx > 0 ? closestIdx : null);
 
                 if (distToDest < 50) {
-                  // Auto-stop — dispatch with a small delay to let state settle
+                  // Auto-stop — dispatch with a small delay to let state settle.
+                  // Goes through the same completion flow as the manual STOP
+                  // button so XP is awarded and the trip is saved either way.
                   setTimeout(() => {
-                    setIsRecording(false);
+                    stopRecordingRef.current();
                   }, 500);
                 }
               }
@@ -1184,6 +1189,8 @@ export default function MapScreen() {
     // Keep path visible after stopping
   }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, xpEarned, wasFaster]);
 
+  useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
+
   // --- Map region ---
   const initialRegion = userLocation
     ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
@@ -1194,6 +1201,11 @@ export default function MapScreen() {
   const ROUTE_RED = "#E53935";
   const ROUTE_GLOW = "#FF5252";
   const RECORDED_PATH_COLOR = "#FF2D55";
+
+  // A just-finished trip owns the bottom card slot — the stale POI/route
+  // cards must yield to it instead of stacking on top and burying its
+  // Save & Share / XP buttons.
+  const showTripSummary = !isRecording && recordedPath.length > 1 && tripDistance > 0;
 
   // ─── HUD derived data ────────────────────────────────────
   // Idle = no route/recording/cards open; the full homepage chrome shows only then
@@ -1714,7 +1726,7 @@ export default function MapScreen() {
       )}
 
       {/* Trip Summary */}
-      {!isRecording && recordedPath.length > 1 && tripDistance > 0 && (() => {
+      {showTripSummary && (() => {
         const actualSec = elapsedMs / 1000;
         const avgSpeed = actualSec > 0 ? (tripDistance / 1000) / (actualSec / 3600) : 0;
         return (
@@ -2365,7 +2377,7 @@ export default function MapScreen() {
       )}
 
       {/* --- Selected destination card (cafe or custom location) --- */}
-      {selectedDestination && !routeInfo && !isRecording && (() => {
+      {selectedDestination && !routeInfo && !isRecording && !showTripSummary && (() => {
         const isCafe = selectedDestination.type === "cafe";
         const destName = isCafe
           ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
@@ -2431,7 +2443,7 @@ export default function MapScreen() {
       })()}
 
       {/* --- Navigation route card (distance + ETA) — hidden while recording --- */}
-      {routeInfo && !isRecording && (
+      {routeInfo && !isRecording && !showTripSummary && (
         <Animated.View
           style={[
             styles.routeCard,
