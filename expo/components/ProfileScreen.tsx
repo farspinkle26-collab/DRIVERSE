@@ -57,8 +57,7 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
-import { rankForLevel } from "@/constants/ranks";
-import { seasonRankForXp, SEASON_NUMBER } from "@/constants/season";
+import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 
@@ -364,8 +363,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const streak = isSelf ? selfStreak : otherStreak;
 
   const rank = rankForLevel(level);
-  const season = seasonRankForXp(totalXp);
-  const seasonProgress = season.xpForTier > 0 ? season.xpIntoTier / season.xpForTier : 0;
+  const rankProg = rankProgress(level);
 
   const acceptedFriends = friends.filter((f) => f.status === "accepted");
   const primaryCar = cars.find((c) => c.is_primary) ?? cars[0] ?? null;
@@ -759,9 +757,8 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           <TouchableOpacity style={styles.rankCard} activeOpacity={0.85} onPress={() => router.push("/ranks" as any)}>
             <Text style={styles.rankCardLabel}>CURRENT RANK</Text>
             <RankBadge rank={rank} size={54} />
-            <Text style={styles.rankCardName}>{season.name}</Text>
+            <Text style={styles.rankCardName}>{rank.name}</Text>
             <View style={styles.rankDivisionRow}>
-              <Text style={[styles.rankDivision, { color: season.color }]}>{season.division}</Text>
               <Info size={11} color="#5A5A6E" />
             </View>
           </TouchableOpacity>
@@ -922,27 +919,27 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               </TouchableOpacity>
             ))}
 
-            {/* Season card */}
+            {/* Rank progress card */}
             <TouchableOpacity style={styles.seasonCard} activeOpacity={0.9} onPress={() => router.push("/ranks" as any)}>
               <View style={styles.seasonBadgeWrap}>
                 <RankBadge rank={rank} size={54} />
               </View>
               <View style={styles.seasonMiddle}>
-                <Text style={styles.seasonLabel}>SEASON {SEASON_NUMBER}</Text>
-                <Text style={styles.seasonName}>{season.name}</Text>
+                <Text style={styles.seasonLabel}>RANK PROGRESS</Text>
+                <Text style={styles.seasonName}>{rank.name}</Text>
                 <View style={styles.seasonTrack}>
-                  <LinearGradient colors={[season.color, "#FFD700"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.seasonFill, { width: `${Math.min(seasonProgress * 100, 100)}%` }]} />
+                  <LinearGradient colors={[rank.color, "#FFD700"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.seasonFill, { width: `${Math.min(rankProg.progress * 100, 100)}%` }]} />
                 </View>
-                <Text style={styles.seasonXp}>{season.xpIntoTier} / {season.xpForTier} XP</Text>
+                <Text style={styles.seasonXp}>{rankProg.next ? `${rankProg.levelsToNext} levels to next rank` : "Top rank reached"}</Text>
               </View>
               <View style={styles.seasonDivider} />
               <View style={styles.seasonNext}>
                 <Text style={styles.seasonNextLabel}>NEXT RANK</Text>
-                {season.next && (
+                {rankProg.next && (
                   <>
-                    <RankBadge rank={rank} size={30} />
-                    <Text style={styles.seasonNextName}>{season.next.name}</Text>
-                    <Text style={styles.seasonNextXp}>{season.next.requiredTotalXp} XP</Text>
+                    <RankBadge rank={rankProg.next} size={30} />
+                    <Text style={styles.seasonNextName}>{rankProg.next.name}</Text>
+                    <Text style={styles.seasonNextXp}>Lv {rankProg.next.minLevel}</Text>
                   </>
                 )}
                 <ChevronRight size={16} color="#5A5A6E" style={{ position: "absolute", right: 0, top: "50%" }} />
@@ -988,7 +985,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 <TouchableOpacity style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
                   <View style={[styles.feedIcon, { backgroundColor: "rgba(255,215,0,0.15)" }]}><Trophy size={13} color="#FFD700" /></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.feedItemTitle} numberOfLines={1}>Season Rewards</Text>
+                    <Text style={styles.feedItemTitle} numberOfLines={1}>Rank Rewards</Text>
                     <Text style={styles.feedItemSub} numberOfLines={1}>You&apos;ve earned {totalXp} XP!</Text>
                   </View>
                 </TouchableOpacity>
@@ -1475,7 +1472,7 @@ const styles = StyleSheet.create({
   addCarSubmit: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#FF6B35" },
   addCarSubmitText: { color: "#FFFFFF", fontWeight: "700" },
 
-  // Season card
+  // Rank progress card
   seasonCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 18, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   seasonBadgeWrap: { marginRight: 12 },
   seasonMiddle: { flex: 1 },
