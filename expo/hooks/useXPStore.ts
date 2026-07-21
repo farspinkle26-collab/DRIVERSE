@@ -109,6 +109,35 @@ export const [XPProvider, useXP] = createContextHook(() => {
     })();
   }, [userId]);
 
+  // Reflect server-side XP grants (e.g. quests auto-completing from
+  // indicators) live, so the client never double-applies or drifts.
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`user-xp-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_xp",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const row = payload.new as
+            | { level: number; xp: number; total_xp: number }
+            | undefined;
+          if (row) {
+            setState({ level: row.level, xp: row.xp, totalXp: row.total_xp });
+          }
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
   // Persist — to Supabase if authenticated, otherwise AsyncStorage
   const persist = useCallback(
     async (s: XPState) => {

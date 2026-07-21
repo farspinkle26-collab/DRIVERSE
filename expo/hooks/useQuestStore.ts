@@ -2,27 +2,29 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as Location from "expo-location";
 import { supabase } from "@/lib/supabase";
-import { useXP } from "@/hooks/useXPStore";
 import {
   DailyQuest,
   QuestStats,
   Badge,
   UserBadge,
-  CompleteQuestResult,
+  QuestEventResult,
+  QuestEventType,
+  PlaceCategory,
   sortByDifficulty,
   pendingRewards,
+  questDay,
 } from "@/lib/questEngine";
 
 // ─── Store ───────────────────────────────────────────────────────────
-// Talks to the server-side quest engine (ensure_daily_quests /
-// complete_quest / update_quest_progress RPCs). Generation is lazy: the
-// first call each day generates the user's 3 quests using their live
-// location, level, and the server clock. XP is applied through the
-// existing useXP pipeline so levelling has a single source of truth;
-// coins/streak/badges are tracked server-side.
+// Talks to the server-side quest engine (ensure_daily_quests +
+// record_quest_event RPCs). Generation is lazy: the first call each day
+// generates the user's 3 universal quests. Quests are AUTO-completed —
+// there is no manual "mark complete". Progress advances only through real
+// indicators (distance driven, a friend made, a place visited) reported
+// via record_quest_event (and server-side triggers for distance/friends).
+// Rewards — XP, coins, streak, badges — are granted server-side the moment
+// an indicator meets the target, so levelling has a single source of truth.
 export const [QuestsProvider, useQuests] = createContextHook(() => {
-  const { addXP } = useXP();
-
   const [quests, setQuests] = useState<DailyQuest[]>([]);
   const [stats, setStats] = useState<QuestStats | null>(null);
   const [badges, setBadges] = useState<Badge[]>([]);
@@ -86,10 +88,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
       return;
     }
     try {
-      const today = new Date();
-      const jakartaDay = new Date(today.getTime() + 7 * 3600 * 1000)
-        .toISOString()
-        .slice(0, 10);
+      const day = questDay();
 
       const [{ data: questRows }, { data: statRow }, { data: earned }] =
         await Promise.all([
@@ -97,7 +96,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
             .from("daily_quests")
             .select("*")
             .eq("user_id", uid)
-            .eq("quest_date", jakartaDay)
+            .eq("quest_date", day)
             .neq("status", "expired"),
           supabase
             .from("user_quest_stats")
@@ -124,11 +123,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
       if (!uid) return;
 
       // Only auto-generate once per day per session.
-      const today = new Date();
-      const jakartaDay = new Date(today.getTime() + 7 * 3600 * 1000)
-        .toISOString()
-        .slice(0, 10);
-      const guardKey = `${uid}:${jakartaDay}`;
+      const guardKey = `${uid}:${questDay()}`;
 
       setGenerating(true);
       try {
@@ -168,11 +163,8 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
       return;
     }
 
-    const today = new Date();
-    const jakartaDay = new Date(today.getTime() + 7 * 3600 * 1000)
-      .toISOString()
-      .slice(0, 10);
-    const guardKey = `${userId}:${jakartaDay}`;
+    const day = questDay();
+    const guardKey = `${userId}:${day}`;
 
     setLoading(true);
     (async () => {
@@ -192,7 +184,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
           .from("daily_quests")
           .select("id")
           .eq("user_id", userId)
-          .eq("quest_date", jakartaDay)
+          .eq("quest_date", day)
           .neq("status", "expired");
         if (!existing || existing.length < 3) {
           await generateQuests();
@@ -229,61 +221,56 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // ─── Update progress on an active quest ────────────────────────────
-  const updateProgress = useCallback(
-    async (questId: string, progress: number): Promise<{ error?: string }> => {
+  // ─── Report a real-world indicator ─────────────────────────────────
+  // The ONLY way quest progress advances. Call this from the app's genuine
+  // signals — e.g. after a drive is recorded (`drive_distance`, km), a
+  // place is visited (`visit_place`, +1, with a category), a photo is taken
+  // (`photo_capture`). Friends and saved routes/trips also fire server-side
+  // triggers automatically, so those need no client call.
+  //
+  // Any matching quest that reaches its target auto-completes server-side;
+  // XP/coins/streak/badges are granted there. Returns the quests that were
+  // just completed so the UI can celebrate.
+  const recordEvent = useCallback(
+    async (
+      eventType: QuestEventType,
+      amount: number = 1,
+      category: PlaceCategory | null = null
+    ): Promise<{ completed: QuestEventResult[]; error?: string }> => {
       const uid = userIdRef.current;
-      if (!uid) return { error: "Not signed in" };
+      if (!uid) return { completed: [], error: "Not signed in" };
+      if (!amount || amount <= 0) return { completed: [] };
 
-      // Optimistic
-      setQuests((prev) =>
-        prev.map((q) =>
-          q.id === questId
-            ? { ...q, progress: Math.max(0, Math.min(progress, q.target)) }
-            : q
-        )
-      );
-
-      const { error } = await supabase.rpc("update_quest_progress", {
-        p_quest_id: questId,
-        p_progress: progress,
+      const { data, error } = await supabase.rpc("record_quest_event", {
+        p_event_type: eventType,
+        p_amount: amount,
+        p_category: category,
       });
       if (error) {
         await fetchState();
-        return { error: error.message };
+        return { completed: [], error: error.message };
       }
-      return {};
+
+      const rows = ((data ?? []) as QuestEventResult[]) ?? [];
+      // Realtime will refresh, but refresh immediately for snappy UI.
+      await fetchState();
+      return { completed: rows.filter((r) => r.completed) };
     },
     [fetchState]
   );
 
-  // ─── Complete / claim a quest ──────────────────────────────────────
-  const completeQuest = useCallback(
-    async (
-      questId: string
-    ): Promise<{ result?: CompleteQuestResult; error?: string }> => {
-      const uid = userIdRef.current;
-      if (!uid) return { error: "Not signed in" };
-
-      const { data, error } = await supabase.rpc("complete_quest", {
-        p_quest_id: questId,
-      });
-      if (error) return { error: error.message };
-
-      // RPC returns a single-row table
-      const row = (Array.isArray(data) ? data[0] : data) as
-        | CompleteQuestResult
-        | undefined;
-
-      if (row?.awarded) {
-        // Apply XP through the existing levelling pipeline (single source
-        // of truth). Coins/streak/badges were granted server-side.
-        if (row.xp_reward > 0) addXP(row.xp_reward);
-      }
-      await fetchState();
-      return { result: row };
-    },
-    [addXP, fetchState]
+  // Convenience wrappers for the common indicators.
+  const recordDrive = useCallback(
+    (km: number) => recordEvent("drive_distance", km),
+    [recordEvent]
+  );
+  const recordPlaceVisit = useCallback(
+    (category: PlaceCategory) => recordEvent("visit_place", 1, category),
+    [recordEvent]
+  );
+  const recordPhoto = useCallback(
+    (count: number = 1) => recordEvent("photo_capture", count),
+    [recordEvent]
   );
 
   // ─── Derived helpers ───────────────────────────────────────────────
@@ -309,7 +296,10 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
     generating,
     refresh: fetchState,
     generateQuests,
-    updateProgress,
-    completeQuest,
+    // Indicator intake (quests auto-complete — no manual claim).
+    recordEvent,
+    recordDrive,
+    recordPlaceVisit,
+    recordPhoto,
   };
 });
