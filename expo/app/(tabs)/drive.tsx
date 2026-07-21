@@ -19,8 +19,6 @@ import {
   Wrench,
   Car,
   Users,
-  Store,
-  AlertTriangle,
   ChevronRight,
   Trophy,
   MapPin,
@@ -78,6 +76,8 @@ const FEATURE_IMAGES: Record<string, number> = {
   events: require("@/assets/images/features/events.png"),
   cafe: require("@/assets/images/features/cafe.png"),
   workshop: require("@/assets/images/features/workshop.png"),
+  garage: require("@/assets/images/features/garage.png"),
+  community: require("@/assets/images/features/community.png"),
 };
 
 type DriveFeature = {
@@ -135,6 +135,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Car,
     color: "#00D4AA",
     bgColor: "#00D4AA15",
+    image: FEATURE_IMAGES.garage,
   },
   {
     id: "community",
@@ -143,24 +144,8 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Users,
     color: "#3B82F6",
     bgColor: "#3B82F615",
+    image: FEATURE_IMAGES.community,
     route: "/community",
-  },
-  {
-    id: "marketplace",
-    title: "Marketplace",
-    subtitle: "Parts & accessories",
-    icon: Store,
-    color: "#EC4899",
-    bgColor: "#EC489915",
-  },
-  {
-    id: "emergency",
-    title: "Emergency",
-    subtitle: "24/7 roadside help",
-    icon: AlertTriangle,
-    color: "#EF4444",
-    bgColor: "#EF444415",
-    route: "/request-tow",
   },
 ];
 
