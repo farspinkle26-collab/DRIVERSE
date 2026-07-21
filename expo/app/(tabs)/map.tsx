@@ -32,6 +32,8 @@ import {
   Coffee,
   Fuel,
   ShoppingBag,
+  Wrench,
+  Car,
   Flag,
   Crown,
   LogOut,
@@ -97,7 +99,7 @@ const INDONESIAN_CITIES = [
   { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
 ];
 
-type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "charging";
+type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "charging" | "workshop";
 
 interface CafePOI {
   id: string;
@@ -115,6 +117,7 @@ function detectCategory(placeTypes: string[]): LandmarkCategory {
   const t = placeTypes.map((s) => s.toLowerCase());
   if (t.some((s) => s.includes("charging") || s === "electric_vehicle_charging_station")) return "charging";
   if (t.some((s) => s.includes("car_wash"))) return "carwash";
+  if (t.some((s) => s.includes("car_repair"))) return "workshop";
   if (t.some((s) => s.includes("gas") || s === "gas_station")) return "spbu";
   if (t.some((s) => s.includes("restaurant") || s.includes("food"))) return "restaurant";
   if (t.some((s) => s.includes("cafe"))) return "cafe";
@@ -314,6 +317,7 @@ const CAT_COLORS: Record<LandmarkCategory, string> = {
   shopping: "#00D4AA",
   carwash: "#3B82F6",
   charging: "#A3E635",
+  workshop: "#FF7A1A",
 };
 
 const CAT_LABELS: Record<LandmarkCategory, string> = {
@@ -323,16 +327,19 @@ const CAT_LABELS: Record<LandmarkCategory, string> = {
   shopping: "Shops",
   carwash: "Car Wash",
   charging: "Charging",
+  workshop: "Workshop",
 };
 
-// Neon badge marker images (design reference). SPBU still uses the vector
-// chip — its badge image is yet to come.
+// Neon badge marker images — every category has a matching badge so POI
+// markers always render consistently (no vector fallback in normal use).
 const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
   cafe: require("@/assets/images/map-icons/cafe.png"),
   restaurant: require("@/assets/images/map-icons/restaurant.png"),
+  spbu: require("@/assets/images/map-icons/spbu.png"),
   shopping: require("@/assets/images/map-icons/shopping.png"),
   carwash: require("@/assets/images/map-icons/carwash.png"),
   charging: require("@/assets/images/map-icons/charging.png"),
+  workshop: require("@/assets/images/map-icons/workshop.png"),
 };
 
 // User/car marker badge — the app's single, official map icon.
@@ -448,6 +455,7 @@ export default function MapScreen() {
     shopping: true,
     carwash: true,
     charging: true,
+    workshop: true,
   });
   const [showEventsLayer, setShowEventsLayer] = useState(true);
   const [showDriversLayer, setShowDriversLayer] = useState(true);
@@ -485,7 +493,7 @@ export default function MapScreen() {
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
     if (!GOOGLE_API_KEY) return [];
-    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash", "electric_vehicle_charging_station"];
+    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash", "car_repair", "electric_vehicle_charging_station"];
     const allResults: CafePOI[] = [];
     const seen = new Set<string>();
 
@@ -1283,8 +1291,10 @@ export default function MapScreen() {
         onPress={handleMapPress}
         followsUserLocation={false}
       >
-        {/* Landmark Markers — neon badge image + name + distance label (design spec) */}
-        {!isRecording && cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
+        {/* Landmark Markers — neon badge image + name + distance label (design spec).
+            Always rendered, regardless of recording/online/party/chat state, so the
+            map's POI layer never disappears mid-session. */}
+        {cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const cat = poi.category;
           const catColor = CAT_COLORS[cat];
@@ -1294,6 +1304,9 @@ export default function MapScreen() {
               case "cafe": return <Coffee size={s} color={c} strokeWidth={2.2} />;
               case "spbu": return <Fuel size={s} color={c} strokeWidth={2.2} />;
               case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2.2} />;
+              case "carwash": return <Car size={s} color={c} strokeWidth={2.2} />;
+              case "charging": return <Zap size={s} color={c} strokeWidth={2.2} />;
+              case "workshop": return <Wrench size={s} color={c} strokeWidth={2.2} />;
               default: return <UtensilsCrossed size={s} color={c} strokeWidth={2.2} />;
             }
           };
