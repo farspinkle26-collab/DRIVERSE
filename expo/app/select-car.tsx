@@ -38,6 +38,7 @@ import {
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar, GarageCar, CarCategory } from "@/hooks/useActiveCarStore";
 import { useXP } from "@/hooks/useXPStore";
+import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -62,11 +63,13 @@ function CarCard({
   index,
   scrollX,
   onMenu,
+  driveStats,
 }: {
   car: GarageCar;
   index: number;
   scrollX: Animated.Value;
   onMenu: (car: GarageCar) => void;
+  driveStats?: CarDriveStats;
 }) {
   const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
   const scale = scrollX.interpolate({
@@ -158,6 +161,29 @@ function CarCard({
           </View>
         </View>
 
+        {/* Drive data — accumulated from every recorded trip in this car */}
+        {driveStats && driveStats.tripCount > 0 && (
+          <View style={styles.driveDataBar}>
+            <View style={styles.spec}>
+              <RouteIcon size={14} color={car.color} />
+              <Text style={styles.driveDataValue}>{formatDistance(driveStats.totalDistanceKm)}</Text>
+              <Text style={styles.specLabel}>km driven</Text>
+            </View>
+            <View style={styles.specDivider} />
+            <View style={styles.spec}>
+              <Hexagon size={14} color={car.color} />
+              <Text style={styles.driveDataValue}>{driveStats.totalXp.toLocaleString("en-US")}</Text>
+              <Text style={styles.specLabel}>XP gained</Text>
+            </View>
+            <View style={styles.specDivider} />
+            <View style={styles.spec}>
+              <Gauge size={14} color={car.color} />
+              <Text style={styles.driveDataValue}>{driveStats.avgSpeedKmh.toFixed(0)}</Text>
+              <Text style={styles.specLabel}>km/h avg</Text>
+            </View>
+          </View>
+        )}
+
         {car.license_plate ? (
           <View style={styles.plate}>
             <Text style={styles.plateText}>{car.license_plate}</Text>
@@ -186,6 +212,7 @@ export default function SelectCarScreen() {
   const { isAuthenticated, loading: authLoading, user } = useAuth();
   const { cars, loadingCars, selectCar, addCar, activeCarId } = useActiveCar();
   const { totalXp } = useXP();
+  const { statsByCarId } = useCarDriveStats(user?.id);
 
   const scrollX = useRef(new Animated.Value(0)).current;
   const listRef = useRef<Animated.FlatList<GarageCar>>(null);
@@ -486,7 +513,13 @@ export default function SelectCarScreen() {
             scrollEventThrottle={16}
             renderItem={({ item, index }) => (
               <View style={{ width: CARD_WIDTH, marginRight: SPACING }}>
-                <CarCard car={item} index={index} scrollX={scrollX} onMenu={handleCarMenu} />
+                <CarCard
+                  car={item}
+                  index={index}
+                  scrollX={scrollX}
+                  onMenu={handleCarMenu}
+                  driveStats={statsByCarId[item.id]}
+                />
               </View>
             )}
           />
@@ -697,6 +730,14 @@ const styles = StyleSheet.create({
   specValue: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
   specLabel: { fontSize: 10, color: "#8A8A9A", textTransform: "uppercase", letterSpacing: 0.5 },
   colorDot: { width: 15, height: 15, borderRadius: 8, borderWidth: 2, borderColor: "rgba(255,255,255,0.25)" },
+  driveDataBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    width: "100%",
+    paddingVertical: 8,
+  },
+  driveDataValue: { fontSize: 14, fontWeight: "800", color: "#FFFFFF" },
   plate: {
     marginTop: 14,
     backgroundColor: "rgba(255,255,255,0.06)",
