@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { Image } from "expo-image";
 import {
   Swords,
   Calendar,
@@ -40,6 +41,9 @@ import {
   Coins,
   Check,
   Sparkles,
+  LayoutGrid,
+  Target,
+  Star,
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
@@ -66,6 +70,16 @@ function questIcon(name: string): IconCmp {
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
 
+// Photographic backgrounds for the feature cards (see prototype). Only the
+// images we currently have are wired up; the rest fall back to a tinted
+// gradient until their artwork is added to assets/images/features.
+const FEATURE_IMAGES: Record<string, number> = {
+  quests: require("@/assets/images/features/quests.png"),
+  events: require("@/assets/images/features/events.png"),
+  cafe: require("@/assets/images/features/cafe.png"),
+  workshop: require("@/assets/images/features/workshop.png"),
+};
+
 type DriveFeature = {
   id: string;
   title: string;
@@ -73,19 +87,11 @@ type DriveFeature = {
   icon: React.FC<{ size: number; color: string }>;
   color: string;
   bgColor: string;
+  image?: number;
   route?: string;
 };
 
 const DRIVE_FEATURES: DriveFeature[] = [
-  {
-    id: "routes",
-    title: "Routes",
-    subtitle: "Save & share your drives",
-    icon: Route,
-    color: "#00D4AA",
-    bgColor: "#00D4AA15",
-    route: "/routes",
-  },
   {
     id: "quests",
     title: "Quests",
@@ -93,6 +99,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Swords,
     color: "#FF6B35",
     bgColor: "#FF6B3515",
+    image: FEATURE_IMAGES.quests,
   },
   {
     id: "events",
@@ -101,6 +108,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Calendar,
     color: "#FF3B6F",
     bgColor: "#FF3B6F15",
+    image: FEATURE_IMAGES.events,
   },
   {
     id: "cafe",
@@ -109,6 +117,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Coffee,
     color: "#8B5CF6",
     bgColor: "#8B5CF615",
+    image: FEATURE_IMAGES.cafe,
   },
   {
     id: "workshop",
@@ -117,6 +126,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     icon: Wrench,
     color: "#F59E0B",
     bgColor: "#F59E0B15",
+    image: FEATURE_IMAGES.workshop,
   },
   {
     id: "garage",
@@ -329,26 +339,32 @@ export default function DriveScreen() {
       >
         {/* View tabs */}
         <View style={styles.viewTabs}>
-          {(["features", "quests", "events"] as const).map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[
-                styles.viewTab,
-                activeView === tab && styles.viewTabActive,
-              ]}
-              onPress={() => setActiveView(tab)}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.viewTabText,
-                  activeView === tab && styles.viewTabTextActive,
-                ]}
+          {([
+            { key: "features", label: "Features", icon: LayoutGrid },
+            { key: "quests", label: "Quests", icon: Target },
+            { key: "events", label: "Events", icon: Star },
+          ] as const).map((tab) => {
+            const active = activeView === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.viewTab, active && styles.viewTabActive]}
+                onPress={() => setActiveView(tab.key)}
+                activeOpacity={0.7}
               >
-                {tab === "features" ? "Features" : tab === "quests" ? "Quests" : "Events"}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <tab.icon size={16} color={active ? "#FF6B35" : "#5A5A6E"} />
+                <Text
+                  style={[
+                    styles.viewTabText,
+                    active && styles.viewTabTextActive,
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+                {active && <View style={styles.viewTabUnderline} />}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Features grid */}
@@ -357,20 +373,45 @@ export default function DriveScreen() {
             {DRIVE_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
-                style={[styles.featureCard, { backgroundColor: feature.bgColor }]}
+                style={[
+                  styles.featureCard,
+                  { backgroundColor: feature.bgColor, borderColor: feature.color + "33" },
+                ]}
                 onPress={() => handleFeaturePress(feature)}
-                activeOpacity={0.7}
+                activeOpacity={0.85}
               >
+                {feature.image ? (
+                  <Image
+                    source={feature.image}
+                    style={styles.featureImage}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                ) : null}
+                {/* Readability + accent tint overlay */}
                 <LinearGradient
-                  colors={[feature.color + "10", feature.color + "00"]}
+                  colors={
+                    feature.image
+                      ? [feature.color + "40", "rgba(6,6,9,0.35)", "rgba(6,6,9,0.92)"]
+                      : [feature.color + "18", feature.color + "00"]
+                  }
+                  locations={feature.image ? [0, 0.5, 1] : [0, 1]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
                   style={styles.featureCardGradient}
                 >
-                  <View style={[styles.featureIcon, { backgroundColor: feature.color + "20" }]}>
+                  <View
+                    style={[styles.featureIcon, { backgroundColor: feature.color + "26" }]}
+                  >
                     <feature.icon size={24} color={feature.color} />
                   </View>
-                  <Text style={styles.featureTitle}>{feature.title}</Text>
-                  <Text style={styles.featureSubtitle}>{feature.subtitle}</Text>
-                  <View style={[styles.featureArrow, { backgroundColor: feature.color + "15" }]}>
+                  <View>
+                    <Text style={styles.featureTitle}>{feature.title}</Text>
+                    <Text style={styles.featureSubtitle}>{feature.subtitle}</Text>
+                  </View>
+                  <View
+                    style={[styles.featureArrow, { backgroundColor: feature.color + "26" }]}
+                  >
                     <ChevronRight size={14} color={feature.color} />
                   </View>
                 </LinearGradient>
@@ -499,9 +540,12 @@ const styles = StyleSheet.create({
   },
   viewTab: {
     flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    alignItems: "center",
   },
   viewTabActive: {
     backgroundColor: "rgba(255, 107, 53, 0.15)",
@@ -513,6 +557,20 @@ const styles = StyleSheet.create({
   },
   viewTabTextActive: {
     color: "#FF6B35",
+  },
+  viewTabUnderline: {
+    position: "absolute",
+    bottom: 3,
+    left: "50%",
+    marginLeft: -14,
+    width: 28,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#FF6B35",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
   },
   // Features grid
   featuresGrid: {
@@ -527,37 +585,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
+  featureImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
   featureCardGradient: {
     padding: 18,
-    minHeight: 130,
+    minHeight: 200,
     justifyContent: "space-between",
   },
   featureIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
   },
   featureTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "700",
     color: "#FFFFFF",
     marginBottom: 4,
+    textShadowColor: "rgba(0, 0, 0, 0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   featureSubtitle: {
     fontSize: 12,
-    color: "#8A8A9A",
+    color: "#C4C4D0",
     lineHeight: 16,
+    textShadowColor: "rgba(0, 0, 0, 0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   featureArrow: {
     position: "absolute",
     top: 18,
     right: 18,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: "center",
     alignItems: "center",
   },
