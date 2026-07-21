@@ -16,7 +16,6 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
-  Navigation,
   MapPin,
   X,
   Clock,
@@ -41,7 +40,8 @@ import {
   Plus,
   MessageCircle,
   ChevronDown,
-  Car,
+  User,
+  Handshake,
   Sun,
   Cloud,
   CloudRain,
@@ -295,14 +295,6 @@ function WeatherGlyph({ code, size }: { code: number; size: number }) {
   return <Sun size={size} color="#FFD75E" fill="rgba(255, 215, 94, 0.25)" />;
 }
 
-// Neon ring palette for other players on the map (stable per user id)
-const PLAYER_COLORS = ["#22D3EE", "#A78BFA", "#FB923C", "#F472B6", "#FACC15", "#34D399"];
-function playerColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  return PLAYER_COLORS[hash % PLAYER_COLORS.length];
-}
-
 // Accent colors matched to the neon badge artwork per category
 const CAT_COLORS: Record<LandmarkCategory, string> = {
   cafe: "#FFA042",
@@ -335,6 +327,10 @@ const CAT_ICONS: Record<LandmarkCategory, ReturnType<typeof require>> = {
   ev: require("@/assets/images/map-icons/ev.png"),
   workshop: require("@/assets/images/map-icons/workshop.png"),
 };
+
+// Blue neon car badge — the current user's own marker, and the pin base
+// beneath every other online driver's profile photo.
+const USER_CAR_ICON = require("@/assets/images/map-icons/user-car.png");
 
 // --- Warm Glow Map Style ---
 const MAP_GLOW = [
@@ -430,6 +426,112 @@ function PoiBadgeMarker({
   );
 }
 
+/**
+ * Another online driver on the map: their profile photo inside a blue neon
+ * ring, a level badge, the blue car pin base beneath, and name + distance.
+ * Uses the same tracksViewChanges lifecycle as PoiBadgeMarker so the avatar
+ * image never snapshots blank.
+ */
+function PlayerMarker({
+  player,
+  distanceLabel,
+  onPress,
+}: {
+  player: OnlineUser;
+  distanceLabel: string | null;
+  onPress: () => void;
+}) {
+  const [tracking, setTracking] = useState(true);
+  const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopTrackingSoon = useCallback(() => {
+    if (settleRef.current) clearTimeout(settleRef.current);
+    settleRef.current = setTimeout(() => setTracking(false), 150);
+  }, []);
+
+  // If there's no avatar image to wait on, freeze shortly after mount
+  useEffect(() => {
+    if (!player.avatar) {
+      const t = setTimeout(() => setTracking(false), 300);
+      return () => clearTimeout(t);
+    }
+    return () => {
+      if (settleRef.current) clearTimeout(settleRef.current);
+    };
+  }, [player.avatar]);
+
+  const initial = (player.name?.[0] ?? "D").toUpperCase();
+
+  return (
+    <Marker
+      coordinate={{ latitude: player.latitude, longitude: player.longitude }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      onPress={onPress}
+      tracksViewChanges={tracking}
+    >
+      <View style={styles.playerMarkerWrap}>
+        <View style={styles.playerAvatarRing}>
+          {player.avatar ? (
+            <Image
+              source={{ uri: player.avatar }}
+              style={styles.playerAvatarPhoto}
+              fadeDuration={0}
+              onLoad={stopTrackingSoon}
+              onLoadEnd={stopTrackingSoon}
+            />
+          ) : (
+            <View style={styles.playerAvatarFallback}>
+              <Text style={styles.playerAvatarInitial}>{initial}</Text>
+            </View>
+          )}
+          <View style={styles.playerLevelBadge}>
+            <Text style={styles.playerLevelBadgeLv}>Lv.</Text>
+            <Text style={styles.playerLevelBadgeNum}>{player.level}</Text>
+          </View>
+        </View>
+        <Image source={USER_CAR_ICON} style={styles.playerCarBase} resizeMode="contain" />
+        <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
+        {distanceLabel && <Text style={styles.playerDistance}>{distanceLabel}</Text>}
+      </View>
+    </Marker>
+  );
+}
+
+/**
+ * The current user's own marker: the blue neon car badge. Managed tracking
+ * keeps the badge image from snapshotting blank on (re)mount.
+ */
+function MeMarker({
+  coordinate,
+  recording,
+}: {
+  coordinate: { latitude: number; longitude: number };
+  recording: boolean;
+}) {
+  const [tracking, setTracking] = useState(true);
+  const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTrackingSoon = useCallback(() => {
+    if (settleRef.current) clearTimeout(settleRef.current);
+    settleRef.current = setTimeout(() => setTracking(false), 150);
+  }, []);
+  useEffect(() => () => { if (settleRef.current) clearTimeout(settleRef.current); }, []);
+
+  return (
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={tracking}>
+      <View style={styles.meMarkerWrap}>
+        <Image
+          source={USER_CAR_ICON}
+          style={[styles.meBadge, recording && styles.meBadgeRecording]}
+          resizeMode="contain"
+          fadeDuration={0}
+          onLoad={stopTrackingSoon}
+          onLoadEnd={stopTrackingSoon}
+        />
+      </View>
+    </Marker>
+  );
+}
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -498,6 +600,7 @@ export default function MapScreen() {
   const { user } = useAuth();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [addingFriend, setAddingFriend] = useState(false);
+  const [playerActionBusy, setPlayerActionBusy] = useState(false);
 
   // ─── HUD chrome state (GTA-style homepage) ───────────────
   const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null);
@@ -530,7 +633,6 @@ export default function MapScreen() {
     events.find((e) => e.id === selectedEventId) ?? null;
 
   // Animations
-  const carFloat = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const cardSlide = useRef(new Animated.Value(200)).current;
   const recPulse = useRef(new Animated.Value(1)).current;
@@ -826,16 +928,6 @@ export default function MapScreen() {
     return () => pulse.stop();
   }, [isRecording, recPulse]);
 
-  // --- Car float ---
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(carFloat, { toValue: -4, duration: 1200, useNativeDriver: true }),
-        Animated.timing(carFloat, { toValue: 0, duration: 1200, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [carFloat]);
-
   // Slide card when route info changes
   useEffect(() => {
     Animated.spring(cardSlide, {
@@ -925,6 +1017,52 @@ export default function MapScreen() {
       setAddingFriend(false);
     }
   }, [user]);
+
+  // --- Send a direct message to another driver (meetup / party invite) ---
+  const sendDriverDM = useCallback(async (
+    receiverId: string,
+    content: string,
+    successMsg: string,
+  ) => {
+    if (!user) {
+      Alert.alert("Sign In Required", "Create an account to connect with other drivers");
+      return;
+    }
+    setPlayerActionBusy(true);
+    try {
+      const { error } = await supabase.from("direct_messages").insert({
+        sender_id: user.id,
+        receiver_id: receiverId,
+        content,
+      });
+      if (error) {
+        Alert.alert("Could Not Send", error.message);
+      } else {
+        Alert.alert("Sent!", successMsg);
+      }
+    } catch {
+      Alert.alert("Could Not Send", "Please try again in a moment.");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }, [user]);
+
+  const handleAskMeetup = useCallback((u: OnlineUser) => {
+    sendDriverDM(
+      u.user_id,
+      `👋 Hey ${u.name}, want to meet up? I'm nearby — let's link up on the map!`,
+      `Meetup request sent to ${u.name}. They'll see it in their messages.`,
+    );
+  }, [sendDriverDM]);
+
+  const handleInviteParty = useCallback((u: OnlineUser) => {
+    const myName = user?.name ?? "A driver";
+    sendDriverDM(
+      u.user_id,
+      `🎉 ${myName} invited you to their party. Roll out together?`,
+      `Party invite sent to ${u.name}.`,
+    );
+  }, [sendDriverDM, user]);
 
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
@@ -1451,29 +1589,18 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* Online player markers — neon ring + car + name/level (design spec) */}
+        {/* Online player markers — profile photo + level + car pin base (design spec) */}
         {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
-          const ringColor = playerColor(onlineUser.user_id);
+          const distLabel = userLocation
+            ? `${fmtMeters(Math.round(haversineMeters(userLocation, { latitude: onlineUser.latitude, longitude: onlineUser.longitude })))} away`
+            : null;
           return (
-            <Marker
+            <PlayerMarker
               key={`online-${onlineUser.user_id}`}
-              coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
-              anchor={{ x: 0.5, y: 0.35 }}
+              player={onlineUser}
+              distanceLabel={distLabel}
               onPress={() => setSelectedOnlineUser(onlineUser)}
-              tracksViewChanges={false}
-            >
-              <View style={styles.playerMarkerWrap}>
-                <View style={[styles.playerRing, { borderColor: ringColor, shadowColor: ringColor }]}>
-                  {onlineUser.avatar ? (
-                    <Image source={{ uri: onlineUser.avatar }} style={styles.playerAvatarImg} />
-                  ) : (
-                    <Car size={15} color={ringColor} strokeWidth={2.2} />
-                  )}
-                </View>
-                <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
-                <Text style={styles.playerLevel}>Lv. {onlineUser.level}</Text>
-              </View>
-            </Marker>
+            />
           );
         })}
 
@@ -1524,33 +1651,16 @@ export default function MapScreen() {
           </Marker>
         )}
 
-        {/* User car marker — green "You" ring + level label (design spec) */}
+        {/* User car marker — blue neon car badge (design spec) */}
         {userLocation && (
-          <Marker
-            coordinate={userLocation}
-            anchor={{ x: 0.5, y: 0.5 }}
-            rotation={heading}
-            flat
-          >
-            <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-              <View style={styles.carGlow} />
-              <View style={[styles.carRing, isRecording && styles.carRingRecording]}>
-                <Navigation
-                  size={16}
-                  color={isRecording ? "#FF2D55" : "#22C55E"}
-                  fill={isRecording ? "rgba(255,45,85,0.15)" : "rgba(34,197,94,0.15)"}
-                  strokeWidth={2.5}
-                />
-              </View>
-            </Animated.View>
-          </Marker>
+          <MeMarker coordinate={userLocation} recording={isRecording} />
         )}
 
-        {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
+        {/* "You · Lv." label rides in a separate marker so it stays below the badge */}
         {userLocation && !isRecording && (
           <Marker
             coordinate={userLocation}
-            anchor={{ x: 0.5, y: -0.35 }}
+            anchor={{ x: 0.5, y: -0.45 }}
             tracksViewChanges={false}
           >
             <View style={styles.youLabelWrap}>
@@ -2196,73 +2306,107 @@ export default function MapScreen() {
         );
       })()}
 
-      {/* --- Online user profile card (tapped on map) --- */}
-      {selectedOnlineUser && !isRecording && (
-        <View style={[styles.onlineUserCard, { paddingBottom: insets.bottom + 90 }]}>
-          <TouchableOpacity
-            style={styles.cafeCardClose}
-            onPress={() => setSelectedOnlineUser(null)}
-          >
-            <View style={styles.cafeCardCloseBar} />
-          </TouchableOpacity>
-          <View style={styles.onlineUserCardContent}>
+      {/* --- Online user profile card + 4-option menu (tapped on map) --- */}
+      {selectedOnlineUser && !isRecording && (() => {
+        const ou = selectedOnlineUser;
+        const distLabel = userLocation
+          ? `${fmtMeters(Math.round(haversineMeters(userLocation, { latitude: ou.latitude, longitude: ou.longitude })))} away`
+          : "Online now";
+        const openProfile = () => {
+          const uid = ou.user_id;
+          setSelectedOnlineUser(null);
+          router.push(`/user/${uid}` as any);
+        };
+        return (
+          <View style={[styles.onlineUserCard, { paddingBottom: insets.bottom + 90 }]}>
             <TouchableOpacity
-              style={styles.onlineUserCardHeader}
-              activeOpacity={0.7}
-              onPress={() => {
-                const uid = selectedOnlineUser.user_id;
-                setSelectedOnlineUser(null);
-                router.push(`/user/${uid}` as any);
-              }}
+              style={styles.cafeCardClose}
+              onPress={() => setSelectedOnlineUser(null)}
             >
-              <View style={styles.onlineUserCardAvatar}>
-                {selectedOnlineUser.avatar ? (
-                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.onlineUserCardAvatarImg} />
-                ) : (
-                  <Text style={styles.onlineUserCardAvatarText}>
-                    {(selectedOnlineUser.name?.[0] ?? "D").toUpperCase()}
-                  </Text>
-                )}
-                <View style={styles.onlineUserCardOnlineDot} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.onlineUserCardName} numberOfLines={1}>
-                  {selectedOnlineUser.name}
-                </Text>
-                <Text style={styles.onlineUserCardLevel}>
-                  Level {selectedOnlineUser.level} · Online now
-                </Text>
-              </View>
-              <ChevronRight size={22} color="#8A8A9A" />
+              <View style={styles.cafeCardCloseBar} />
             </TouchableOpacity>
-            <View style={styles.onlineUserCardActions}>
+            <View style={styles.onlineUserCardContent}>
+              {/* Identity header — avatar in blue ring, level, name, distance */}
               <TouchableOpacity
-                style={styles.onlineUserProfileBtn}
-                onPress={() => {
-                  const uid = selectedOnlineUser.user_id;
-                  setSelectedOnlineUser(null);
-                  router.push(`/user/${uid}` as any);
-                }}
-                activeOpacity={0.8}
-              >
-                <Users size={18} color="#FFFFFF" />
-                <Text style={styles.onlineUserProfileBtnText}>View Profile</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.onlineUserAddBtn, addingFriend && { opacity: 0.5 }]}
-                onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-                disabled={addingFriend}
+                style={styles.playerSheetHeader}
                 activeOpacity={0.7}
+                onPress={openProfile}
               >
-                <UserPlus size={18} color="#FFFFFF" />
-                <Text style={styles.onlineUserAddBtnText}>
-                  {addingFriend ? "Sending..." : "Add Friend"}
-                </Text>
+                <View style={styles.playerSheetAvatarRing}>
+                  {ou.avatar ? (
+                    <Image source={{ uri: ou.avatar }} style={styles.playerSheetAvatarImg} />
+                  ) : (
+                    <Text style={styles.playerSheetAvatarText}>
+                      {(ou.name?.[0] ?? "D").toUpperCase()}
+                    </Text>
+                  )}
+                  <View style={styles.playerSheetLevelBadge}>
+                    <Text style={styles.playerSheetLevelLv}>Lv.</Text>
+                    <Text style={styles.playerSheetLevelNum}>{ou.level}</Text>
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.playerSheetName} numberOfLines={1}>{ou.name}</Text>
+                  <Text style={styles.playerSheetDistance}>{distLabel}</Text>
+                </View>
+                <View style={styles.playerSheetOnlineDot} />
               </TouchableOpacity>
+
+              {/* 4-option action menu */}
+              <View style={styles.playerMenu}>
+                <TouchableOpacity style={styles.playerMenuRow} activeOpacity={0.7} onPress={openProfile}>
+                  <View style={styles.playerMenuIcon}>
+                    <User size={18} color="#4FB4FF" strokeWidth={2.2} />
+                  </View>
+                  <Text style={styles.playerMenuLabel}>See Profile</Text>
+                  <ChevronRight size={18} color="#5A7A9A" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.playerMenuRow, playerActionBusy && { opacity: 0.5 }]}
+                  activeOpacity={0.7}
+                  disabled={playerActionBusy}
+                  onPress={() => handleAskMeetup(ou)}
+                >
+                  <View style={styles.playerMenuIcon}>
+                    <Handshake size={18} color="#4FB4FF" strokeWidth={2.2} />
+                  </View>
+                  <Text style={styles.playerMenuLabel}>Ask a Meetup</Text>
+                  <ChevronRight size={18} color="#5A7A9A" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.playerMenuRow, addingFriend && { opacity: 0.5 }]}
+                  activeOpacity={0.7}
+                  disabled={addingFriend}
+                  onPress={() => handleAddFriendFromMap(ou.user_id, ou.name)}
+                >
+                  <View style={styles.playerMenuIcon}>
+                    <UserPlus size={18} color="#4FB4FF" strokeWidth={2.2} />
+                  </View>
+                  <Text style={styles.playerMenuLabel}>
+                    {addingFriend ? "Sending..." : "Add Friend"}
+                  </Text>
+                  <ChevronRight size={18} color="#5A7A9A" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.playerMenuRow, styles.playerMenuRowLast, playerActionBusy && { opacity: 0.5 }]}
+                  activeOpacity={0.7}
+                  disabled={playerActionBusy}
+                  onPress={() => handleInviteParty(ou)}
+                >
+                  <View style={styles.playerMenuIcon}>
+                    <Users size={18} color="#4FB4FF" strokeWidth={2.2} />
+                  </View>
+                  <Text style={styles.playerMenuLabel}>Invite to Party</Text>
+                  <ChevronRight size={18} color="#5A7A9A" />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       {/* --- Selected destination card (cafe or custom location) --- */}
       {selectedDestination && !routeInfo && !isRecording && (() => {
@@ -2681,33 +2825,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
-  // Car marker
-  carMarker: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  carGlow: {
-    position: "absolute",
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
-  },
-  carRing: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#0A0A14",
-    borderWidth: 2,
-    borderColor: "#22C55E",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 10,
-  },
   // "You / Lv." label under the player's own marker
   youLabelWrap: {
     alignItems: "center",
@@ -2723,17 +2840,11 @@ const styles = StyleSheet.create({
   youLabelLevel: {
     fontSize: 9.5,
     fontWeight: "600",
-    color: "#9A9AB0",
+    color: "#7FC4FF",
     marginTop: 1,
     textShadowColor: "rgba(0, 0, 0, 0.9)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-  carRingRecording: {
-    borderColor: "#FF2D55",
-    shadowColor: "#FF2D55",
-    shadowOpacity: 0.6,
-    shadowRadius: 18,
   },
   // Destination pin
   destPin: {
@@ -3942,46 +4053,104 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#E0E0EA",
   },
-  // ─── Online player markers on map ────────────────────
+  // ─── Own user marker (blue neon car badge) ───────────
+  meMarkerWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  meBadge: {
+    width: 52,
+    height: 52,
+  },
+  meBadgeRecording: {
+    width: 58,
+    height: 58,
+  },
+  // ─── Online player markers on map (photo + level + car base) ──
   playerMarkerWrap: {
     alignItems: "center",
-    maxWidth: 96,
+    maxWidth: 100,
   },
-  playerRing: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(10, 10, 20, 0.95)",
+  playerAvatarRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(10, 14, 24, 0.95)",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
+    borderWidth: 2.5,
+    borderColor: "#3BA7FF",
+    shadowColor: "#3BA7FF",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
+    shadowOpacity: 0.7,
     shadowRadius: 10,
-    elevation: 8,
-    overflow: "hidden",
+    elevation: 9,
   },
-  playerAvatarImg: {
+  playerAvatarPhoto: {
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+  },
+  playerAvatarFallback: {
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: "#1B3A5C",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  playerAvatarInitial: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#BFE2FF",
+  },
+  playerLevelBadge: {
+    position: "absolute",
+    top: -6,
+    right: -8,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 3,
+    backgroundColor: "#0A1420",
+    borderWidth: 1.5,
+    borderColor: "#3BA7FF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  playerLevelBadgeLv: {
+    fontSize: 5.5,
+    fontWeight: "700",
+    color: "#7FC4FF",
+    lineHeight: 6,
+  },
+  playerLevelBadgeNum: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    lineHeight: 11,
+  },
+  playerCarBase: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    marginTop: -6,
   },
   playerName: {
-    marginTop: 4,
-    fontSize: 10.5,
-    fontWeight: "700",
-    color: "#E8E8F0",
+    marginTop: 1,
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#FFFFFF",
     textAlign: "center",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
+    textShadowColor: "rgba(0, 0, 0, 0.95)",
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-    maxWidth: 92,
+    textShadowRadius: 4,
+    maxWidth: 96,
   },
-  playerLevel: {
+  playerDistance: {
     marginTop: 1,
     fontSize: 9.5,
     fontWeight: "600",
-    color: "#9A9AB0",
+    color: "#7FC4FF",
     textShadowColor: "rgba(0, 0, 0, 0.9)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -3995,98 +4164,129 @@ const styles = StyleSheet.create({
     zIndex: 160,
   },
   onlineUserCardContent: {
-    backgroundColor: "rgba(18, 22, 32, 0.97)",
-    borderRadius: 18,
+    backgroundColor: "rgba(12, 18, 30, 0.97)",
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.2)",
-    padding: 18,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
+    borderColor: "rgba(59, 167, 255, 0.3)",
+    padding: 16,
+    shadowColor: "#3BA7FF",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 20,
   },
-  onlineUserCardHeader: {
+  // Identity header
+  playerSheetHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
     marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(59, 167, 255, 0.12)",
   },
-  onlineUserCardAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#22C55E",
+  playerSheetAvatarRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#0A1420",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2.5,
+    borderColor: "#3BA7FF",
+    shadowColor: "#3BA7FF",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  playerSheetAvatarImg: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  playerSheetAvatarText: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#BFE2FF",
+  },
+  playerSheetLevelBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 4,
+    backgroundColor: "#0A1420",
+    borderWidth: 1.5,
+    borderColor: "#3BA7FF",
     justifyContent: "center",
     alignItems: "center",
   },
-  onlineUserCardAvatarImg: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  playerSheetLevelLv: {
+    fontSize: 6,
+    fontWeight: "700",
+    color: "#7FC4FF",
+    lineHeight: 7,
   },
-  onlineUserCardOnlineDot: {
-    position: "absolute",
-    bottom: 1,
-    right: 1,
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-    backgroundColor: "#22C55E",
-    borderWidth: 2.5,
-    borderColor: "rgba(18, 22, 32, 1)",
+  playerSheetLevelNum: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    lineHeight: 13,
   },
-  onlineUserCardAvatarText: {
-    fontSize: 20,
+  playerSheetName: {
+    fontSize: 19,
     fontWeight: "800",
     color: "#FFFFFF",
   },
-  onlineUserCardName: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  onlineUserCardLevel: {
+  playerSheetDistance: {
     fontSize: 13,
-    color: "#22C55E",
+    color: "#7FC4FF",
     fontWeight: "600",
-    marginTop: 2,
+    marginTop: 3,
   },
-  onlineUserCardActions: {
-    flexDirection: "row",
+  playerSheetOnlineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#22C55E",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  // 4-option menu
+  playerMenu: {
     gap: 10,
   },
-  onlineUserProfileBtn: {
-    flex: 1,
+  playerMenuRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "rgba(34, 197, 94, 0.16)",
+    gap: 14,
+    backgroundColor: "rgba(20, 30, 46, 0.9)",
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.35)",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    borderColor: "rgba(59, 167, 255, 0.25)",
+    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
   },
-  onlineUserProfileBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  onlineUserAddBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
+  playerMenuRowLast: {},
+  playerMenuIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(59, 167, 255, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(59, 167, 255, 0.4)",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#FF6B35",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    alignItems: "center",
   },
-  onlineUserAddBtnText: {
-    fontSize: 14,
+  playerMenuLabel: {
+    flex: 1,
+    fontSize: 15,
     fontWeight: "700",
     color: "#FFFFFF",
   },
