@@ -461,13 +461,26 @@ export default function MapScreen() {
   const [showDriversLayer, setShowDriversLayer] = useState(true);
   const weatherFetchedRef = useRef(false);
 
-  // Keep markers re-rendering briefly after POIs change so the badge images
-  // finish decoding before tracksViewChanges turns off (Android blank-marker fix)
-  const [markerImagesSettling, setMarkerImagesSettling] = useState(true);
+  // Keep each badge marker re-rendering (tracksViewChanges) until its Image has
+  // actually finished decoding, so the native Android marker snapshot isn't taken
+  // mid-load (which is what produced icons frozen at half-drawn/cropped size).
+  // A blind timeout can't guarantee the image is ready by the time it fires, so
+  // we track load completion per-marker instead.
+  const [loadedBadgeIds, setLoadedBadgeIds] = useState<Set<string>>(new Set());
+  const handleBadgeLoaded = useCallback((id: string) => {
+    setLoadedBadgeIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
   useEffect(() => {
-    setMarkerImagesSettling(true);
-    const t = setTimeout(() => setMarkerImagesSettling(false), 1500);
-    return () => clearTimeout(t);
+    const currentIds = new Set(cafes.map((poi) => poi.id));
+    setLoadedBadgeIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (currentIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
   }, [cafes]);
 
   // Events system
@@ -1319,7 +1332,7 @@ export default function MapScreen() {
               key={poi.id}
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
-              tracksViewChanges={markerImagesSettling || isSelected}
+              tracksViewChanges={isSelected || (!!badgeSrc && !loadedBadgeIds.has(poi.id))}
               anchor={{ x: 0.5, y: 0.3 }}
             >
               <View style={styles.poiMarkerWrap}>
@@ -1332,6 +1345,8 @@ export default function MapScreen() {
                       isChosen && styles.poiBadgeChosen,
                     ]}
                     resizeMode="contain"
+                    fadeDuration={0}
+                    onLoadEnd={() => handleBadgeLoaded(poi.id)}
                   />
                 ) : (
                   <View style={[
