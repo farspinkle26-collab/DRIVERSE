@@ -139,10 +139,11 @@ const DRIVE_FEATURES: DriveFeature[] = [
   {
     id: "community",
     title: "Community",
-    subtitle: "Clubs & meetups",
+    subtitle: "Convoy & meetups",
     icon: Users,
     color: "#3B82F6",
     bgColor: "#3B82F615",
+    route: "/community",
   },
   {
     id: "marketplace",
