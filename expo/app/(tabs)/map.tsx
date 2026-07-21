@@ -980,6 +980,16 @@ export default function MapScreen() {
     setSelectedDestination(null);
     setLocationChosen(false);
     estimatedDurationRef.current = null;
+    // Also clear any leftover trip state from a cancelled navigation
+    // (e.g. STOP tapped before the trip qualified for the Trip Summary
+    // card), otherwise recordedPath stays non-empty and permanently
+    // hides the Create Event/Convoy/Chat stack and online banner.
+    setRecordedPath([]);
+    setTripDistance(0);
+    setElapsedMs(0);
+    setTripStartMs(null);
+    setRouteSplitIdx(null);
+    setXpEarned(null);
   }, []);
 
   // --- Toggle pick mode ---
