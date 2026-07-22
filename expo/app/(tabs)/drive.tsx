@@ -8,7 +8,6 @@ import {
   Animated,
   Dimensions,
   Platform,
-  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -47,7 +46,6 @@ import {
 import { useRouter } from "expo-router";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useQuests } from "@/hooks/useQuestStore";
-import { useEvents } from "@/hooks/useEventsStore";
 import {
   DIFFICULTY_TIERS,
   progressPercent,
@@ -138,7 +136,6 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#00D4AA",
     bgColor: "#00D4AA15",
     image: FEATURE_IMAGES.garage,
-    route: "/(tabs)/profile",
   },
   {
     id: "community",
@@ -247,6 +244,25 @@ function QuestCard({ quest }: { quest: DailyQuest }) {
   );
 }
 
+const UPCOMING_EVENTS = [
+  {
+    id: "e1",
+    title: "Midnight Rally",
+    date: "Sat, 29 Jun",
+    location: "Downtown Parking Lot",
+    attendees: 128,
+    image: null,
+  },
+  {
+    id: "e2",
+    title: "EV Showcase & Coffee",
+    date: "Sun, 30 Jun",
+    location: "City Central",
+    attendees: 56,
+    image: null,
+  },
+];
+
 export default function DriveScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -264,16 +280,6 @@ export default function DriveScreen() {
     generating: questsGenerating,
     generateQuests,
   } = useQuests();
-
-  const { events, loadingEvents, joinEvent, leaveEvent } = useEvents();
-  const [rsvpBusyId, setRsvpBusyId] = useState<string | null>(null);
-
-  const handleRsvp = async (eventId: string, isJoined: boolean) => {
-    setRsvpBusyId(eventId);
-    const result = isJoined ? await leaveEvent(eventId) : await joinEvent(eventId);
-    setRsvpBusyId(null);
-    if (result.error) console.error(result.error);
-  };
 
   const handleFeaturePress = (feature: DriveFeature) => {
     if (feature.route) {
@@ -460,58 +466,35 @@ export default function DriveScreen() {
             <Text style={styles.sectionSubtitle}>
               Car meets, rallies, and community gatherings near you
             </Text>
-            {loadingEvents && events.length === 0 ? (
-              <Text style={styles.questEmpty}>Loading events…</Text>
-            ) : events.length === 0 ? (
-              <Text style={styles.questEmpty}>No events in your country yet — create one from the map</Text>
-            ) : (
-              events.map((event) => (
-                <View key={event.id} style={styles.eventCard}>
-                  <View style={styles.eventImagePlaceholder}>
-                    <Calendar size={28} color="#FF6B3560" />
+            {UPCOMING_EVENTS.map((event) => (
+              <TouchableOpacity key={event.id} style={styles.eventCard} activeOpacity={0.7}>
+                <View style={styles.eventImagePlaceholder}>
+                  <Calendar size={28} color="#FF6B3560" />
+                </View>
+                <View style={styles.eventContent}>
+                  <Text style={styles.eventTitle}>{event.title}</Text>
+                  <View style={styles.eventDetail}>
+                    <Clock size={12} color="#8A8A9A" />
+                    <Text style={styles.eventDetailText}>{event.date}</Text>
                   </View>
-                  <View style={styles.eventContent}>
-                    <Text style={styles.eventTitle}>{event.title}</Text>
-                    <View style={styles.eventDetail}>
-                      <Clock size={12} color="#8A8A9A" />
-                      <Text style={styles.eventDetailText}>
-                        {new Date(event.starts_at).toLocaleString(undefined, {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
+                  <View style={styles.eventDetail}>
+                    <MapPin size={12} color="#8A8A9A" />
+                    <Text style={styles.eventDetailText}>{event.location}</Text>
+                  </View>
+                  <View style={styles.eventFooter}>
+                    <View style={styles.eventAttendees}>
+                      <Users size={12} color="#FF6B35" />
+                      <Text style={styles.eventAttendeeText}>
+                        {event.attendees} attending
                       </Text>
                     </View>
-                    <View style={styles.eventDetail}>
-                      <MapPin size={12} color="#8A8A9A" />
-                      <Text style={styles.eventDetailText}>{event.location_name || "Pinned location"}</Text>
-                    </View>
-                    <View style={styles.eventFooter}>
-                      <View style={styles.eventAttendees}>
-                        <Users size={12} color="#FF6B35" />
-                        <Text style={styles.eventAttendeeText}>
-                          {event.participant_count} attending
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.rsvpButton}
-                        activeOpacity={0.7}
-                        disabled={rsvpBusyId === event.id}
-                        onPress={() => handleRsvp(event.id, event.is_joined)}
-                      >
-                        {rsvpBusyId === event.id ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <Text style={styles.rsvpText}>{event.is_joined ? "Going" : "RSVP"}</Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity style={styles.rsvpButton} activeOpacity={0.7}>
+                      <Text style={styles.rsvpText}>RSVP</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
-              ))
-            )}
+              </TouchableOpacity>
+            ))}
           </View>
         )}
       </ScrollView>

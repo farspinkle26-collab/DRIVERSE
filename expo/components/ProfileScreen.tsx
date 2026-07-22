@@ -73,15 +73,15 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
   if (!hasPoints) return null;
 
-  // No recorded GPS path (e.g. older trips) — fall back to a straight line
-  // between the two endpoints so the route is still visible on the map.
-  const hasDestination = !!(trip.destination_lat && trip.destination_lng);
-  const straightLine = [
-    { latitude: trip.origin_lat, longitude: trip.origin_lng },
-    { latitude: trip.destination_lat || trip.origin_lat, longitude: trip.destination_lng || trip.origin_lng },
-  ];
-
-  const region = hasPath ? regionForPath(coords) : regionForPath(straightLine, 1.8);
+  const region = hasPath
+    ? regionForPath(coords)
+    : regionForPath(
+        [
+          { latitude: trip.origin_lat, longitude: trip.origin_lng },
+          { latitude: trip.destination_lat || trip.origin_lat, longitude: trip.destination_lng || trip.origin_lng },
+        ],
+        1.8
+      );
 
   return (
     <View style={styles.tripMapWrap} pointerEvents="none">
@@ -108,19 +108,10 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
           </>
         ) : (
           <>
-            {hasDestination && (
-              <Polyline
-                coordinates={straightLine}
-                strokeWidth={3}
-                strokeColor="#FF6B35"
-                lineDashPattern={[6, 6]}
-                lineCap="round"
-              />
-            )}
             <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
               <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
             </Marker>
-            {hasDestination ? (
+            {trip.destination_lat && trip.destination_lng ? (
               <Marker coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }} anchor={{ x: 0.5, y: 0.5 }}>
                 <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
               </Marker>
@@ -158,7 +149,6 @@ interface CarItem {
 
 interface TripItem {
   id: string;
-  title: string;
   destination_name: string;
   origin_name: string;
   origin_lat: number;
@@ -1080,7 +1070,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   <View style={styles.tripHeader}>
                     <View style={styles.tripRoute}>
                       <MapPin size={14} color="#8A8A9A" />
-                      <Text style={styles.tripDest} numberOfLines={1}>{trip.title || trip.destination_name || trip.origin_name || "Unknown"}</Text>
+                      <Text style={styles.tripDest} numberOfLines={1}>{trip.destination_name || trip.origin_name || "Unknown"}</Text>
                     </View>
                     {trip.was_faster_than_estimation && (
                       <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>
