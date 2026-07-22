@@ -17,7 +17,6 @@ import { XPProvider } from "@/hooks/useXPStore";
 import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
-import { ConvoysProvider } from "@/hooks/useConvoysStore";
 import { PartyProvider } from "@/hooks/usePartyStore";
 import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
@@ -104,14 +103,12 @@ export default function RootLayout() {
                             <OnlineUsersProvider>
                               <PartyProvider>
                                 <EventsProvider>
-                                  <ConvoysProvider>
-                                    <RoutesProvider>
-                                      <ActiveCarProvider>
-                                        <RootLayoutNav />
-                                        <NotificationBanner />
-                                      </ActiveCarProvider>
-                                    </RoutesProvider>
-                                  </ConvoysProvider>
+                                  <RoutesProvider>
+                                    <ActiveCarProvider>
+                                      <RootLayoutNav />
+                                      <NotificationBanner />
+                                    </ActiveCarProvider>
+                                  </RoutesProvider>
                                 </EventsProvider>
                               </PartyProvider>
                             </OnlineUsersProvider>

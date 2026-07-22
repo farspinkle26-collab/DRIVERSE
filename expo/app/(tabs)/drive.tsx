@@ -136,7 +136,6 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#00D4AA",
     bgColor: "#00D4AA15",
     image: FEATURE_IMAGES.garage,
-    route: "/(tabs)/profile",
   },
   {
     id: "community",
