@@ -117,6 +117,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#8B5CF6",
     bgColor: "#8B5CF615",
     image: FEATURE_IMAGES.cafe,
+    route: "/nearby-places?type=cafe",
   },
   {
     id: "workshop",
@@ -126,6 +127,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#F59E0B",
     bgColor: "#F59E0B15",
     image: FEATURE_IMAGES.workshop,
+    route: "/nearby-places?type=workshop",
   },
   {
     id: "garage",
