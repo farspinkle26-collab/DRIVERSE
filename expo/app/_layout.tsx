@@ -55,6 +55,7 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="routes" options={{ headerShown: false }} />
+      <Stack.Screen name="nearby-places" options={{ headerShown: false }} />
       <Stack.Screen name="route/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="trip/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="ranks" options={{ headerShown: false }} />
