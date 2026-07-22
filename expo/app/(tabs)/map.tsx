@@ -50,6 +50,7 @@ import {
   User,
   Handshake,
   Sun,
+  Moon,
   Cloud,
   CloudRain,
   CloudSnow,
@@ -485,7 +486,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
-  const { isDark } = useTheme();
+  const { isDark, toggleTheme } = useTheme();
 
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -706,7 +707,11 @@ export default function MapScreen() {
 
   // --- Fetch directions from user location to destination ---
   const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
-    if (!GOOGLE_API_KEY) return;
+    if (!GOOGLE_API_KEY) {
+      Alert.alert("Route Unavailable", "Maps API key is missing, so a route can't be calculated.");
+      setNavigating(false);
+      return;
+    }
     setLoadingRoute(true);
     try {
       const url =
@@ -750,10 +755,17 @@ export default function MapScreen() {
             edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
             animated: true,
           });
+        } else {
+          setNavigating(false);
+          Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
         }
+      } else {
+        setNavigating(false);
+        Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
       }
     } catch {
-      // Silent fail
+      setNavigating(false);
+      Alert.alert("Route Unavailable", "Couldn't reach the maps service. Check your connection and try again.");
     } finally {
       setLoadingRoute(false);
     }
@@ -1183,7 +1195,11 @@ export default function MapScreen() {
 
   const handleNavigate = useCallback(() => {
     const coords = destCoords();
-    if (!userLocation || !coords) return;
+    if (!coords) return;
+    if (!userLocation) {
+      Alert.alert("Location Needed", "We can't find your current location yet. Make sure location services are on and try again.");
+      return;
+    }
     setNavigating(true);
     fetchDirections(userLocation, coords);
   }, [userLocation, destCoords, fetchDirections]);
@@ -1306,7 +1322,10 @@ export default function MapScreen() {
   }, [cancelEvent]);
 
   const handleRouteToEvent = useCallback((ev: DriveEvent) => {
-    if (!userLocation) return;
+    if (!userLocation) {
+      Alert.alert("Location Needed", "We can't find your current location yet. Make sure location services are on and try again.");
+      return;
+    }
     setSelectedEventId(null);
     setSelectedDestination({ type: "location", lat: ev.latitude, lng: ev.longitude });
     setLocationChosen(true);
@@ -2614,6 +2633,26 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {filtersOpen && !isRecording && (
         <View style={[styles.filtersPopover, { top: insets.top + 150 }]}>
+          <Text style={styles.filtersTitle}>Map Style</Text>
+          <View style={styles.mapStyleToggle}>
+            <TouchableOpacity
+              style={[styles.mapStyleOption, !isDark && styles.mapStyleOptionActive]}
+              activeOpacity={0.7}
+              onPress={() => { if (isDark) toggleTheme(); }}
+            >
+              <Sun size={16} color={!isDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
+              <Text style={[styles.mapStyleOptionText, !isDark && styles.mapStyleOptionTextActive]}>Light</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.mapStyleOption, isDark && styles.mapStyleOptionActive]}
+              activeOpacity={0.7}
+              onPress={() => { if (!isDark) toggleTheme(); }}
+            >
+              <Moon size={16} color={isDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
+              <Text style={[styles.mapStyleOptionText, isDark && styles.mapStyleOptionTextActive]}>Dark</Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={styles.filtersTitle}>Map Layers</Text>
           {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => (
             <TouchableOpacity
@@ -3736,7 +3775,7 @@ const styles = StyleSheet.create({
   filtersPopover: {
     position: "absolute",
     right: 78,
-    width: 170,
+    width: 190,
     backgroundColor: "rgba(14, 14, 24, 0.97)",
     borderRadius: 16,
     borderWidth: 1,
@@ -3787,6 +3826,34 @@ const styles = StyleSheet.create({
   filterCheckOn: {
     backgroundColor: "#FF6B35",
     borderColor: "#FF6B35",
+  },
+  mapStyleToggle: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+    marginBottom: 14,
+  },
+  mapStyleOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  mapStyleOptionActive: {
+    backgroundColor: "#FFFFFF",
+  },
+  mapStyleOptionText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#8A8A9A",
+  },
+  mapStyleOptionTextActive: {
+    color: "#0A0A14",
   },
   // ========================
   //  LIVE FEED PANEL
