@@ -3,7 +3,19 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
+import { resolveCountry } from "@/lib/geoCountry";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
+
+// Fire-and-forget: resolves the driver's country from device GPS once and
+// persists it, so Events/Community can be scoped to "drivers in my country".
+function ensureProfileCountry(userId: string, existingCountry?: string | null) {
+  if (existingCountry) return;
+  resolveCountry().then((country) => {
+    if (country) {
+      supabase.from("profiles").update({ country }).eq("id", userId);
+    }
+  });
+}
 
 const GUEST_USER: User = {
   id: "guest-user",
@@ -106,6 +118,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         };
 
         await supabase.from("profiles").upsert(defaultProfile);
+        ensureProfileCountry(userId);
 
         setUser({
           id: userId,
@@ -137,6 +150,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
       setUser(loadedUser);
       setError(null);
+      ensureProfileCountry(userId, profile.country);
     } catch (err) {
       console.error("Profile load error:", err);
     }

@@ -1,15 +1,20 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   StyleSheet,
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, Stack } from "expo-router";
+import * as Location from "expo-location";
 import {
   ArrowLeft,
   Users,
@@ -21,114 +26,13 @@ import {
   Check,
   Shield,
   Zap,
+  X,
 } from "lucide-react-native";
+import { useCommunity } from "@/hooks/useCommunityStore";
+import { useEvents } from "@/hooks/useEventsStore";
+import CreateEventModal from "@/components/CreateEventModal";
 
 const ACCENT = "#3B82F6"; // Community blue (matches the Drive feature card)
-
-// ─── Convoy data ─────────────────────────────────────────────────────
-// A "convoy" is a driving crew you can ride with. Membership is toggled
-// locally so the Join / Leave button is fully interactive.
-type Convoy = {
-  id: string;
-  name: string;
-  tag: string;
-  members: number;
-  description: string;
-  online: number;
-  verified?: boolean;
-};
-
-const CONVOYS: Convoy[] = [
-  {
-    id: "c1",
-    name: "Midnight Runners",
-    tag: "MDNT",
-    members: 342,
-    online: 28,
-    description: "Late-night touge & city cruises. JDM welcome.",
-    verified: true,
-  },
-  {
-    id: "c2",
-    name: "Apex Hunters",
-    tag: "APEX",
-    members: 187,
-    online: 12,
-    description: "Track days, canyon runs and clean driving.",
-  },
-  {
-    id: "c3",
-    name: "EV Volt Crew",
-    tag: "VOLT",
-    members: 96,
-    online: 9,
-    description: "Electric owners charging up together.",
-  },
-  {
-    id: "c4",
-    name: "Sunday Cruisers",
-    tag: "SNDY",
-    members: 254,
-    online: 17,
-    description: "Relaxed weekend coffee runs, all cars welcome.",
-    verified: true,
-  },
-];
-
-// ─── Meetup data ─────────────────────────────────────────────────────
-type Meetup = {
-  id: string;
-  title: string;
-  date: string;
-  when: "week" | "nearby";
-  distanceKm: number;
-  location: string;
-  attendees: number;
-  host: string;
-};
-
-const MEETUPS: Meetup[] = [
-  {
-    id: "m1",
-    title: "Midnight Rally",
-    date: "Sat, 25 Jul · 21:00",
-    when: "week",
-    distanceKm: 3,
-    location: "Downtown Parking Lot",
-    attendees: 128,
-    host: "Midnight Runners",
-  },
-  {
-    id: "m2",
-    title: "Cars & Coffee",
-    date: "Sun, 26 Jul · 08:00",
-    when: "week",
-    distanceKm: 6,
-    location: "Harbour Cafe",
-    attendees: 74,
-    host: "Sunday Cruisers",
-  },
-  {
-    id: "m3",
-    title: "Canyon Touge Run",
-    date: "Sat, 1 Aug · 06:00",
-    when: "nearby",
-    distanceKm: 22,
-    location: "Skyline Pass",
-    attendees: 41,
-    host: "Apex Hunters",
-  },
-  {
-    id: "m4",
-    title: "EV Showcase",
-    date: "Sun, 2 Aug · 10:00",
-    when: "nearby",
-    distanceKm: 14,
-    location: "City Central",
-    attendees: 56,
-    host: "EV Volt Crew",
-  },
-];
 
 const MEETUP_FILTERS = [
   { key: "all", label: "All" },
@@ -137,44 +41,84 @@ const MEETUP_FILTERS = [
 ] as const;
 type MeetupFilter = (typeof MEETUP_FILTERS)[number]["key"];
 
+function haversineKm(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
+  const R = 6371;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [tab, setTab] = useState<"convoy" | "meetups">("convoy");
+  const { crews, loadingCrews, joinCrew, leaveCrew, createCrew } = useCommunity();
+  const { events, loadingEvents, joinEvent, leaveEvent } = useEvents();
 
-  // Interactive membership + RSVP state
-  const [joined, setJoined] = useState<Record<string, boolean>>({ c1: true });
-  const [going, setGoing] = useState<Record<string, boolean>>({});
+  const [tab, setTab] = useState<"crew" | "meetups">("crew");
   const [filter, setFilter] = useState<MeetupFilter>("all");
+  const [myPos, setMyPos] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const toggleJoin = (id: string) =>
-    setJoined((prev) => ({ ...prev, [id]: !prev[id] }));
-  const toggleGoing = (id: string) =>
-    setGoing((prev) => ({ ...prev, [id]: !prev[id] }));
+  const [createCrewVisible, setCreateCrewVisible] = useState(false);
+  const [createMeetupVisible, setCreateMeetupVisible] = useState(false);
+  const [meetupPin, setMeetupPin] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low })
+      .then((loc) => setMyPos({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }))
+      .catch(() => {});
+  }, []);
 
   const visibleMeetups = useMemo(() => {
-    if (filter === "all") return MEETUPS;
-    if (filter === "week") return MEETUPS.filter((m) => m.when === "week");
-    return MEETUPS.filter((m) => m.distanceKm <= 15);
-  }, [filter]);
+    const now = Date.now();
+    const weekMs = 7 * 24 * 3600 * 1000;
+    return events.filter((e) => {
+      if (filter === "week") {
+        const start = new Date(e.starts_at).getTime();
+        return start - now <= weekMs;
+      }
+      if (filter === "nearby") {
+        if (!myPos) return true;
+        return haversineKm(myPos, { latitude: e.latitude, longitude: e.longitude }) <= 15;
+      }
+      return true;
+    });
+  }, [events, filter, myPos]);
 
-  const joinedCount = Object.values(joined).filter(Boolean).length;
-  const goingCount = Object.values(going).filter(Boolean).length;
+  const joinedCount = crews.filter((c) => c.is_joined).length;
+  const goingCount = events.filter((e) => e.is_joined).length;
 
-  const handleCreate = () => {
-    if (tab === "convoy") {
-      Alert.alert("Start a Convoy", "Rally your crew and give it a name.", [
-        { text: "Not now", style: "cancel" },
-        { text: "Create", style: "default" },
-      ]);
+  const handleToggleCrew = useCallback(async (crew: (typeof crews)[number]) => {
+    setBusyId(crew.id);
+    const result = crew.is_joined ? await leaveCrew(crew.id) : await joinCrew(crew.id);
+    setBusyId(null);
+    if (result.error) console.error(result.error);
+  }, [joinCrew, leaveCrew]);
+
+  const handleToggleGoing = useCallback(async (event: (typeof events)[number]) => {
+    setBusyId(event.id);
+    const result = event.is_joined ? await leaveEvent(event.id) : await joinEvent(event.id);
+    setBusyId(null);
+    if (result.error) console.error(result.error);
+  }, [joinEvent, leaveEvent]);
+
+  const handleCreate = useCallback(async () => {
+    if (tab === "crew") {
+      setCreateCrewVisible(true);
     } else {
-      Alert.alert("Host a Meetup", "Pick a spot, set a time, invite drivers.", [
-        { text: "Not now", style: "cancel" },
-        { text: "Create", style: "default" },
-      ]);
+      const pin = myPos ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low })
+        .then((loc) => ({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }))
+        .catch(() => null));
+      setMeetupPin(pin);
+      setCreateMeetupVisible(true);
     }
-  };
+  }, [tab, myPos]);
 
   return (
     <View style={styles.container}>
@@ -206,10 +150,10 @@ export default function CommunityScreen() {
       {/* Tabs */}
       <View style={styles.tabs}>
         <TabButton
-          label="Convoy"
+          label="Crews"
           icon={Flag}
-          active={tab === "convoy"}
-          onPress={() => setTab("convoy")}
+          active={tab === "crew"}
+          onPress={() => setTab("crew")}
         />
         <TabButton
           label="Meetups"
@@ -227,11 +171,11 @@ export default function CommunityScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {tab === "convoy" ? (
+        {tab === "crew" ? (
           <>
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>Your convoys</Text>
+                <Text style={styles.sectionTitle}>Crews in your country</Text>
                 <Text style={styles.sectionSub}>
                   {joinedCount > 0
                     ? `Riding with ${joinedCount} crew${joinedCount > 1 ? "s" : ""}`
@@ -240,61 +184,69 @@ export default function CommunityScreen() {
               </View>
             </View>
 
-            {CONVOYS.map((c) => {
-              const isJoined = !!joined[c.id];
-              return (
-                <View key={c.id} style={styles.card}>
-                  <View style={styles.convoyTop}>
-                    <View style={[styles.tagBadge, { backgroundColor: ACCENT + "22" }]}>
-                      <Text style={[styles.tagText, { color: ACCENT }]}>{c.tag}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.nameRow}>
-                        <Text style={styles.cardTitle}>{c.name}</Text>
-                        {c.verified ? (
-                          <Shield size={14} color={ACCENT} fill={ACCENT} />
-                        ) : null}
+            {loadingCrews && crews.length === 0 ? (
+              <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
+            ) : crews.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Flag size={28} color={ACCENT + "60"} />
+                <Text style={styles.emptyText}>No crews near you yet — start the first one</Text>
+              </View>
+            ) : (
+              crews.map((c) => {
+                const isJoined = c.is_joined;
+                return (
+                  <View key={c.id} style={styles.card}>
+                    <View style={styles.convoyTop}>
+                      <View style={[styles.tagBadge, { backgroundColor: ACCENT + "22" }]}>
+                        <Text style={[styles.tagText, { color: ACCENT }]}>{c.tag || c.name.slice(0, 4).toUpperCase()}</Text>
                       </View>
-                      <Text style={styles.cardDesc}>{c.description}</Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.nameRow}>
+                          <Text style={styles.cardTitle}>{c.name}</Text>
+                          {c.is_creator ? (
+                            <Shield size={14} color={ACCENT} fill={ACCENT} />
+                          ) : null}
+                        </View>
+                        {c.description ? <Text style={styles.cardDesc}>{c.description}</Text> : null}
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.convoyMeta}>
-                    <View style={styles.metaItem}>
-                      <Users size={13} color="#8A8A9A" />
-                      <Text style={styles.metaText}>{c.members} members</Text>
+                    <View style={styles.convoyMeta}>
+                      <View style={styles.metaItem}>
+                        <Users size={13} color="#8A8A9A" />
+                        <Text style={styles.metaText}>{c.member_count} member{c.member_count === 1 ? "" : "s"}</Text>
+                      </View>
                     </View>
-                    <View style={styles.metaItem}>
-                      <View style={styles.onlineDot} />
-                      <Text style={styles.metaText}>{c.online} online</Text>
-                    </View>
-                  </View>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      isJoined ? styles.actionBtnJoined : styles.actionBtnPrimary,
-                    ]}
-                    onPress={() => toggleJoin(c.id)}
-                    activeOpacity={0.8}
-                  >
-                    {isJoined ? (
-                      <>
-                        <Check size={15} color={ACCENT} />
-                        <Text style={[styles.actionText, { color: ACCENT }]}>
-                          Joined
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={15} color="#FFFFFF" />
-                        <Text style={styles.actionText}>Join convoy</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
+                    <TouchableOpacity
+                      style={[
+                        styles.actionBtn,
+                        isJoined ? styles.actionBtnJoined : styles.actionBtnPrimary,
+                      ]}
+                      onPress={() => handleToggleCrew(c)}
+                      disabled={busyId === c.id}
+                      activeOpacity={0.8}
+                    >
+                      {busyId === c.id ? (
+                        <ActivityIndicator size="small" color={isJoined ? ACCENT : "#FFFFFF"} />
+                      ) : isJoined ? (
+                        <>
+                          <Check size={15} color={ACCENT} />
+                          <Text style={[styles.actionText, { color: ACCENT }]}>
+                            Joined
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={15} color="#FFFFFF" />
+                          <Text style={styles.actionText}>Join crew</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
           </>
         ) : (
           <>
@@ -330,14 +282,17 @@ export default function CommunityScreen() {
               </View>
             </View>
 
-            {visibleMeetups.length === 0 ? (
+            {loadingEvents && events.length === 0 ? (
+              <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
+            ) : visibleMeetups.length === 0 ? (
               <View style={styles.emptyState}>
                 <Calendar size={28} color={ACCENT + "60"} />
                 <Text style={styles.emptyText}>No meetups match this filter</Text>
               </View>
             ) : (
               visibleMeetups.map((m) => {
-                const isGoing = !!going[m.id];
+                const isGoing = m.is_joined;
+                const distanceKm = myPos ? haversineKm(myPos, { latitude: m.latitude, longitude: m.longitude }) : null;
                 return (
                   <View key={m.id} style={styles.card}>
                     <View style={styles.meetupTop}>
@@ -346,19 +301,28 @@ export default function CommunityScreen() {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.cardTitle}>{m.title}</Text>
-                        <Text style={styles.hostText}>by {m.host}</Text>
+                        <Text style={styles.hostText}>by {m.host_name}</Text>
                       </View>
                     </View>
 
                     <View style={styles.meetupMeta}>
                       <View style={styles.metaItem}>
                         <Clock size={13} color="#8A8A9A" />
-                        <Text style={styles.metaText}>{m.date}</Text>
+                        <Text style={styles.metaText}>
+                          {new Date(m.starts_at).toLocaleString(undefined, {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </Text>
                       </View>
                       <View style={styles.metaItem}>
                         <MapPin size={13} color="#8A8A9A" />
                         <Text style={styles.metaText}>
-                          {m.location} · {m.distanceKm} km
+                          {m.location_name || "Pinned location"}
+                          {distanceKm != null ? ` · ${distanceKm.toFixed(1)} km` : ""}
                         </Text>
                       </View>
                     </View>
@@ -367,7 +331,7 @@ export default function CommunityScreen() {
                       <View style={styles.metaItem}>
                         <Users size={13} color={ACCENT} />
                         <Text style={[styles.metaText, { color: "#B8B8C8" }]}>
-                          {m.attendees + (isGoing ? 1 : 0)} going
+                          {m.participant_count} going
                         </Text>
                       </View>
                       <TouchableOpacity
@@ -375,10 +339,13 @@ export default function CommunityScreen() {
                           styles.rsvpBtn,
                           isGoing ? styles.rsvpBtnActive : styles.rsvpBtnIdle,
                         ]}
-                        onPress={() => toggleGoing(m.id)}
+                        onPress={() => handleToggleGoing(m)}
+                        disabled={busyId === m.id}
                         activeOpacity={0.8}
                       >
-                        {isGoing ? (
+                        {busyId === m.id ? (
+                          <ActivityIndicator size="small" color={isGoing ? "#FFFFFF" : ACCENT} />
+                        ) : isGoing ? (
                           <>
                             <Check size={14} color="#FFFFFF" />
                             <Text style={styles.rsvpText}>Going</Text>
@@ -397,7 +364,131 @@ export default function CommunityScreen() {
           </>
         )}
       </ScrollView>
+
+      <CreateCrewModal
+        visible={createCrewVisible}
+        onClose={() => setCreateCrewVisible(false)}
+        onCreate={createCrew}
+      />
+
+      <CreateEventModal
+        visible={createMeetupVisible}
+        coordinate={meetupPin}
+        onClose={() => setCreateMeetupVisible(false)}
+        onCreated={() => setCreateMeetupVisible(false)}
+      />
     </View>
+  );
+}
+
+function CreateCrewModal({
+  visible,
+  onClose,
+  onCreate,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onCreate: (input: { name: string; tag?: string; description?: string }) => Promise<{ error?: string }>;
+}) {
+  const insets = useSafeAreaInsets();
+  const [name, setName] = useState("");
+  const [tag, setTag] = useState("");
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = useCallback(() => {
+    setName("");
+    setTag("");
+    setDescription("");
+    setError(null);
+    setSubmitting(false);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    reset();
+    onClose();
+  }, [reset, onClose]);
+
+  const handleSubmit = useCallback(async () => {
+    if (name.trim().length < 2 || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await onCreate({ name, tag, description });
+    if (result.error) {
+      setError(result.error);
+      setSubmitting(false);
+      return;
+    }
+    reset();
+    onClose();
+  }, [name, tag, description, submitting, onCreate, reset, onClose]);
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
+      <View style={modalStyles.backdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={modalStyles.sheetWrap}>
+          <View style={[modalStyles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={modalStyles.header}>
+              <Text style={modalStyles.headerTitle}>Start a Crew</Text>
+              <TouchableOpacity style={modalStyles.closeBtn} onPress={handleClose} activeOpacity={0.7}>
+                <X size={18} color="#8A8A9A" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={modalStyles.label}>Crew name</Text>
+            <TextInput
+              style={modalStyles.input}
+              placeholder="Midnight Runners"
+              placeholderTextColor="#4A4A5E"
+              value={name}
+              onChangeText={setName}
+              maxLength={60}
+            />
+
+            <Text style={modalStyles.label}>Tag (optional)</Text>
+            <TextInput
+              style={modalStyles.input}
+              placeholder="MDNT"
+              placeholderTextColor="#4A4A5E"
+              value={tag}
+              onChangeText={setTag}
+              maxLength={6}
+              autoCapitalize="characters"
+            />
+
+            <Text style={modalStyles.label}>Description (optional)</Text>
+            <TextInput
+              style={[modalStyles.input, modalStyles.inputMultiline]}
+              placeholder="What's this crew about?"
+              placeholderTextColor="#4A4A5E"
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              maxLength={300}
+            />
+
+            {error && <Text style={modalStyles.errorText}>{error}</Text>}
+
+            <TouchableOpacity
+              style={[modalStyles.submitBtn, (name.trim().length < 2 || submitting) && modalStyles.submitBtnDisabled]}
+              onPress={handleSubmit}
+              disabled={name.trim().length < 2 || submitting}
+              activeOpacity={0.75}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Flag size={18} color="#FFFFFF" />
+                  <Text style={modalStyles.submitBtnText}>Create Crew</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
   );
 }
 
@@ -425,6 +516,43 @@ function TabButton({
     </TouchableOpacity>
   );
 }
+
+const modalStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "flex-end" },
+  sheetWrap: { justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: "#0E0E18",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "700" },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: "rgba(255, 255, 255, 0.06)",
+    justifyContent: "center", alignItems: "center",
+  },
+  label: {
+    color: "#8A8A9A", fontSize: 12, fontWeight: "600", marginTop: 14, marginBottom: 8,
+    letterSpacing: 0.4, textTransform: "uppercase",
+  },
+  input: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)", borderRadius: 12, borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)", color: "#FFFFFF", fontSize: 15,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  inputMultiline: { minHeight: 70, textAlignVertical: "top" },
+  errorText: { color: "#EF4444", fontSize: 13, fontWeight: "600", marginTop: 12 },
+  submitBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: ACCENT, borderRadius: 16, paddingVertical: 15, marginTop: 20, marginBottom: 8,
+  },
+  submitBtnDisabled: { opacity: 0.4 },
+  submitBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: 0.4 },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#060609" },
@@ -492,7 +620,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   cardDesc: { fontSize: 13, color: "#8A8A9A", marginTop: 3, lineHeight: 18 },
 
-  // Convoy
+  // Crew
   convoyTop: { flexDirection: "row", gap: 12 },
   tagBadge: {
     width: 48,
@@ -510,12 +638,6 @@ const styles = StyleSheet.create({
   },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   metaText: { fontSize: 12.5, color: "#8A8A9A" },
-  onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#22C55E",
-  },
 
   // Action buttons
   actionBtn: {
