@@ -719,6 +719,10 @@ export default function MapScreen() {
       const res = await fetch(url);
       const data = await res.json();
 
+      if (data.status !== "OK" || !data.routes?.[0]) {
+        console.warn("Directions API error:", data.status, data.error_message);
+      }
+
       if (data.status === "OK" && data.routes?.[0]) {
         const route = data.routes[0];
         const leg = route.legs[0];
@@ -761,7 +765,13 @@ export default function MapScreen() {
         }
       } else {
         setNavigating(false);
-        Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
+        const isKeyIssue = data.status === "REQUEST_DENIED" || data.status === "OVER_QUERY_LIMIT";
+        Alert.alert(
+          "Route Unavailable",
+          isKeyIssue
+            ? "The maps service rejected the request. The Google Maps API key may be missing the Directions API or have restrictions that block it."
+            : "No driving route could be found to this destination."
+        );
       }
     } catch {
       setNavigating(false);
