@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -68,27 +68,45 @@ import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const { isDark } = useTheme();
+  const mapRef = useRef<MapView>(null);
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
   const hasPath = coords.length > 1;
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
   if (!hasPoints) return null;
 
-  const region = hasPath
-    ? regionForPath(coords)
-    : regionForPath(
-        [
-          { latitude: trip.origin_lat, longitude: trip.origin_lng },
-          { latitude: trip.destination_lat || trip.origin_lat, longitude: trip.destination_lng || trip.origin_lng },
-        ],
-        1.8
-      );
+  // Points to frame the camera around: the recorded road path if we have
+  // one, otherwise just the origin/destination pair.
+  const fitPoints = hasPath
+    ? coords
+    : [
+        { latitude: trip.origin_lat, longitude: trip.origin_lng },
+        ...(trip.destination_lat && trip.destination_lng
+          ? [{ latitude: trip.destination_lat, longitude: trip.destination_lng }]
+          : []),
+      ];
+
+  const region = regionForPath(fitPoints, hasPath ? 1.4 : 1.8);
+
+  // initialRegion alone can render at a stale/default zoom in liteMode on
+  // Android before the view has laid out, so fit explicitly once ready.
+  const fitToPoints = () => {
+    if (fitPoints.length > 1) {
+      mapRef.current?.fitToCoordinates(fitPoints, {
+        edgePadding: { top: 24, right: 24, bottom: 24, left: 24 },
+        animated: false,
+      });
+    }
+  };
 
   return (
     <View style={styles.tripMapWrap} pointerEvents="none">
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={region}
+        onMapReady={fitToPoints}
+        onLayout={fitToPoints}
         customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         scrollEnabled={false}
         zoomEnabled={false}
@@ -96,28 +114,23 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
         rotateEnabled={false}
         liteMode={Platform.OS === "android"}
       >
-        {hasPath ? (
+        {hasPath && (
           <>
-            <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF6B35" lineCap="round" />
-            <Marker coordinate={coords[0]} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
-            </Marker>
-            <Marker coordinate={coords[coords.length - 1]} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
-            </Marker>
-          </>
-        ) : (
-          <>
-            <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
-            </Marker>
-            {trip.destination_lat && trip.destination_lng ? (
-              <Marker coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }} anchor={{ x: 0.5, y: 0.5 }}>
-                <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
-              </Marker>
-            ) : null}
+            <Polyline coordinates={coords} strokeWidth={7} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
+            <Polyline coordinates={coords} strokeWidth={3.5} strokeColor="#FF6B35" lineCap="round" />
           </>
         )}
+        <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
+          <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
+        </Marker>
+        {trip.destination_lat && trip.destination_lng ? (
+          <Marker
+            coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
+          </Marker>
+        ) : null}
       </MapView>
     </View>
   );
@@ -149,6 +162,7 @@ interface CarItem {
 
 interface TripItem {
   id: string;
+  name: string | null;
   destination_name: string;
   origin_name: string;
   origin_lat: number;
@@ -162,6 +176,13 @@ interface TripItem {
   xp_earned: number;
   was_faster_than_estimation: boolean;
   completed_at: string;
+}
+
+function tripDisplayName(trip: TripItem): string {
+  if (trip.name?.trim()) return trip.name;
+  if (trip.destination_name && trip.destination_name !== "Unknown") return trip.destination_name;
+  if (trip.origin_name) return trip.origin_name;
+  return "Unknown";
 }
 
 interface FriendItem {
@@ -1070,7 +1091,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   <View style={styles.tripHeader}>
                     <View style={styles.tripRoute}>
                       <MapPin size={14} color="#8A8A9A" />
-                      <Text style={styles.tripDest} numberOfLines={1}>{trip.destination_name || trip.origin_name || "Unknown"}</Text>
+                      <Text style={styles.tripDest} numberOfLines={1}>{tripDisplayName(trip)}</Text>
                     </View>
                     {trip.was_faster_than_estimation && (
                       <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>

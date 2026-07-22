@@ -41,6 +41,7 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import RenameModal from "@/components/RenameModal";
 
 function fmtDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -84,6 +85,8 @@ export default function RouteDetailScreen() {
   const [loadingComments, setLoadingComments] = useState(true);
   const [commentText, setCommentText] = useState("");
   const [posting, setPosting] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   const coords = useMemo(
     () => (route?.route_polyline ? decodePolyline(route.route_polyline) : []),
@@ -102,18 +105,22 @@ export default function RouteDetailScreen() {
     loadComments();
   }, [loadComments]);
 
-  // Fit map to the route once coordinates are available
-  useEffect(() => {
+  // Fit map to the route once coordinates are available. initialRegion alone
+  // can render at a stale zoom before the native view has laid out, so we
+  // also re-fit as soon as the map reports ready.
+  const fitToRoute = useCallback(() => {
     if (coords.length > 1) {
-      const t = setTimeout(() => {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
-          animated: true,
-        });
-      }, 500);
-      return () => clearTimeout(t);
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
+        animated: true,
+      });
     }
   }, [coords]);
+
+  useEffect(() => {
+    const t = setTimeout(fitToRoute, 400);
+    return () => clearTimeout(t);
+  }, [fitToRoute]);
 
   const handleShare = useCallback(async () => {
     if (!route) return;
@@ -182,12 +189,25 @@ export default function RouteDetailScreen() {
 
   const handleOwnerMenu = useCallback(() => {
     Alert.alert("Route Options", undefined, [
+      { text: "Rename route", onPress: () => setShowRename(true) },
       { text: "Change visibility", onPress: handleChangeVisibility },
       { text: "Copy share link", onPress: handleCopyLink },
       { text: "Delete route", style: "destructive", onPress: handleDeleteRoute },
       { text: "Cancel", style: "cancel" },
     ]);
   }, [handleChangeVisibility, handleCopyLink, handleDeleteRoute]);
+
+  const handleRename = useCallback(async (value: string) => {
+    if (!route) return;
+    setRenaming(true);
+    const { error } = await updateRoute(route.id, { title: value });
+    setRenaming(false);
+    if (error) {
+      Alert.alert("Error", error);
+      return;
+    }
+    setShowRename(false);
+  }, [route, updateRoute]);
 
   if (!route) {
     return (
@@ -253,6 +273,7 @@ export default function RouteDetailScreen() {
               style={StyleSheet.absoluteFill}
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
+              onMapReady={fitToRoute}
               customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               scrollEnabled={false}
               zoomEnabled={false}
@@ -420,6 +441,16 @@ export default function RouteDetailScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <RenameModal
+        visible={showRename}
+        title="Rename Route"
+        initialValue={route.title}
+        placeholder="e.g. Sunset Canyon Run"
+        saving={renaming}
+        onCancel={() => setShowRename(false)}
+        onSave={handleRename}
+      />
     </View>
   );
 }

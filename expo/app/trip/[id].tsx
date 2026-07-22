@@ -1,17 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
-import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag } from "lucide-react-native";
+import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import RenameModal from "@/components/RenameModal";
 
 interface TripDetail {
   id: string;
+  name: string | null;
   origin_name: string;
   origin_lat: number;
   origin_lng: number;
@@ -45,6 +47,8 @@ export default function TripDetailScreen() {
   const { isDark } = useTheme();
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showRename, setShowRename] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,24 +66,56 @@ export default function TripDetailScreen() {
     };
   }, [id]);
 
+  const defaultTripName = trip
+    ? trip.destination_name && trip.destination_name !== "Unknown"
+      ? `Drive to ${trip.destination_name}`
+      : "Drive"
+    : "Drive";
+  const tripDisplayName = trip?.name?.trim() ? trip.name : defaultTripName;
+
+  const handleRename = async (value: string) => {
+    if (!trip) return;
+    setRenaming(true);
+    const { error } = await supabase.from("trips").update({ name: value }).eq("id", trip.id);
+    setRenaming(false);
+    if (!error) {
+      setTrip((prev) => (prev ? { ...prev, name: value } : prev));
+      setShowRename(false);
+    }
+  };
+
   const coords = useMemo(
     () => (trip?.route_polyline ? decodePolyline(trip.route_polyline) : []),
     [trip?.route_polyline]
   );
 
-  useEffect(() => {
-    if (coords.length > 1) {
-      const t = setTimeout(() => {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
-          animated: true,
-        });
-      }, 500);
-      return () => clearTimeout(t);
-    }
-  }, [coords]);
+  // Points to frame the camera around: the recorded path if we have one,
+  // otherwise the origin/destination pair — even a two-point fallback
+  // deserves a proper fit instead of trusting initialRegion alone, since
+  // it can render at a stale zoom before the native view has laid out.
+  const fitPoints = useMemo(() => {
+    if (coords.length > 1) return coords;
+    const pts: { latitude: number; longitude: number }[] = [];
+    if (trip?.origin_lat && trip?.origin_lng) pts.push({ latitude: trip.origin_lat, longitude: trip.origin_lng });
+    if (trip?.destination_lat && trip?.destination_lng) pts.push({ latitude: trip.destination_lat, longitude: trip.destination_lng });
+    return pts;
+  }, [coords, trip]);
 
-  const region = regionForPath(coords);
+  const fitToPoints = useCallback(() => {
+    if (fitPoints.length > 1) {
+      mapRef.current?.fitToCoordinates(fitPoints, {
+        edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
+        animated: true,
+      });
+    }
+  }, [fitPoints]);
+
+  useEffect(() => {
+    const t = setTimeout(fitToPoints, 400);
+    return () => clearTimeout(t);
+  }, [fitToPoints]);
+
+  const region = regionForPath(fitPoints.length > 0 ? fitPoints : coords);
 
   return (
     <View style={styles.container}>
@@ -90,8 +126,14 @@ export default function TripDetailScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
           <ArrowLeft size={22} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.topTitle} numberOfLines={1}>Trip</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.topTitle} numberOfLines={1}>{trip ? tripDisplayName : "Trip"}</Text>
+        {trip ? (
+          <TouchableOpacity onPress={() => setShowRename(true)} style={styles.iconBtn} hitSlop={8}>
+            <Pencil size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
       {loading ? (
@@ -110,6 +152,7 @@ export default function TripDetailScreen() {
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
               customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+              onMapReady={fitToPoints}
             >
               {coords.length > 1 && (
                 <>
@@ -141,6 +184,11 @@ export default function TripDetailScreen() {
           </View>
 
           <View style={styles.body}>
+            <TouchableOpacity style={styles.nameRow} onPress={() => setShowRename(true)} activeOpacity={0.7}>
+              <Text style={styles.nameText} numberOfLines={1}>{tripDisplayName}</Text>
+              <Pencil size={14} color="#8A8A9A" />
+            </TouchableOpacity>
+
             <View style={styles.routeLine}>
               <MapPin size={13} color="#00D4AA" />
               <Text style={styles.routeLineText} numberOfLines={2}>
@@ -179,6 +227,18 @@ export default function TripDetailScreen() {
             )}
           </View>
         </ScrollView>
+      )}
+
+      {trip && (
+        <RenameModal
+          visible={showRename}
+          title="Rename Trip"
+          initialValue={tripDisplayName}
+          placeholder="e.g. Sunset Canyon Run"
+          saving={renaming}
+          onCancel={() => setShowRename(false)}
+          onSave={handleRename}
+        />
       )}
     </View>
   );
@@ -220,6 +280,8 @@ const styles = StyleSheet.create({
     borderColor: "#0A0A0F",
   },
   body: { padding: 20 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  nameText: { fontSize: 20, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
   routeLine: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginBottom: 18 },
   routeLineText: { fontSize: 14, color: "#CACAD5", flex: 1, lineHeight: 19 },
   statsGrid: { flexDirection: "row", gap: 10, marginBottom: 14 },
