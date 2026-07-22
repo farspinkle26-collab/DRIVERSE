@@ -15,7 +15,8 @@ Enable these APIs in your Google Cloud Console for comprehensive location search
 1. **Places API** - For location search and autocomplete
 2. **Maps JavaScript API** - For map display
 3. **Geocoding API** - For address conversion and fallback geocoding
-4. **Places API (New)** - Enhanced place search (if available)
+4. **Directions API** - Required for driving route/navigation calculations (used by the "Route" button)
+5. **Places API (New)** - Enhanced place search (if available)
 
 To enable APIs:
 1. Go to "APIs & Services" > "Library"
@@ -38,6 +39,9 @@ For security, restrict your API key:
    - Places API
    - Maps JavaScript API
    - Geocoding API
+   - Directions API
+
+**Note on key restrictions:** if you use "Application restrictions" (Android package name/SHA-1 or iOS bundle ID), the Directions API calls made directly from this app's fetch requests will be rejected with `REQUEST_DENIED`, since that restriction type only works with the native Maps SDKs, not raw REST calls. For a key used with the Directions/Places/Geocoding REST endpoints, either leave "Application restrictions" set to "None" or use "IP addresses" restriction on a server-side proxy instead.
 
 ## Step 5: Configure Your App
 
@@ -102,6 +106,11 @@ Google Maps Platform has a generous free tier:
 2. Verify the APIs are enabled
 3. Check API key restrictions
 4. Look for error messages in the browser console
+
+### "Route Unavailable" / Route button doesn't work?
+1. Confirm the **Directions API** is enabled for your project (a separate API from Maps JavaScript/Places).
+2. Check the console/logs for `Directions API error: <status> <error_message>` printed by the app — the `status` field (e.g. `REQUEST_DENIED`, `OVER_QUERY_LIMIT`, `ZERO_RESULTS`) tells you exactly why Google rejected the request.
+3. `REQUEST_DENIED` almost always means the API key has application restrictions (Android/iOS) that block direct REST calls, or the Directions API isn't enabled/billing isn't active — see the restriction note in Step 4 above.
 
 ### No Search Results?
 1. Check your internet connection
