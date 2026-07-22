@@ -20,6 +20,25 @@ export interface Party {
   leader_id: string;
   name: string;
   color: string;
+  visibility: "public" | "invite_only";
+  description: string;
+  max_members: number; // 0 = unlimited
+}
+
+export interface PublicPartySummary {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  max_members: number;
+  member_count: number;
+  leader_name: string;
+}
+
+export interface CreatePartyOptions {
+  visibility?: "public" | "invite_only";
+  description?: string;
+  maxMembers?: number;
 }
 
 export interface PartyInvite {
@@ -134,7 +153,15 @@ export const [PartyProvider, useParty] = createContextHook(() => {
 
       setState((prev) => ({
         ...prev,
-        party: partyRow ? { id: partyRow.id, leader_id: partyRow.leader_id, name: partyRow.name, color: partyRow.color } : null,
+        party: partyRow ? {
+          id: partyRow.id,
+          leader_id: partyRow.leader_id,
+          name: partyRow.name,
+          color: partyRow.color,
+          visibility: partyRow.visibility ?? "invite_only",
+          description: partyRow.description ?? "",
+          max_members: partyRow.max_members ?? 0,
+        } : null,
         members,
         invites,
         loading: false,
@@ -146,13 +173,20 @@ export const [PartyProvider, useParty] = createContextHook(() => {
   }, [user, hydrateMembers, hydrateInvites]);
 
   // ─── Create a party (I become leader) ────────────────────
-  const createParty = useCallback(async (name: string): Promise<boolean> => {
+  const createParty = useCallback(async (name: string, options?: CreatePartyOptions): Promise<boolean> => {
     if (!user) return false;
     try {
       const color = PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)];
       const { error } = await supabase
         .from("parties")
-        .insert({ leader_id: user.id, name: name.trim() || "Convoy", color })
+        .insert({
+          leader_id: user.id,
+          name: name.trim() || "Convoy",
+          color,
+          visibility: options?.visibility ?? "invite_only",
+          description: options?.description?.trim() ?? "",
+          max_members: options?.maxMembers ?? 0,
+        })
         .select()
         .single();
       if (error) {
@@ -164,6 +198,102 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     } catch (error) {
       console.error("Error creating party:", error);
       return false;
+    }
+  }, [user, loadParty]);
+
+  // ─── Browse public convoys (for anyone not already in one) ──
+  const [publicParties, setPublicParties] = useState<PublicPartySummary[]>([]);
+  const [loadingPublicParties, setLoadingPublicParties] = useState(false);
+
+  const browsePublicParties = useCallback(async () => {
+    setLoadingPublicParties(true);
+    try {
+      const { data: partyRows } = await supabase
+        .from("parties")
+        .select("*")
+        .eq("visibility", "public")
+        .order("created_at", { ascending: false });
+
+      const rows = (partyRows ?? []) as any[];
+      if (rows.length === 0) {
+        setPublicParties([]);
+        return;
+      }
+
+      const partyIds = rows.map((p) => p.id);
+      const leaderIds = [...new Set(rows.map((p) => p.leader_id))];
+      const [{ data: memberRows }, { data: leaderProfiles }] = await Promise.all([
+        supabase.from("party_members").select("party_id, user_id").eq("status", "accepted").in("party_id", partyIds),
+        supabase.from("profiles").select("id, name").in("id", leaderIds),
+      ]);
+
+      const countMap = new Map<string, number>();
+      (memberRows ?? []).forEach((m: any) => {
+        countMap.set(m.party_id, (countMap.get(m.party_id) ?? 0) + 1);
+      });
+      const leaderMap = new Map<string, string>();
+      (leaderProfiles ?? []).forEach((p: any) => { leaderMap.set(p.id, p.name ?? "Driver"); });
+
+      setPublicParties(
+        rows.map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description ?? "",
+          color: p.color,
+          max_members: p.max_members ?? 0,
+          member_count: countMap.get(p.id) ?? 0,
+          leader_name: leaderMap.get(p.leader_id) ?? "Driver",
+        }))
+      );
+    } catch (error) {
+      console.error("Error browsing convoys:", error);
+    } finally {
+      setLoadingPublicParties(false);
+    }
+  }, []);
+
+  // ─── Fetch any convoy + its accepted roster by id (for viewing a
+  // convoy you're browsing, not just your own) ─────────────
+  const getPartyDetail = useCallback(async (partyId: string): Promise<{ party: Party | null; members: PartyMember[] }> => {
+    const { data: partyRow } = await supabase.from("parties").select("*").eq("id", partyId).single();
+    if (!partyRow) return { party: null, members: [] };
+    const { data: rosterRows } = await supabase
+      .from("party_members")
+      .select("*")
+      .eq("party_id", partyId)
+      .eq("status", "accepted");
+    const members = await hydrateMembers(rosterRows ?? []);
+    return {
+      party: {
+        id: partyRow.id,
+        leader_id: partyRow.leader_id,
+        name: partyRow.name,
+        color: partyRow.color,
+        visibility: partyRow.visibility ?? "invite_only",
+        description: partyRow.description ?? "",
+        max_members: partyRow.max_members ?? 0,
+      },
+      members,
+    };
+  }, [hydrateMembers]);
+
+  // ─── Join a public convoy directly (no invite needed) ────
+  const joinParty = useCallback(async (partyId: string): Promise<{ ok: boolean; message?: string }> => {
+    if (!user) return { ok: false, message: "Sign in to join a convoy." };
+    try {
+      const { error } = await supabase
+        .from("party_members")
+        .insert({ party_id: partyId, user_id: user.id, role: "member", status: "accepted" });
+      if (error) {
+        if (error.code === "23505") return { ok: false, message: "Leave your current convoy first." };
+        if (error.message.includes("full")) return { ok: false, message: "This convoy is full." };
+        return { ok: false, message: error.message };
+      }
+      await loadParty();
+      return { ok: true };
+    } catch (error) {
+      console.error("Error joining party:", error);
+      return { ok: false, message: "Something went wrong." };
     }
   }, [user, loadParty]);
 
@@ -285,5 +415,10 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     declineInvite,
     leaveParty,
     kickMember,
-  }), [state, partyMemberIds, isLeader, loadParty, createParty, inviteFriend, acceptInvite, declineInvite, leaveParty, kickMember]);
+    publicParties,
+    loadingPublicParties,
+    browsePublicParties,
+    joinParty,
+    getPartyDetail,
+  }), [state, partyMemberIds, isLeader, loadParty, createParty, inviteFriend, acceptInvite, declineInvite, leaveParty, kickMember, publicParties, loadingPublicParties, browsePublicParties, joinParty, getPartyDetail]);
 });

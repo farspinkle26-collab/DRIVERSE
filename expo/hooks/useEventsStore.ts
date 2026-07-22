@@ -19,6 +19,7 @@ export interface DriveEvent {
   ends_at: string | null;
   max_participants: number; // 0 = unlimited
   status: EventStatus;
+  country: string;
   created_at: string;
   // Derived
   host_name: string;
@@ -53,6 +54,7 @@ interface EventRow {
   ends_at: string | null;
   max_participants: number;
   status: EventStatus;
+  country: string;
   created_at: string;
 }
 
@@ -196,6 +198,15 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
     async (input: CreateEventInput): Promise<{ error?: string }> => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in to create an event" };
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("country")
+        .eq("id", uid)
+        .single();
+      if (!profile?.country) {
+        return { error: "Set your country in your profile before creating an event" };
+      }
 
       const { error } = await supabase.from("events").insert({
         creator_id: uid,

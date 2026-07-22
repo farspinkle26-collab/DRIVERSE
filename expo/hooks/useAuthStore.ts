@@ -133,6 +133,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         canSwitchRoles: false,
         registrationCompletedAt: profile.registration_completed_at,
         verifiedAt: profile.verified_at,
+        country: profile.country ?? undefined,
       };
 
       setUser(loadedUser);
@@ -388,6 +389,27 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, [user, session]);
 
+  const updateCountry = useCallback(async (country: string) => {
+    if (!user || !session?.user) return false;
+    try {
+      const next = country.trim();
+      const { error: updErr } = await supabase
+        .from("profiles")
+        .update({ country: next })
+        .eq("id", session.user.id);
+      if (updErr) {
+        setError(updErr.message);
+        return false;
+      }
+      setUser({ ...user, country: next });
+      return true;
+    } catch (err) {
+      console.error("Country update error:", err);
+      setError("Failed to update country.");
+      return false;
+    }
+  }, [user, session]);
+
   // alias for simplified signup
   const signUp = useCallback(async (email: string, password: string) => {
     return signup(email, password, email.split("@")[0]);
@@ -407,6 +429,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     setCustomerRole,
     switchAccountType,
     updateProfilePicture,
+    updateCountry,
     loadUserProfile,
     getTitleForLevel,
     isAuthenticated: !!user && user.id !== GUEST_USER.id,
@@ -418,5 +441,5 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     isAccountActive: user?.accountStatus === "active",
     requiresDocuments: user?.verificationStatus === "requires_documents",
     isVerifiedCustomer: user?.role === "customer",
-  }), [user, session, loading, error, needsRoleSelection, login, signup, signUp, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, loadUserProfile]);
+  }), [user, session, loading, error, needsRoleSelection, login, signup, signUp, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, loadUserProfile]);
 });

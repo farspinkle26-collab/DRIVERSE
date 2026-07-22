@@ -18,6 +18,7 @@ import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
 import { PartyProvider } from "@/hooks/usePartyStore";
+import { GroupChatProvider } from "@/hooks/useGroupChatStore";
 import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
@@ -61,7 +62,11 @@ function RootLayoutNav() {
       <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="messages/index" options={{ headerShown: false }} />
       <Stack.Screen name="messages/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="messages/group/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="convoy" options={{ headerShown: false }} />
+      <Stack.Screen name="convoy/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="event/[id]/manage" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -103,12 +108,14 @@ export default function RootLayout() {
                             <OnlineUsersProvider>
                               <PartyProvider>
                                 <EventsProvider>
-                                  <RoutesProvider>
-                                    <ActiveCarProvider>
-                                      <RootLayoutNav />
-                                      <NotificationBanner />
-                                    </ActiveCarProvider>
-                                  </RoutesProvider>
+                                  <GroupChatProvider>
+                                    <RoutesProvider>
+                                      <ActiveCarProvider>
+                                        <RootLayoutNav />
+                                        <NotificationBanner />
+                                      </ActiveCarProvider>
+                                    </RoutesProvider>
+                                  </GroupChatProvider>
                                 </EventsProvider>
                               </PartyProvider>
                             </OnlineUsersProvider>

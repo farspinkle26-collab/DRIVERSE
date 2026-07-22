@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, Stack } from "expo-router";
-import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio } from "lucide-react-native";
+import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio, Flag } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useParty } from "@/hooks/usePartyStore";
 import { supabase } from "@/lib/supabase";
@@ -40,12 +40,18 @@ export default function ConvoyScreen() {
     declineInvite,
     leaveParty,
     kickMember,
+    publicParties,
+    loadingPublicParties,
+    browsePublicParties,
+    joinParty,
   } = useParty();
 
   const [nameDraft, setNameDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [friends, setFriends] = useState<Contact[]>([]);
   const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const loadFriends = useCallback(async () => {
     if (!user) return;
@@ -69,6 +75,18 @@ export default function ConvoyScreen() {
   useEffect(() => {
     if (isAuthenticated) loadFriends();
   }, [isAuthenticated, loadFriends]);
+
+  useEffect(() => {
+    if (isAuthenticated && !party) browsePublicParties();
+  }, [isAuthenticated, party, browsePublicParties]);
+
+  const handleJoinPublic = useCallback(async (convoyId: string) => {
+    setJoiningId(convoyId);
+    setJoinError(null);
+    const result = await joinParty(convoyId);
+    setJoiningId(null);
+    if (!result.ok) setJoinError(result.message ?? "Couldn't join that convoy");
+  }, [joinParty]);
 
   const memberIds = new Set(members.map((m) => m.user_id));
 
@@ -189,6 +207,42 @@ export default function ConvoyScreen() {
                 {creating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.createBtnText}>Create Convoy</Text>}
               </TouchableOpacity>
             </View>
+
+            {joinError && <Text style={[styles.rowSub, { color: "#EF4444", marginTop: 12 }]}>{joinError}</Text>}
+
+            <Text style={[styles.sectionLabel, { marginTop: 22 }]}>Browse Open Convoys</Text>
+            {loadingPublicParties && publicParties.length === 0 ? (
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 8 }} />
+            ) : publicParties.length === 0 ? (
+              <Text style={styles.rowSub}>No open convoys yet — start your own above.</Text>
+            ) : (
+              publicParties.map((c) => {
+                const full = c.max_members > 0 && c.member_count >= c.max_members;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={styles.inviteCard}
+                    activeOpacity={0.8}
+                    onPress={() => router.push(`/convoy/${c.id}` as any)}
+                  >
+                    <View style={[styles.colorDot, { backgroundColor: c.color }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowName}>{c.name}</Text>
+                      <Text style={styles.rowSub}>
+                        {c.member_count}{c.max_members > 0 ? `/${c.max_members}` : ""} members · Led by {c.leader_name}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.acceptBtn, full && { opacity: 0.5 }]}
+                      onPress={() => handleJoinPublic(c.id)}
+                      disabled={full || joiningId === c.id}
+                    >
+                      {joiningId === c.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Flag size={14} color="#FFFFFF" />}
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                );
+              })
+            )}
           </View>
         ) : (
           <>
@@ -206,13 +260,19 @@ export default function ConvoyScreen() {
               <Text style={styles.sectionLabel}>Members</Text>
               {members.map((m) => (
                 <View key={m.id} style={styles.memberRow}>
-                  <View style={styles.avatar}>
-                    {m.avatar ? <Image source={{ uri: m.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
-                    <Text style={styles.rowSub}>Level {m.level}{m.status === "invited" ? " · Invited" : ""}</Text>
-                  </View>
+                  <TouchableOpacity
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}
+                    activeOpacity={0.7}
+                    onPress={() => router.push(`/user/${m.user_id}` as any)}
+                  >
+                    <View style={styles.avatar}>
+                      {m.avatar ? <Image source={{ uri: m.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
+                      <Text style={styles.rowSub}>Level {m.level}{m.status === "invited" ? " · Invited" : ""}</Text>
+                    </View>
+                  </TouchableOpacity>
                   {m.role === "leader" && <Crown size={16} color="#FFD700" />}
                   {isLeader && m.user_id !== user?.id && (
                     <TouchableOpacity onPress={() => handleKick(m.user_id, m.name)} style={{ marginLeft: 10 }}>

@@ -22,7 +22,6 @@ import {
   ChevronRight,
   Trophy,
   MapPin,
-  Clock,
   Flame,
   Route,
   Sunrise,
@@ -245,30 +244,11 @@ function QuestCard({ quest }: { quest: DailyQuest }) {
   );
 }
 
-const UPCOMING_EVENTS = [
-  {
-    id: "e1",
-    title: "Midnight Rally",
-    date: "Sat, 29 Jun",
-    location: "Downtown Parking Lot",
-    attendees: 128,
-    image: null,
-  },
-  {
-    id: "e2",
-    title: "EV Showcase & Coffee",
-    date: "Sun, 30 Jun",
-    location: "City Central",
-    attendees: 56,
-    image: null,
-  },
-];
-
 export default function DriveScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const [activeView, setActiveView] = useState<"features" | "quests" | "events">("features");
+  const [activeView, setActiveView] = useState<"features" | "quests">("features");
   const scrollY = useRef(new Animated.Value(0)).current;
   const [sheetExpanded, setSheetExpanded] = useState(true);
 
@@ -288,7 +268,7 @@ export default function DriveScreen() {
     } else if (feature.id === "quests") {
       setActiveView("quests");
     } else if (feature.id === "events") {
-      setActiveView("events");
+      router.push({ pathname: "/community", params: { tab: "events" } } as any);
     }
   };
 
@@ -327,10 +307,9 @@ export default function DriveScreen() {
         {/* View tabs */}
         <View style={styles.viewTabs}>
           {([
-            { key: "features", label: "Features", icon: LayoutGrid },
-            { key: "quests", label: "Quests", icon: Target },
-            { key: "events", label: "Events", icon: Star },
-          ] as const).map((tab) => {
+            { key: "features" as const, label: "Features", icon: LayoutGrid },
+            { key: "quests" as const, label: "Quests", icon: Target },
+          ]).map((tab) => {
             const active = activeView === tab.key;
             return (
               <TouchableOpacity
@@ -352,6 +331,14 @@ export default function DriveScreen() {
               </TouchableOpacity>
             );
           })}
+          <TouchableOpacity
+            style={styles.viewTab}
+            onPress={() => router.push({ pathname: "/community", params: { tab: "events" } } as any)}
+            activeOpacity={0.7}
+          >
+            <Star size={16} color="#5A5A6E" />
+            <Text style={styles.viewTabText}>Events</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Features grid */}
@@ -460,44 +447,6 @@ export default function DriveScreen() {
           </View>
         )}
 
-        {/* Upcoming events */}
-        {activeView === "events" && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            <Text style={styles.sectionSubtitle}>
-              Car meets, rallies, and community gatherings near you
-            </Text>
-            {UPCOMING_EVENTS.map((event) => (
-              <TouchableOpacity key={event.id} style={styles.eventCard} activeOpacity={0.7}>
-                <View style={styles.eventImagePlaceholder}>
-                  <Calendar size={28} color="#FF6B3560" />
-                </View>
-                <View style={styles.eventContent}>
-                  <Text style={styles.eventTitle}>{event.title}</Text>
-                  <View style={styles.eventDetail}>
-                    <Clock size={12} color="#8A8A9A" />
-                    <Text style={styles.eventDetailText}>{event.date}</Text>
-                  </View>
-                  <View style={styles.eventDetail}>
-                    <MapPin size={12} color="#8A8A9A" />
-                    <Text style={styles.eventDetailText}>{event.location}</Text>
-                  </View>
-                  <View style={styles.eventFooter}>
-                    <View style={styles.eventAttendees}>
-                      <Users size={12} color="#FF6B35" />
-                      <Text style={styles.eventAttendeeText}>
-                        {event.attendees} attending
-                      </Text>
-                    </View>
-                    <TouchableOpacity style={styles.rsvpButton} activeOpacity={0.7}>
-                      <Text style={styles.rsvpText}>RSVP</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
       </ScrollView>
     </View>
   );
@@ -817,66 +766,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#5A5A6E",
     marginTop: 6,
-  },
-  // Event cards
-  eventCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderRadius: 16,
-    overflow: "hidden",
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  eventImagePlaceholder: {
-    height: 120,
-    backgroundColor: "rgba(255, 107, 53, 0.05)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  eventContent: {
-    padding: 16,
-  },
-  eventTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    marginBottom: 8,
-  },
-  eventDetail: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 4,
-  },
-  eventDetailText: {
-    fontSize: 13,
-    color: "#8A8A9A",
-  },
-  eventFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 12,
-  },
-  eventAttendees: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  eventAttendeeText: {
-    fontSize: 12,
-    color: "#FF6B35",
-    fontWeight: "600",
-  },
-  rsvpButton: {
-    backgroundColor: "#FF6B35",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  rsvpText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
   },
 });
