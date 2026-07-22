@@ -63,11 +63,11 @@ import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
-
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const TRIP_MAP_STYLE: any[] = [];
+import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
+  const { isDark } = useTheme();
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
   const hasPath = coords.length > 1;
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
@@ -89,7 +89,7 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
         style={StyleSheet.absoluteFill}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={region}
-        customMapStyle={TRIP_MAP_STYLE}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         scrollEnabled={false}
         zoomEnabled={false}
         pitchEnabled={false}

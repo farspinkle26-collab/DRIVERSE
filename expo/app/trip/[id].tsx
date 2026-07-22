@@ -7,9 +7,8 @@ import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
-
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const MAP_GLOW: any[] = [];
+import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 interface TripDetail {
   id: string;
@@ -43,6 +42,7 @@ export default function TripDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
+  const { isDark } = useTheme();
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -109,7 +109,7 @@ export default function TripDetailScreen() {
               style={StyleSheet.absoluteFill}
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
-              customMapStyle={MAP_GLOW}
+              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
             >
               {coords.length > 1 && (
                 <>
