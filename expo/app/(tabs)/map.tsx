@@ -86,6 +86,7 @@ import CreateEventModal, {
 } from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
+import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { Alert } from "react-native";
@@ -480,8 +481,29 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const MAP_GLOW: any[] = [];
+// Google's own default POI/business icons render independently of this app's
+// data and can't be toggled by the in-app category Filters, so both map
+// styles turn that native layer off — every visible POI then comes from our
+// own filterable `cafes` markers.
+const HIDE_NATIVE_POIS = { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] };
+const HIDE_NATIVE_TRANSIT = { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] };
+
+const MAP_STYLE_LIGHT: any[] = [HIDE_NATIVE_POIS, HIDE_NATIVE_TRANSIT];
+
+const MAP_STYLE_DARK: any[] = [
+  { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8a8aa3" }] },
+  HIDE_NATIVE_POIS,
+  HIDE_NATIVE_TRANSIT,
+  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#3c3c52" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d2d44" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1a1a2e" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#3d3d5c" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#2d2d44" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e0e18" }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#232338" }] },
+];
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -568,6 +590,7 @@ export default function MapScreen() {
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
   const { user } = useAuth();
   const { activeCar } = useActiveCar();
+  const { isDark } = useTheme();
   const { party, partyMemberIds, inviteFriend } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
@@ -1637,7 +1660,7 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={MAP_GLOW}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         onPress={handleMapPress}
         followsUserLocation={false}
       >
@@ -2758,7 +2781,7 @@ export default function MapScreen() {
           <View style={styles.labeledBtn}>
             <TouchableOpacity
               style={styles.stackBtn}
-              onPress={() => router.push("/chat" as any)}
+              onPress={() => router.push("/messages" as any)}
               activeOpacity={0.7}
             >
               <MessageCircle size={20} color="#FFFFFF" strokeWidth={2.2} />
@@ -4380,6 +4403,10 @@ const styles = StyleSheet.create({
   progressSection: {
     alignItems: "center",
     marginBottom: 12,
+    backgroundColor: "rgba(14, 14, 24, 0.78)",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   progressPercentText: {
     color: "#E53935",
@@ -4404,7 +4431,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: 3,
     borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
   },
   progressTrackFill: {
     position: "absolute",
