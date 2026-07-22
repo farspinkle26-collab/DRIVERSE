@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -22,118 +24,18 @@ import {
   Shield,
   Zap,
 } from "lucide-react-native";
+import { useConvoys, type Convoy } from "@/hooks/useConvoysStore";
+import { useEvents, type DriveEvent } from "@/hooks/useEventsStore";
+import { EventTypeIcon, eventTypeLabel } from "@/components/CreateEventModal";
+import CreateConvoyModal from "@/components/CreateConvoyModal";
 
 const ACCENT = "#3B82F6"; // Community blue (matches the Drive feature card)
-
-// ─── Convoy data ─────────────────────────────────────────────────────
-// A "convoy" is a driving crew you can ride with. Membership is toggled
-// locally so the Join / Leave button is fully interactive.
-type Convoy = {
-  id: string;
-  name: string;
-  tag: string;
-  members: number;
-  description: string;
-  online: number;
-  verified?: boolean;
-};
-
-const CONVOYS: Convoy[] = [
-  {
-    id: "c1",
-    name: "Midnight Runners",
-    tag: "MDNT",
-    members: 342,
-    online: 28,
-    description: "Late-night touge & city cruises. JDM welcome.",
-    verified: true,
-  },
-  {
-    id: "c2",
-    name: "Apex Hunters",
-    tag: "APEX",
-    members: 187,
-    online: 12,
-    description: "Track days, canyon runs and clean driving.",
-  },
-  {
-    id: "c3",
-    name: "EV Volt Crew",
-    tag: "VOLT",
-    members: 96,
-    online: 9,
-    description: "Electric owners charging up together.",
-  },
-  {
-    id: "c4",
-    name: "Sunday Cruisers",
-    tag: "SNDY",
-    members: 254,
-    online: 17,
-    description: "Relaxed weekend coffee runs, all cars welcome.",
-    verified: true,
-  },
-];
-
-// ─── Meetup data ─────────────────────────────────────────────────────
-type Meetup = {
-  id: string;
-  title: string;
-  date: string;
-  when: "week" | "nearby";
-  distanceKm: number;
-  location: string;
-  attendees: number;
-  host: string;
-};
-
-const MEETUPS: Meetup[] = [
-  {
-    id: "m1",
-    title: "Midnight Rally",
-    date: "Sat, 25 Jul · 21:00",
-    when: "week",
-    distanceKm: 3,
-    location: "Downtown Parking Lot",
-    attendees: 128,
-    host: "Midnight Runners",
-  },
-  {
-    id: "m2",
-    title: "Cars & Coffee",
-    date: "Sun, 26 Jul · 08:00",
-    when: "week",
-    distanceKm: 6,
-    location: "Harbour Cafe",
-    attendees: 74,
-    host: "Sunday Cruisers",
-  },
-  {
-    id: "m3",
-    title: "Canyon Touge Run",
-    date: "Sat, 1 Aug · 06:00",
-    when: "nearby",
-    distanceKm: 22,
-    location: "Skyline Pass",
-    attendees: 41,
-    host: "Apex Hunters",
-  },
-  {
-    id: "m4",
-    title: "EV Showcase",
-    date: "Sun, 2 Aug · 10:00",
-    when: "nearby",
-    distanceKm: 14,
-    location: "City Central",
-    attendees: 56,
-    host: "EV Volt Crew",
-  },
-];
+const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 const MEETUP_FILTERS = [
   { key: "all", label: "All" },
   { key: "week", label: "This week" },
-  { key: "nearby", label: "Nearby" },
+  { key: "live", label: "Live now" },
 ] as const;
 type MeetupFilter = (typeof MEETUP_FILTERS)[number]["key"];
 
@@ -141,38 +43,67 @@ export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
+  const { convoys, loadingConvoys, fetchConvoys, joinConvoy, leaveConvoy } = useConvoys();
+  const { events, loadingEvents, fetchEvents, joinEvent, leaveEvent } = useEvents();
+
   const [tab, setTab] = useState<"convoy" | "meetups">("convoy");
-
-  // Interactive membership + RSVP state
-  const [joined, setJoined] = useState<Record<string, boolean>>({ c1: true });
-  const [going, setGoing] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<MeetupFilter>("all");
+  const [showCreateConvoy, setShowCreateConvoy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const toggleJoin = (id: string) =>
-    setJoined((prev) => ({ ...prev, [id]: !prev[id] }));
-  const toggleGoing = (id: string) =>
-    setGoing((prev) => ({ ...prev, [id]: !prev[id] }));
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([fetchConvoys(), fetchEvents()]);
+    setRefreshing(false);
+  }, [fetchConvoys, fetchEvents]);
 
   const visibleMeetups = useMemo(() => {
-    if (filter === "all") return MEETUPS;
-    if (filter === "week") return MEETUPS.filter((m) => m.when === "week");
-    return MEETUPS.filter((m) => m.distanceKm <= 15);
-  }, [filter]);
+    const now = Date.now();
+    if (filter === "week") {
+      return events.filter((e) => new Date(e.starts_at).getTime() - now <= WEEK_MS);
+    }
+    if (filter === "live") {
+      return events.filter((e) => e.is_live);
+    }
+    return events;
+  }, [events, filter]);
 
-  const joinedCount = Object.values(joined).filter(Boolean).length;
-  const goingCount = Object.values(going).filter(Boolean).length;
+  const joinedCount = convoys.filter((c) => c.is_joined).length;
+  const goingCount = events.filter((e) => e.is_joined).length;
+
+  const handleToggleConvoy = useCallback(
+    async (c: Convoy) => {
+      setBusyId(c.id);
+      const result = c.is_joined ? await leaveConvoy(c.id) : await joinConvoy(c.id);
+      setBusyId(null);
+      if (result.error) Alert.alert("Couldn't update convoy", result.error);
+    },
+    [joinConvoy, leaveConvoy]
+  );
+
+  const handleToggleEvent = useCallback(
+    async (e: DriveEvent) => {
+      setBusyId(e.id);
+      const result = e.is_joined ? await leaveEvent(e.id) : await joinEvent(e.id);
+      setBusyId(null);
+      if (result.error) Alert.alert("Couldn't update RSVP", result.error);
+    },
+    [joinEvent, leaveEvent]
+  );
 
   const handleCreate = () => {
     if (tab === "convoy") {
-      Alert.alert("Start a Convoy", "Rally your crew and give it a name.", [
-        { text: "Not now", style: "cancel" },
-        { text: "Create", style: "default" },
-      ]);
+      setShowCreateConvoy(true);
     } else {
-      Alert.alert("Host a Meetup", "Pick a spot, set a time, invite drivers.", [
-        { text: "Not now", style: "cancel" },
-        { text: "Create", style: "default" },
-      ]);
+      Alert.alert(
+        "Host a Meetup",
+        "Pick a spot on the map to drop a pin and set the time.",
+        [
+          { text: "Not now", style: "cancel" },
+          { text: "Open map", onPress: () => router.push("/(tabs)/map" as any) },
+        ]
+      );
     }
   };
 
@@ -226,12 +157,15 @@ export default function CommunityScreen() {
           paddingBottom: insets.bottom + 40,
         }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />
+        }
       >
         {tab === "convoy" ? (
           <>
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>Your convoys</Text>
+                <Text style={styles.sectionTitle}>Driver-created convoys</Text>
                 <Text style={styles.sectionSub}>
                   {joinedCount > 0
                     ? `Riding with ${joinedCount} crew${joinedCount > 1 ? "s" : ""}`
@@ -240,61 +174,81 @@ export default function CommunityScreen() {
               </View>
             </View>
 
-            {CONVOYS.map((c) => {
-              const isJoined = !!joined[c.id];
-              return (
-                <View key={c.id} style={styles.card}>
-                  <View style={styles.convoyTop}>
-                    <View style={[styles.tagBadge, { backgroundColor: ACCENT + "22" }]}>
-                      <Text style={[styles.tagText, { color: ACCENT }]}>{c.tag}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.nameRow}>
-                        <Text style={styles.cardTitle}>{c.name}</Text>
-                        {c.verified ? (
-                          <Shield size={14} color={ACCENT} fill={ACCENT} />
-                        ) : null}
+            {loadingConvoys && convoys.length === 0 ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={ACCENT} />
+              </View>
+            ) : convoys.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Flag size={28} color={ACCENT + "60"} />
+                <Text style={styles.emptyText}>No convoys yet</Text>
+                <TouchableOpacity onPress={() => setShowCreateConvoy(true)} activeOpacity={0.8}>
+                  <Text style={[styles.emptyText, { color: ACCENT, fontWeight: "700" }]}>
+                    Start the first one
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              convoys.map((c) => {
+                const isJoined = c.is_joined;
+                const isBusy = busyId === c.id;
+                return (
+                  <View key={c.id} style={styles.card}>
+                    <View style={styles.convoyTop}>
+                      <View style={[styles.tagBadge, { backgroundColor: ACCENT + "22" }]}>
+                        <Text style={[styles.tagText, { color: ACCENT }]}>{c.tag}</Text>
                       </View>
-                      <Text style={styles.cardDesc}>{c.description}</Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.nameRow}>
+                          <Text style={styles.cardTitle}>{c.name}</Text>
+                          {c.is_owner ? (
+                            <Shield size={14} color={ACCENT} fill={ACCENT} />
+                          ) : null}
+                        </View>
+                        {!!c.description && (
+                          <Text style={styles.cardDesc}>{c.description}</Text>
+                        )}
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.convoyMeta}>
-                    <View style={styles.metaItem}>
-                      <Users size={13} color="#8A8A9A" />
-                      <Text style={styles.metaText}>{c.members} members</Text>
-                    </View>
-                    <View style={styles.metaItem}>
-                      <View style={styles.onlineDot} />
-                      <Text style={styles.metaText}>{c.online} online</Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      isJoined ? styles.actionBtnJoined : styles.actionBtnPrimary,
-                    ]}
-                    onPress={() => toggleJoin(c.id)}
-                    activeOpacity={0.8}
-                  >
-                    {isJoined ? (
-                      <>
-                        <Check size={15} color={ACCENT} />
-                        <Text style={[styles.actionText, { color: ACCENT }]}>
-                          Joined
+                    <View style={styles.convoyMeta}>
+                      <View style={styles.metaItem}>
+                        <Users size={13} color="#8A8A9A" />
+                        <Text style={styles.metaText}>
+                          {c.member_count} member{c.member_count === 1 ? "" : "s"}
                         </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={15} color="#FFFFFF" />
-                        <Text style={styles.actionText}>Join convoy</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.actionBtn,
+                        isJoined ? styles.actionBtnJoined : styles.actionBtnPrimary,
+                      ]}
+                      onPress={() => handleToggleConvoy(c)}
+                      activeOpacity={0.8}
+                      disabled={isBusy}
+                    >
+                      {isBusy ? (
+                        <ActivityIndicator size="small" color={isJoined ? ACCENT : "#FFFFFF"} />
+                      ) : isJoined ? (
+                        <>
+                          <Check size={15} color={ACCENT} />
+                          <Text style={[styles.actionText, { color: ACCENT }]}>
+                            Joined
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={15} color="#FFFFFF" />
+                          <Text style={styles.actionText}>Join convoy</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
           </>
         ) : (
           <>
@@ -321,7 +275,7 @@ export default function CommunityScreen() {
 
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>Upcoming meetups</Text>
+                <Text style={styles.sectionTitle}>Driver-hosted meetups</Text>
                 <Text style={styles.sectionSub}>
                   {goingCount > 0
                     ? `You're going to ${goingCount} meetup${goingCount > 1 ? "s" : ""}`
@@ -330,44 +284,65 @@ export default function CommunityScreen() {
               </View>
             </View>
 
-            {visibleMeetups.length === 0 ? (
+            {loadingEvents && events.length === 0 ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={ACCENT} />
+              </View>
+            ) : visibleMeetups.length === 0 ? (
               <View style={styles.emptyState}>
                 <Calendar size={28} color={ACCENT + "60"} />
                 <Text style={styles.emptyText}>No meetups match this filter</Text>
               </View>
             ) : (
               visibleMeetups.map((m) => {
-                const isGoing = !!going[m.id];
+                const isGoing = m.is_joined;
+                const isBusy = busyId === m.id;
                 return (
                   <View key={m.id} style={styles.card}>
                     <View style={styles.meetupTop}>
                       <View style={styles.meetupThumb}>
-                        <Calendar size={24} color={ACCENT} />
+                        <EventTypeIcon type={m.event_type} size={22} color={ACCENT} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.cardTitle}>{m.title}</Text>
-                        <Text style={styles.hostText}>by {m.host}</Text>
+                        <Text style={styles.hostText}>
+                          {eventTypeLabel(m.event_type)} · hosted by {m.host_name}
+                        </Text>
                       </View>
+                      {m.is_live && (
+                        <View style={styles.liveBadge}>
+                          <View style={styles.liveDot} />
+                          <Text style={styles.liveText}>LIVE</Text>
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.meetupMeta}>
                       <View style={styles.metaItem}>
                         <Clock size={13} color="#8A8A9A" />
-                        <Text style={styles.metaText}>{m.date}</Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <MapPin size={13} color="#8A8A9A" />
                         <Text style={styles.metaText}>
-                          {m.location} · {m.distanceKm} km
+                          {new Date(m.starts_at).toLocaleString(undefined, {
+                            weekday: "short",
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </Text>
                       </View>
+                      {!!m.location_name && (
+                        <View style={styles.metaItem}>
+                          <MapPin size={13} color="#8A8A9A" />
+                          <Text style={styles.metaText}>{m.location_name}</Text>
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.meetupFooter}>
                       <View style={styles.metaItem}>
                         <Users size={13} color={ACCENT} />
                         <Text style={[styles.metaText, { color: "#B8B8C8" }]}>
-                          {m.attendees + (isGoing ? 1 : 0)} going
+                          {m.participant_count} going
                         </Text>
                       </View>
                       <TouchableOpacity
@@ -375,10 +350,13 @@ export default function CommunityScreen() {
                           styles.rsvpBtn,
                           isGoing ? styles.rsvpBtnActive : styles.rsvpBtnIdle,
                         ]}
-                        onPress={() => toggleGoing(m.id)}
+                        onPress={() => handleToggleEvent(m)}
                         activeOpacity={0.8}
+                        disabled={isBusy}
                       >
-                        {isGoing ? (
+                        {isBusy ? (
+                          <ActivityIndicator size="small" color={isGoing ? "#FFFFFF" : ACCENT} />
+                        ) : isGoing ? (
                           <>
                             <Check size={14} color="#FFFFFF" />
                             <Text style={styles.rsvpText}>Going</Text>
@@ -397,6 +375,12 @@ export default function CommunityScreen() {
           </>
         )}
       </ScrollView>
+
+      <CreateConvoyModal
+        visible={showCreateConvoy}
+        onClose={() => setShowCreateConvoy(false)}
+        onCreated={() => setShowCreateConvoy(false)}
+      />
     </View>
   );
 }
@@ -510,12 +494,6 @@ const styles = StyleSheet.create({
   },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   metaText: { fontSize: 12.5, color: "#8A8A9A" },
-  onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#22C55E",
-  },
 
   // Action buttons
   actionBtn: {
@@ -580,6 +558,18 @@ const styles = StyleSheet.create({
   },
   rsvpBtnActive: { backgroundColor: ACCENT },
   rsvpText: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
+
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EF444422",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" },
+  liveText: { fontSize: 10, fontWeight: "800", color: "#EF4444", letterSpacing: 0.4 },
 
   // Empty
   emptyState: { alignItems: "center", paddingVertical: 48, gap: 10 },
