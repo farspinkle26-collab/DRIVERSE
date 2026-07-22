@@ -89,7 +89,7 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -147,7 +147,7 @@ function detectCategory(placeTypes: string[]): LandmarkCategory {
 
 type SelectedDestination =
   | { type: "cafe"; data: CafePOI }
-  | { type: "location"; lat: number; lng: number };
+  | { type: "location"; lat: number; lng: number; name?: string };
 
 interface RouteInfo {
   coordinates: { latitude: number; longitude: number }[];
@@ -625,6 +625,7 @@ export default function MapScreen() {
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
   const [isEventPickMode, setIsEventPickMode] = useState(false);
   const [eventCoordinate, setEventCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [eventLocationName, setEventLocationName] = useState<string | null>(null);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [eventActionBusy, setEventActionBusy] = useState(false);
@@ -1219,7 +1220,7 @@ export default function MapScreen() {
 
   // --- Map press: drop a pin at tapped location (only when pick mode is ON) ---
   const mapPressCooldownRef = useRef(0);
-  const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+  const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }, placeName?: string) => {
     if (!isPickMode && !isEventPickMode) return;
     const now = Date.now();
     if (now - mapPressCooldownRef.current < 200) return;
@@ -1230,6 +1231,7 @@ export default function MapScreen() {
     if (isEventPickMode) {
       setIsEventPickMode(false);
       setEventCoordinate({ latitude, longitude });
+      setEventLocationName(placeName ?? null);
       setShowCreateEvent(true);
       mapRef.current?.animateCamera(
         { center: { latitude, longitude }, zoom: 16, pitch: 40 },
@@ -1237,7 +1239,7 @@ export default function MapScreen() {
       );
       return;
     }
-    setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
+    setSelectedDestination({ type: "location", lat: latitude, lng: longitude, name: placeName });
     setLocationChosen(false);
     setRouteInfo(null);
     // Turn off pick mode after placing a pin (single-use)
@@ -1247,6 +1249,14 @@ export default function MapScreen() {
       { duration: 500 }
     );
   }, [isPickMode, isEventPickMode]);
+
+  // --- POI tap: pick a real place from Google's own map database (only while
+  // actively picking a destination or event location — see MAP_STYLE_*_PICK,
+  // which turns Google's native POI icons back on for this interaction). ---
+  const handlePoiClick = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number }; name?: string } }) => {
+    if (!isPickMode && !isEventPickMode) return;
+    handleMapPress({ nativeEvent: { coordinate: event.nativeEvent.coordinate } }, event.nativeEvent.name);
+  }, [isPickMode, isEventPickMode, handleMapPress]);
 
   // --- Event handlers ---
   const toggleEventPickMode = useCallback(() => {
@@ -1261,6 +1271,7 @@ export default function MapScreen() {
   const handleEventCreated = useCallback(() => {
     setShowCreateEvent(false);
     setEventCoordinate(null);
+    setEventLocationName(null);
   }, []);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
@@ -1392,6 +1403,8 @@ export default function MapScreen() {
     if (user?.id) {
       const destName = selectedDestination?.type === "cafe"
         ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+        : selectedDestination?.name
+        ? selectedDestination.name
         : selectedDestination
         ? `${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(4)}, ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(4)}`
         : "Unknown";
@@ -1458,11 +1471,6 @@ export default function MapScreen() {
     : 0;
   const stepDurationRemaining = activeStep && activeStep.distanceMeters > 0
     ? activeStep.durationSeconds * (stepDistanceRemaining / activeStep.distanceMeters)
-    : 0;
-
-  // Overall trip progress along the planned route
-  const tripPercent = routeInfo && routeInfo.distanceMeters > 0
-    ? Math.min(100, Math.round((tripDistance / routeInfo.distanceMeters) * 100))
     : 0;
 
   // Live average speed so far this trip
@@ -1636,8 +1644,13 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+        customMapStyle={
+          isPickMode || isEventPickMode
+            ? (isDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
+            : (isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
+        }
         onPress={handleMapPress}
+        onPoiClick={handlePoiClick}
         followsUserLocation={false}
       >
         {/* Landmark Markers — neon badge image + name + distance label (design spec).
@@ -2245,26 +2258,6 @@ export default function MapScreen() {
               )}
             </View>
 
-            {/* Trip progress */}
-            {routeInfo && (
-              <View style={styles.progressSection}>
-                <Text style={styles.progressPercentText}>{tripPercent}%</Text>
-                <Text style={styles.progressPercentLabel}>COMPLETED</Text>
-                <View style={styles.progressTrackWrap}>
-                  <View style={styles.progressTrackLine} />
-                  <View style={[styles.progressTrackFill, { width: `${tripPercent}%` }]} />
-                  <View style={[styles.progressDot, styles.progressDotStart]} />
-                  <View style={[styles.progressDot, styles.progressDotYou, { left: `${tripPercent}%` }]} />
-                  <Flag size={14} color="#8A8A9A" style={styles.progressFlag} />
-                </View>
-                <View style={styles.progressLabelsRow}>
-                  <Text style={styles.progressLabelText}>START</Text>
-                  <Text style={[styles.progressLabelText, styles.progressLabelYou]}>YOU</Text>
-                  <Text style={styles.progressLabelText}>DESTINATION</Text>
-                </View>
-              </View>
-            )}
-
             {/* Action row: Pause / End Drive / Record */}
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.drivingActionBtn} onPress={togglePause} activeOpacity={0.7}>
@@ -2757,7 +2750,7 @@ export default function MapScreen() {
           <View style={styles.labeledBtn}>
             <TouchableOpacity
               style={styles.stackBtn}
-              onPress={() => router.push("/chat" as any)}
+              onPress={() => router.push("/messages" as any)}
               activeOpacity={0.7}
             >
               <MessageCircle size={20} color="#FFFFFF" strokeWidth={2.2} />
@@ -2988,7 +2981,7 @@ export default function MapScreen() {
         const isCafe = selectedDestination.type === "cafe";
         const destName = isCafe
           ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-          : "Selected Location";
+          : (selectedDestination as { type: "location"; name?: string }).name ?? "Selected Location";
         const destVicinity = isCafe
           ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.vicinity
           : undefined;
@@ -3093,7 +3086,7 @@ export default function MapScreen() {
             {(() => {
               const destName = selectedDestination?.type === "cafe"
                 ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-                : "Selected Location";
+                : (selectedDestination as { type: "location"; name?: string } | undefined)?.name ?? "Selected Location";
               return selectedDestination ? (
                 <View style={styles.routeDest}>
                   <MapPin size={14} color={ROUTE_RED} />
@@ -3241,9 +3234,11 @@ export default function MapScreen() {
       <CreateEventModal
         visible={showCreateEvent}
         coordinate={eventCoordinate}
+        locationName={eventLocationName}
         onClose={() => {
           setShowCreateEvent(false);
           setEventCoordinate(null);
+          setEventLocationName(null);
         }}
         onCreated={handleEventCreated}
       />
@@ -3266,7 +3261,7 @@ export default function MapScreen() {
           selectedDestination?.type === "cafe"
             ? selectedDestination.data.name
             : selectedDestination?.type === "location"
-            ? "Dropped Pin"
+            ? selectedDestination.name ?? "Dropped Pin"
             : ""
         }
         onSaved={(routeId) => router.push(`/route/${routeId}` as any)}
@@ -4374,80 +4369,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 0.5,
-  },
-  // --- Trip progress ---
-  progressSection: {
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  progressPercentText: {
-    color: "#E53935",
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  progressPercentLabel: {
-    color: "#6A6A7E",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  progressTrackWrap: {
-    width: "100%",
-    height: 14,
-    justifyContent: "center",
-  },
-  progressTrackLine: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-  },
-  progressTrackFill: {
-    position: "absolute",
-    left: 0,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#E53935",
-  },
-  progressDot: {
-    position: "absolute",
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  progressDotStart: {
-    left: 0,
-    backgroundColor: "#8A8A9A",
-    marginLeft: -4,
-  },
-  progressDotYou: {
-    backgroundColor: "#E53935",
-    marginLeft: -4,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  progressFlag: {
-    position: "absolute",
-    right: -2,
-  },
-  progressLabelsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    marginTop: 4,
-  },
-  progressLabelText: {
-    color: "#6A6A7E",
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  progressLabelYou: {
-    color: "#E53935",
   },
   // --- Action row ---
   actionRow: {

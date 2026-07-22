@@ -18,6 +18,7 @@ import { useEvents, EventType } from "@/hooks/useEventsStore";
 interface CreateEventModalProps {
   visible: boolean;
   coordinate: { latitude: number; longitude: number } | null;
+  locationName?: string | null;
   onClose: () => void;
   onCreated: () => void;
 }
@@ -80,7 +81,7 @@ export function EventTypeIcon({ type, size, color }: { type: EventType; size: nu
   }
 }
 
-export default function CreateEventModal({ visible, coordinate, onClose, onCreated }: CreateEventModalProps) {
+export default function CreateEventModal({ visible, coordinate, locationName, onClose, onCreated }: CreateEventModalProps) {
   const insets = useSafeAreaInsets();
   const { createEvent } = useEvents();
 
@@ -163,7 +164,9 @@ export default function CreateEventModal({ visible, coordinate, onClose, onCreat
                 <View style={styles.locationRow}>
                   <MapPin size={13} color="#FF6B35" />
                   <Text style={styles.locationText}>
-                    Pinned at {coordinate.latitude.toFixed(4)}, {coordinate.longitude.toFixed(4)}
+                    {locationName
+                      ? locationName
+                      : `Pinned at ${coordinate.latitude.toFixed(4)}, ${coordinate.longitude.toFixed(4)}`}
                   </Text>
                 </View>
               )}

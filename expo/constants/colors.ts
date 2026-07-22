@@ -87,10 +87,52 @@ const driveverse = {
   transparent: "transparent",
 } as const;
 
-const lightTheme = driveverse;
-const darkTheme = driveverse;
+type ThemeColors = { -readonly [K in keyof typeof driveverse]: string };
 
-export type Theme = typeof driveverse;
+// Driveverse — Light theme
+// Same brand accents as the dark theme, flipped onto a white/light-grey surface.
+const driveverseLight: ThemeColors = {
+  ...driveverse,
 
-export { driveverse, lightTheme, darkTheme };
+  // Background spectrum
+  background: "#FFFFFF",
+  backgroundLight: "#F5F5F7",
+  backgroundDark: "#EDEDF2",
+  bgDeep: "#EDEDF2",
+  bgPrimary: "#FFFFFF",
+  bgCard: "#FFFFFF",
+  bgElevated: "#F5F5F7",
+  bgGlass: "#FFFFFF80",
+  card: "#FFFFFF",
+
+  // Surface accents
+  surfaceGlow: "#FF6B3508",
+  surfaceBorder: "#E4E4EA",
+  border: "#E4E4EA",
+  borderLight: "#D5D5DE",
+  divider: "#E4E4EA",
+
+  // Text
+  text: "#0A0A0F",
+  textLight: "#5A5A6E",
+  textDark: "#0A0A0F",
+  textOnGradient: "#FFFFFF",
+  textPrimary: "#0A0A0F",
+  textSecondary: "#5A5A6E",
+  textMuted: "#8A8A9A",
+  textAccent: "#FF6B35",
+
+  // Utility
+  overlay: "rgba(0, 0, 0, 0.45)",
+  overlayLight: "rgba(0, 0, 0, 0.15)",
+  inactive: "#C5C5D0",
+  disabled: "#E4E4EA",
+};
+
+const lightTheme = driveverseLight;
+const darkTheme: ThemeColors = driveverse;
+
+export type Theme = ThemeColors;
+
+export { driveverse, driveverseLight, lightTheme, darkTheme };
 export default driveverse;
