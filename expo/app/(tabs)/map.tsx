@@ -86,6 +86,7 @@ import CreateEventModal, {
 } from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
+import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 
@@ -479,8 +480,29 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const MAP_GLOW: any[] = [];
+// Google's own default POI/business icons render independently of this app's
+// data and can't be toggled by the in-app category Filters, so both map
+// styles turn that native layer off — every visible POI then comes from our
+// own filterable `cafes` markers.
+const HIDE_NATIVE_POIS = { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] };
+const HIDE_NATIVE_TRANSIT = { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] };
+
+const MAP_STYLE_LIGHT: any[] = [HIDE_NATIVE_POIS, HIDE_NATIVE_TRANSIT];
+
+const MAP_STYLE_DARK: any[] = [
+  { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#8a8aa3" }] },
+  HIDE_NATIVE_POIS,
+  HIDE_NATIVE_TRANSIT,
+  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#3c3c52" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d2d44" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1a1a2e" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#3d3d5c" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#2d2d44" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e0e18" }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#232338" }] },
+];
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -506,9 +528,6 @@ export default function MapScreen() {
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [navigating, setNavigating] = useState(false);
   const [loadingRoute, setLoadingRoute] = useState(false);
-
-  // --- Pick mode --- (toggle to allow dropping a custom pin on the map)
-  const [isPickMode, setIsPickMode] = useState(false);
 
   // --- Recording state ---
   const [isRecording, setIsRecording] = useState(false);
@@ -567,6 +586,7 @@ export default function MapScreen() {
   const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
   const { user } = useAuth();
   const { activeCar } = useActiveCar();
+  const { isDark } = useTheme();
   const { party, partyMemberIds, inviteFriend } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
@@ -1206,21 +1226,11 @@ export default function MapScreen() {
     setRouteSteps([]);
   }, []);
 
-  // --- Toggle pick mode ---
-  const togglePickMode = useCallback(() => {
-    setIsPickMode((prev) => !prev);
-    // Clear any pending destination when leaving pick mode
-    if (isPickMode) {
-      setSelectedDestination(null);
-      setLocationChosen(false);
-      setRouteInfo(null);
-    }
-  }, [isPickMode]);
-
-  // --- Map press: drop a pin at tapped location (only when pick mode is ON) ---
+  // --- Map press: drop a pin at the tapped location, Google-Maps style —
+  // a single tap anywhere on the map immediately selects that point (no
+  // separate "pick mode" toggle needed first). ---
   const mapPressCooldownRef = useRef(0);
   const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
-    if (!isPickMode && !isEventPickMode) return;
     const now = Date.now();
     if (now - mapPressCooldownRef.current < 200) return;
     mapPressCooldownRef.current = now;
@@ -1237,16 +1247,16 @@ export default function MapScreen() {
       );
       return;
     }
+    // Don't drop destination pins mid-drive
+    if (isRecording) return;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setLocationChosen(false);
     setRouteInfo(null);
-    // Turn off pick mode after placing a pin (single-use)
-    setIsPickMode(false);
     mapRef.current?.animateCamera(
       { center: { latitude, longitude }, zoom: 17, pitch: 40 },
       { duration: 500 }
     );
-  }, [isPickMode, isEventPickMode]);
+  }, [isEventPickMode, isRecording]);
 
   // --- Event handlers ---
   const toggleEventPickMode = useCallback(() => {
@@ -1255,7 +1265,6 @@ export default function MapScreen() {
       return;
     }
     setIsEventPickMode((prev) => !prev);
-    setIsPickMode(false);
   }, [user]);
 
   const handleEventCreated = useCallback(() => {
@@ -1636,7 +1645,7 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={MAP_GLOW}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         onPress={handleMapPress}
         followsUserLocation={false}
       >
@@ -2540,17 +2549,6 @@ export default function MapScreen() {
             <Text style={styles.actionBtnLabel}>Filters</Text>
           </View>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={[styles.actionBtn, isPickMode && styles.actionBtnActive]}
-              onPress={togglePickMode}
-              activeOpacity={0.7}
-            >
-              <MapPin size={18} color={isPickMode ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Drop Pin</Text>
-          </View>
-
           {routeInfo && (
             <View style={styles.labeledBtn}>
               <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
@@ -2757,7 +2755,7 @@ export default function MapScreen() {
           <View style={styles.labeledBtn}>
             <TouchableOpacity
               style={styles.stackBtn}
-              onPress={() => router.push("/chat" as any)}
+              onPress={() => router.push("/messages" as any)}
               activeOpacity={0.7}
             >
               <MessageCircle size={20} color="#FFFFFF" strokeWidth={2.2} />
@@ -4379,6 +4377,10 @@ const styles = StyleSheet.create({
   progressSection: {
     alignItems: "center",
     marginBottom: 12,
+    backgroundColor: "rgba(14, 14, 24, 0.78)",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   progressPercentText: {
     color: "#E53935",
@@ -4403,7 +4405,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: 3,
     borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
   },
   progressTrackFill: {
     position: "absolute",
