@@ -87,6 +87,7 @@ import CreateEventModal, {
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { supabase } from "@/lib/supabase";
+import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { Alert } from "react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -1392,11 +1393,10 @@ export default function MapScreen() {
     if (user?.id) {
       const destName = selectedDestination?.type === "cafe"
         ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-        : selectedDestination
-        ? `${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(4)}, ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(4)}`
-        : "Unknown";
+        : "Dropped Pin";
       const dest = destCoords();
       const estSec = estimatedDurationRef.current ?? 0;
+      const routePolyline = recordedPath.length > 1 ? encodePolyline(simplifyPath(recordedPath)) : "";
       supabase.from("trips").insert({
         user_id: user.id,
         origin_name: "Current Location",
@@ -1405,6 +1405,7 @@ export default function MapScreen() {
         destination_name: destName,
         destination_lat: dest?.latitude ?? 0,
         destination_lng: dest?.longitude ?? 0,
+        route_polyline: routePolyline,
         distance_km: tripDistance / 1000,
         duration_seconds: Math.round(actualDurationSec),
         avg_speed_kmh: avgSpeed,

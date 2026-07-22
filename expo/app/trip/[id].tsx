@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
-import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag } from "lucide-react-native";
+import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil, Check } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 
@@ -13,6 +13,7 @@ const MAP_GLOW: any[] = [];
 
 interface TripDetail {
   id: string;
+  title: string;
   origin_name: string;
   origin_lat: number;
   origin_lng: number;
@@ -45,6 +46,9 @@ export default function TripDetailScreen() {
   const mapRef = useRef<MapView>(null);
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +84,28 @@ export default function TripDetailScreen() {
   }, [coords]);
 
   const region = regionForPath(coords);
+  const defaultName = trip
+    ? `${trip.origin_name || "Start"} → ${trip.destination_name || "Finish"}`
+    : "Trip";
+  const displayName = trip?.title || defaultName;
+
+  const startEditingTitle = () => {
+    if (!trip) return;
+    setTitleDraft(trip.title || "");
+    setEditingTitle(true);
+  };
+
+  const saveTitle = async () => {
+    if (!trip) return;
+    const next = titleDraft.trim();
+    setSavingTitle(true);
+    const { error } = await supabase.from("trips").update({ title: next }).eq("id", trip.id);
+    setSavingTitle(false);
+    if (!error) {
+      setTrip({ ...trip, title: next });
+      setEditingTitle(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -90,7 +116,7 @@ export default function TripDetailScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
           <ArrowLeft size={22} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.topTitle} numberOfLines={1}>Trip</Text>
+        <Text style={styles.topTitle} numberOfLines={1}>{trip ? displayName : "Trip"}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -127,6 +153,18 @@ export default function TripDetailScreen() {
                   <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
                 </Marker>
               )}
+              {coords.length === 0 && trip.origin_lat && trip.origin_lng && trip.destination_lat && trip.destination_lng && (
+                <Polyline
+                  coordinates={[
+                    { latitude: trip.origin_lat, longitude: trip.origin_lng },
+                    { latitude: trip.destination_lat, longitude: trip.destination_lng },
+                  ]}
+                  strokeWidth={4}
+                  strokeColor="#FF6B35"
+                  lineDashPattern={[8, 8]}
+                  lineCap="round"
+                />
+              )}
               {coords.length === 0 && trip.origin_lat && trip.origin_lng && (
                 <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
                   <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
@@ -141,6 +179,30 @@ export default function TripDetailScreen() {
           </View>
 
           <View style={styles.body}>
+            {editingTitle ? (
+              <View style={styles.titleEditRow}>
+                <TextInput
+                  style={styles.titleInput}
+                  value={titleDraft}
+                  onChangeText={setTitleDraft}
+                  placeholder={defaultName}
+                  placeholderTextColor="#5A5A6E"
+                  autoFocus
+                  maxLength={60}
+                  returnKeyType="done"
+                  onSubmitEditing={saveTitle}
+                />
+                <TouchableOpacity onPress={saveTitle} disabled={savingTitle} style={styles.titleSaveBtn} hitSlop={8}>
+                  {savingTitle ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Check size={16} color="#FFFFFF" />}
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.titleRow} onPress={startEditingTitle} activeOpacity={0.7}>
+                <Text style={styles.tripTitleText} numberOfLines={1}>{displayName}</Text>
+                <Pencil size={14} color="#8A8A9A" />
+              </TouchableOpacity>
+            )}
+
             <View style={styles.routeLine}>
               <MapPin size={13} color="#00D4AA" />
               <Text style={styles.routeLineText} numberOfLines={2}>
@@ -220,6 +282,29 @@ const styles = StyleSheet.create({
     borderColor: "#0A0A0F",
   },
   body: { padding: 20 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  tripTitleText: { flex: 1, fontSize: 19, fontWeight: "800", color: "#FFFFFF" },
+  titleEditRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  titleInput: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,107,53,0.4)",
+  },
+  titleSaveBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FF6B35",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   routeLine: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginBottom: 18 },
   routeLineText: { fontSize: 14, color: "#CACAD5", flex: 1, lineHeight: 19 },
   statsGrid: { flexDirection: "row", gap: 10, marginBottom: 14 },
