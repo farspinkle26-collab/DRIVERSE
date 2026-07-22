@@ -39,9 +39,8 @@ import {
 import { useRoutes, RouteComment, RouteVisibility } from "@/hooks/useRoutesStore";
 import { useAuth } from "@/hooks/useAuthStore";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
-
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const MAP_GLOW: any[] = [];
+import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 function fmtDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -75,6 +74,7 @@ export default function RouteDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
+  const { isDark } = useTheme();
   const { user } = useAuth();
   const { getRoute, toggleKudos, fetchComments, addComment, deleteComment, deleteRoute, updateRoute } = useRoutes();
 
@@ -253,7 +253,7 @@ export default function RouteDetailScreen() {
               style={StyleSheet.absoluteFill}
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
-              customMapStyle={MAP_GLOW}
+              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               scrollEnabled={false}
               zoomEnabled={false}
               pitchEnabled={false}

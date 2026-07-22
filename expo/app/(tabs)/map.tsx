@@ -86,8 +86,10 @@ import CreateEventModal, {
 } from "@/components/CreateEventModal";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
+import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -479,13 +481,11 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
-// Standard Google Maps look — no custom styling, all default landmarks/POIs visible.
-const MAP_GLOW: any[] = [];
-
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
+  const { isDark } = useTheme();
 
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -1636,7 +1636,7 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={MAP_GLOW}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         onPress={handleMapPress}
         followsUserLocation={false}
       >

@@ -7,7 +7,7 @@ type Theme = typeof lightTheme;
 type ThemeMode = "light" | "dark";
 
 export const [ThemeContext, useTheme] = createContextHook(() => {
-  const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("light");
   const [loading, setLoading] = useState<boolean>(true);
 
   const theme: Theme = themeMode === "dark" ? darkTheme : lightTheme;
