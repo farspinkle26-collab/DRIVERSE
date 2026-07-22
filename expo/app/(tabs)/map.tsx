@@ -3043,7 +3043,11 @@ export default function MapScreen() {
       })()}
 
       {/* --- Navigation route card (distance + ETA) — hidden while recording --- */}
-      {routeInfo && !isRecording && !showTripSummary && (
+      {routeInfo && !isRecording && !showTripSummary && (() => {
+        const destName = selectedDestination?.type === "cafe"
+          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+          : "Selected Location";
+        return (
         <Animated.View
           style={[
             styles.routeCard,
@@ -3051,6 +3055,10 @@ export default function MapScreen() {
           ]}
         >
           <View style={styles.routeCardContent}>
+            <TouchableOpacity style={styles.routeCardHandle} onPress={clearRoute} activeOpacity={0.7}>
+              <View style={styles.routeCardHandleBar} />
+            </TouchableOpacity>
+
             {loadingRoute && (
               <View style={styles.routeLoader}>
                 <ActivityIndicator size="small" color={ROUTE_RED} />
@@ -3059,63 +3067,55 @@ export default function MapScreen() {
             )}
 
             {!loadingRoute && (
-              <View style={styles.routeInfoRow}>
-                <View style={styles.routeStat}>
-                  <View style={styles.routeStatIcon}>
-                    <Route size={20} color={ROUTE_RED} />
+              <>
+                <View style={styles.routeTopRow}>
+                  <View style={styles.routeDestInfo}>
+                    <MapPin size={18} color={ROUTE_RED} />
+                    <Text style={styles.routeDestName} numberOfLines={1}>{destName}</Text>
                   </View>
-                  <View>
-                    <Text style={styles.routeStatLabel}>Distance</Text>
-                    <Text style={styles.routeStatValue}>{routeInfo.distanceKm}</Text>
+                  <TouchableOpacity style={styles.routeDetailsBtn} activeOpacity={0.7}>
+                    <ArrowUp size={16} color={ROUTE_RED} />
+                    <Text style={styles.routeDetailsBtnText}>Details</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.routeSummaryRow}>
+                  <Text style={styles.routeSummaryDistance}>{routeInfo.distanceKm}</Text>
+                  <Text style={styles.routeSummaryDot}>•</Text>
+                  <Text style={styles.routeSummaryTime}>{routeInfo.durationMin}</Text>
+                  <View style={styles.routeSummaryDivider} />
+                  <Car size={14} color="#8A8A9A" />
+                  <Text style={styles.routeSummaryType}>Normal Route</Text>
+                </View>
+
+                <View style={styles.routeChipsRow}>
+                  <View style={styles.routeChip}>
+                    <Route size={12} color="#4ADE80" />
+                    <Text style={styles.routeChipText}>No Toll</Text>
+                  </View>
+                  <View style={styles.routeChip}>
+                    <Zap size={12} color={ROUTE_RED} />
+                    <Text style={styles.routeChipText}>Moderate Traffic</Text>
                   </View>
                 </View>
 
-                <View style={styles.routeDivider} />
-
-                <View style={styles.routeStat}>
-                  <View style={styles.routeStatIcon}>
-                    <Clock size={20} color="#F59E0B" />
-                  </View>
-                  <View>
-                    <Text style={styles.routeStatLabel}>Est. Time</Text>
-                    <Text style={styles.routeStatValue}>{routeInfo.durationMin}</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={styles.routeCancel} onPress={clearRoute} activeOpacity={0.7}>
-                  <X size={18} color="#8A8A9A" />
+                {/* --- Record button (only after route + ETA visible) --- */}
+                <TouchableOpacity
+                  style={styles.routeRecBtn}
+                  onPress={startRecording}
+                  activeOpacity={0.7}
+                >
+                  <Animated.View style={{ transform: [{ scale: recPulse }] }}>
+                    <Navigation size={20} color="#FFFFFF" />
+                  </Animated.View>
+                  <Text style={styles.routeRecBtnText}>START NAVIGATION</Text>
                 </TouchableOpacity>
-              </View>
-            )}
-
-            {(() => {
-              const destName = selectedDestination?.type === "cafe"
-                ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-                : "Selected Location";
-              return selectedDestination ? (
-                <View style={styles.routeDest}>
-                  <MapPin size={14} color={ROUTE_RED} />
-                  <Text style={styles.routeDestText} numberOfLines={1}>{destName}</Text>
-                </View>
-              ) : null;
-            })()}
-
-            {/* --- Record button (only after route + ETA visible) --- */}
-            {!isRecording && (
-              <TouchableOpacity
-                style={styles.routeRecBtn}
-                onPress={startRecording}
-                activeOpacity={0.7}
-              >
-                <Animated.View style={{ transform: [{ scale: recPulse }] }}>
-                  <Circle size={22} color="#FFFFFF" fill={RECORD_RED} />
-                </Animated.View>
-                <Text style={styles.routeRecBtnText}>START NAVIGATION</Text>
-              </TouchableOpacity>
+              </>
             )}
           </View>
         </Animated.View>
-      )}
+        );
+      })()}
 
       {/* --- Event pick mode banner --- */}
       {isEventPickMode && (
@@ -4938,66 +4938,98 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  routeInfoRow: {
+  routeCardHandle: {
+    alignItems: "center",
+    paddingBottom: 12,
+  },
+  routeCardHandleBar: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+  routeTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  routeStat: {
+  routeDestInfo: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     flex: 1,
   },
-  routeStatIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  routeStatLabel: {
-    fontSize: 11,
-    color: "#6A6A7E",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  routeStatValue: {
-    fontSize: 18,
+  routeDestName: {
     color: "#FFFFFF",
+    fontSize: 17,
     fontWeight: "800",
-    marginTop: 2,
+    flexShrink: 1,
   },
-  routeDivider: {
-    width: 1,
-    height: 50,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginHorizontal: 12,
-  },
-  routeCancel: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    justifyContent: "center",
+  routeDetailsBtn: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: "rgba(229, 57, 53, 0.12)",
   },
-  routeDest: {
+  routeDetailsBtnText: {
+    color: ROUTE_RED,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  routeSummaryRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.06)",
+    marginTop: 10,
   },
-  routeDestText: {
+  routeSummaryDistance: {
+    color: ROUTE_RED,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  routeSummaryDot: {
+    color: "#6A6A7E",
+    fontSize: 13,
+  },
+  routeSummaryTime: {
+    color: ROUTE_RED,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  routeSummaryDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    marginHorizontal: 4,
+  },
+  routeSummaryType: {
     color: "#8A8A9A",
     fontSize: 13,
-    fontWeight: "500",
-    flex: 1,
+    fontWeight: "600",
+  },
+  routeChipsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  routeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  routeChipText: {
+    color: "#C8C8D4",
+    fontSize: 11,
+    fontWeight: "600",
   },
   // ─── ONLINE STATUS BANNER ────────────────────────────
   onlineBigCard: {
