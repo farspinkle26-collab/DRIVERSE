@@ -13,13 +13,7 @@ import {
   Keyboard,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import Svg, {
-  Circle as SvgCircle,
-  Path as SvgPath,
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  Stop,
-} from "react-native-svg";
+import Svg, { Circle as SvgCircle, Path as SvgPath } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
@@ -435,29 +429,22 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
 // ─── PlayerPuck ──────────────────────────────────────────
 // The player's own map marker, drawn entirely in code (SVG) instead of a
 // bitmap asset, so it can never ship cropped, half-loaded, or missing.
-// A neon heading arrow on a dark puck: the arrow points up and the parent
-// Marker's `rotation={heading}` + `flat` steer it with the vehicle.
-const PLAYER_PUCK_SIZE = 64;
+// Styled after Google Maps' own navigation arrow (blue chevron, white
+// outline, soft halo) so it reads as familiar rather than blocking the
+// map. The arrow points up and the parent Marker's `rotation={heading}` +
+// `flat` steer it with the vehicle.
+const PLAYER_PUCK_SIZE = 36;
 function PlayerPuck() {
   return (
-    <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 64 64">
-      <Defs>
-        <SvgLinearGradient id="playerPuckArrow" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#FF8A50" />
-          <Stop offset="1" stopColor="#E55A2A" />
-        </SvgLinearGradient>
-      </Defs>
-      {/* soft neon halo */}
-      <SvgCircle cx="32" cy="32" r="30" fill="#FF6B35" opacity={0.1} />
-      <SvgCircle cx="32" cy="32" r="24" fill="#FF6B35" opacity={0.15} />
-      {/* dark puck with orange rim */}
-      <SvgCircle cx="32" cy="32" r="19" fill="#12121A" stroke="#FF6B35" strokeWidth={2} />
-      {/* heading arrow (notched navigation chevron) */}
+    <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 36 36">
+      {/* soft blue halo */}
+      <SvgCircle cx="18" cy="18" r="17" fill="#4285F4" opacity={0.16} />
+      {/* navigation chevron, Google Maps blue-dot style */}
       <SvgPath
-        d="M32 18.5 L43 43 L32 37 L21 43 Z"
-        fill="url(#playerPuckArrow)"
-        stroke="#FFD9C4"
-        strokeWidth={1}
+        d="M18 6 L27 27 L18 22 L9 27 Z"
+        fill="#4285F4"
+        stroke="#FFFFFF"
+        strokeWidth={2}
         strokeLinejoin="round"
       />
     </Svg>
@@ -2037,10 +2024,10 @@ export default function MapScreen() {
           {activeStep && (() => {
             const { Icon: TurnIcon, label } = maneuverMeta(activeStep.maneuver);
             return (
-              <View style={[styles.turnCard, { top: insets.top + 66 }]}>
+              <View style={[styles.turnCard, { top: insets.top + 54 }]}>
                 <View style={styles.turnCardTopRow}>
                   <View style={styles.turnIconBox}>
-                    <TurnIcon size={26} color="#FFFFFF" />
+                    <TurnIcon size={20} color="#FFFFFF" />
                   </View>
                   <View style={styles.turnTextCol}>
                     <View style={styles.turnDistanceRow}>
@@ -2081,17 +2068,17 @@ export default function MapScreen() {
                 }
               }}
             >
-              <Navigation size={20} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
+              <Navigation size={16} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
             </TouchableOpacity>
           </View>
 
           {/* --- Top-right: Nearby card --- */}
-          <View style={[styles.nearbyCard, { top: insets.top + 78 }]}>
+          <View style={[styles.nearbyCard, { top: insets.top + 60 }]}>
             <Text style={styles.nearbyHeaderText}>NEARBY</Text>
             {nearbyCafe && (
               <View style={styles.nearbyRow}>
                 <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.cafe}22` }]}>
-                  <Coffee size={14} color={CAT_COLORS.cafe} />
+                  <Coffee size={11} color={CAT_COLORS.cafe} />
                 </View>
                 <View>
                   <Text style={styles.nearbyLabel}>Coffee</Text>
@@ -2102,7 +2089,7 @@ export default function MapScreen() {
             {nearbyWorkshop && (
               <View style={styles.nearbyRow}>
                 <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.workshop}22` }]}>
-                  <Wrench size={14} color={CAT_COLORS.workshop} />
+                  <Wrench size={11} color={CAT_COLORS.workshop} />
                 </View>
                 <View>
                   <Text style={styles.nearbyLabel}>Workshop</Text>
@@ -2113,7 +2100,7 @@ export default function MapScreen() {
             {nearbyMeet && (
               <View style={styles.nearbyRow}>
                 <View style={[styles.nearbyIconBox, { backgroundColor: "#3B82F622" }]}>
-                  <Car size={14} color="#3B82F6" />
+                  <Car size={11} color="#3B82F6" />
                 </View>
                 <View>
                   <Text style={styles.nearbyLabel}>Car Meet</Text>
@@ -2124,7 +2111,7 @@ export default function MapScreen() {
             {nearbyFuel && (
               <View style={styles.nearbyRow}>
                 <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.spbu}22` }]}>
-                  <Fuel size={14} color={CAT_COLORS.spbu} />
+                  <Fuel size={11} color={CAT_COLORS.spbu} />
                 </View>
                 <View>
                   <Text style={styles.nearbyLabel}>Fuel</Text>
@@ -2139,7 +2126,7 @@ export default function MapScreen() {
                   return second && second.id !== nearbyCafe?.id ? (
                     <View style={styles.nearbyRow}>
                       <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.restaurant}22` }]}>
-                        <UtensilsCrossed size={14} color={CAT_COLORS.restaurant} />
+                        <UtensilsCrossed size={11} color={CAT_COLORS.restaurant} />
                       </View>
                       <View>
                         <Text style={styles.nearbyLabel}>Food</Text>
@@ -2153,7 +2140,7 @@ export default function MapScreen() {
                   return charging ? (
                     <View style={styles.nearbyRow}>
                       <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.charging}22` }]}>
-                        <Zap size={14} color={CAT_COLORS.charging} />
+                        <Zap size={11} color={CAT_COLORS.charging} />
                       </View>
                       <View>
                         <Text style={styles.nearbyLabel}>Charging</Text>
@@ -2169,15 +2156,15 @@ export default function MapScreen() {
               onPress={() => setNearbyExpanded((v) => !v)}
               activeOpacity={0.7}
             >
-              {nearbyExpanded ? <ChevronUp size={16} color="#6A6A7E" /> : <ChevronDown size={16} color="#6A6A7E" />}
+              {nearbyExpanded ? <ChevronUp size={13} color="#6A6A7E" /> : <ChevronDown size={13} color="#6A6A7E" />}
             </TouchableOpacity>
           </View>
 
           {/* --- Left column: gamification stack --- */}
-          <View style={[styles.achievementStack, { top: insets.top + 240 }]} pointerEvents="box-none">
+          <View style={[styles.achievementStack, { top: insets.top + 178 }]} pointerEvents="box-none">
             <View style={styles.achievementCard}>
               <View style={styles.achievementIconBox}>
-                <Leaf size={16} color="#22C55E" />
+                <Leaf size={13} color="#22C55E" />
               </View>
               <View style={styles.achievementTextCol}>
                 <Text style={styles.achievementTitle}>Smooth Drive</Text>
@@ -2191,7 +2178,7 @@ export default function MapScreen() {
             {liveXpEarned > 0 && (
               <View style={styles.achievementCard}>
                 <View style={[styles.achievementIconBox, { backgroundColor: "rgba(250, 204, 21, 0.12)" }]}>
-                  <Star size={16} color="#FACC15" fill="#FACC15" />
+                  <Star size={13} color="#FACC15" fill="#FACC15" />
                 </View>
                 <Text style={styles.achievementInlineText}>XP +{liveXpEarned}</Text>
               </View>
@@ -2200,7 +2187,7 @@ export default function MapScreen() {
             {showScenicToast && (
               <View style={styles.achievementCard}>
                 <View style={[styles.achievementIconBox, { backgroundColor: "rgba(167, 139, 250, 0.12)" }]}>
-                  <Mountain size={16} color="#A78BFA" />
+                  <Mountain size={13} color="#A78BFA" />
                 </View>
                 <View>
                   <Text style={styles.achievementTitle}>Scenic Road</Text>
@@ -3458,8 +3445,8 @@ const styles = StyleSheet.create({
   // Car marker — outer box leaves headroom for the ±4px float animation so
   // the icon never translates outside the marker bounds (which would clip it).
   carMarkerBox: {
-    width: 68,
-    height: 74,
+    width: 40,
+    height: 46,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4017,25 +4004,25 @@ const styles = StyleSheet.create({
     zIndex: 160,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     backgroundColor: "rgba(14, 14, 24, 0.9)",
-    borderRadius: 14,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   drivingProfileAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1.5,
     borderColor: "#FF6B35",
   },
   drivingProfileAvatarFallback: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1.5,
     borderColor: "#FF6B35",
     backgroundColor: "#2A2A45",
@@ -4045,29 +4032,29 @@ const styles = StyleSheet.create({
   drivingProfileAvatarText: {
     color: "#FFFFFF",
     fontWeight: "800",
-    fontSize: 14,
+    fontSize: 11,
   },
   drivingProfileLevel: {
     color: "#FF9F55",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "800",
   },
   drivingProfileXp: {
     color: "#8A8A9A",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "600",
   },
   // --- Turn-by-turn instruction card ---
   turnCard: {
     position: "absolute",
     left: 12,
-    width: 220,
+    width: 168,
     zIndex: 155,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 12,
+    padding: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
@@ -4077,12 +4064,12 @@ const styles = StyleSheet.create({
   turnCardTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 7,
   },
   turnIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 9,
     backgroundColor: "rgba(255, 107, 53, 0.16)",
     justifyContent: "center",
     alignItems: "center",
@@ -4093,33 +4080,33 @@ const styles = StyleSheet.create({
   turnDistanceRow: {
     flexDirection: "row",
     alignItems: "baseline",
-    gap: 3,
+    gap: 2,
   },
   turnDistanceText: {
     color: "#FFFFFF",
-    fontSize: 22,
+    fontSize: 16,
     fontWeight: "800",
   },
   turnMetersUnit: {
     color: "#8A8A9A",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "600",
   },
   turnInstructionText: {
     color: "#FF9F55",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "700",
   },
   turnStreetText: {
     color: "#8A8A9A",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "600",
   },
   turnProgressTrack: {
     height: 3,
     borderRadius: 2,
     backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginTop: 10,
+    marginTop: 7,
     overflow: "hidden",
   },
   turnProgressFill: {
@@ -4130,11 +4117,11 @@ const styles = StyleSheet.create({
   turnBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 6,
+    marginTop: 5,
   },
   turnBottomText: {
     color: "#6A6A7E",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "700",
   },
   // --- Speed limit + compass ---
@@ -4144,33 +4131,33 @@ const styles = StyleSheet.create({
     zIndex: 155,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 7,
   },
   speedLimitSign: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "#FFFFFF",
-    borderWidth: 4,
+    borderWidth: 3,
     borderColor: "#E53935",
     justifyContent: "center",
     alignItems: "center",
   },
   speedLimitNumber: {
     color: "#111111",
-    fontSize: 17,
+    fontSize: 13,
     fontWeight: "800",
-    lineHeight: 19,
+    lineHeight: 15,
   },
   speedLimitUnit: {
     color: "#111111",
-    fontSize: 8,
+    fontSize: 6,
     fontWeight: "700",
   },
   compassBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: "rgba(14, 14, 24, 0.9)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
@@ -4181,69 +4168,69 @@ const styles = StyleSheet.create({
   nearbyCard: {
     position: "absolute",
     right: 12,
-    width: 140,
+    width: 106,
     zIndex: 150,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 10,
-    gap: 8,
+    padding: 7,
+    gap: 5,
   },
   nearbyHeaderText: {
     color: "#6A6A7E",
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   nearbyRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   nearbyIconBox: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 6,
     justifyContent: "center",
     alignItems: "center",
   },
   nearbyLabel: {
     color: "#FFFFFF",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   nearbyDist: {
     color: "#6A6A7E",
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "600",
   },
   nearbyChevronBtn: {
     alignSelf: "center",
-    paddingTop: 2,
+    paddingTop: 1,
   },
   // --- Left column gamification stack ---
   achievementStack: {
     position: "absolute",
     left: 12,
-    width: 148,
+    width: 114,
     zIndex: 150,
-    gap: 8,
+    gap: 6,
   },
   achievementCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 14,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 10,
+    padding: 7,
   },
   achievementIconBox: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: 7,
     backgroundColor: "rgba(34, 197, 94, 0.12)",
     justifyContent: "center",
     alignItems: "center",
@@ -4253,64 +4240,64 @@ const styles = StyleSheet.create({
   },
   achievementTitle: {
     color: "#8A8A9A",
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "700",
     textTransform: "uppercase",
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   achievementValue: {
     color: "#FFFFFF",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "800",
     marginTop: 1,
   },
   achievementProgressTrack: {
-    height: 3,
+    height: 2,
     borderRadius: 2,
     backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginTop: 6,
+    marginTop: 5,
     overflow: "hidden",
   },
   achievementProgressFill: {
-    height: 3,
+    height: 2,
     borderRadius: 2,
     backgroundColor: "#22C55E",
   },
   achievementInlineText: {
     color: "#FACC15",
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "800",
   },
   friendCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 14,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 8,
+    padding: 6,
   },
   friendAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   friendAvatarFallback: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
   },
   friendName: {
     color: "#FFFFFF",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "700",
   },
   friendMeta: {
     color: "#8A8A9A",
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "600",
     marginTop: 1,
   },
@@ -4339,29 +4326,29 @@ const styles = StyleSheet.create({
   // --- Floating speedometer ---
   speedometerWrap: {
     position: "absolute",
-    top: -78,
+    top: -66,
     right: 4,
     alignItems: "center",
   },
   speedometerRing: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderWidth: 4,
+    borderWidth: 3,
     borderColor: "#E53935",
     justifyContent: "center",
     alignItems: "center",
   },
   speedometerValue: {
     color: "#FFFFFF",
-    fontSize: 30,
+    fontSize: 25,
     fontWeight: "800",
-    lineHeight: 34,
+    lineHeight: 28,
   },
   speedometerUnit: {
     color: "#6A6A7E",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
   },
   speedometerGearRow: {
