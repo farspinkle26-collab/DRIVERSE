@@ -216,7 +216,7 @@ type ProfileTab = "garage" | "trips" | "friends";
 export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, updateProfilePicture } = useAuth();
+  const { user, isAuthenticated, updateProfilePicture, updateCountry } = useAuth();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -255,6 +255,8 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [purchasing, setPurchasing] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [editingCountry, setEditingCountry] = useState(false);
+  const [countryDraft, setCountryDraft] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // ─── Add-car form ──────────────────────────────────────────
@@ -498,6 +500,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     setEditingName(false);
     await supabase.from("profiles").update({ name: next }).eq("id", user.id);
   }, [nameDraft, user]);
+
+  const saveCountry = useCallback(async () => {
+    const next = countryDraft.trim();
+    setEditingCountry(false);
+    if (!user || !next) return;
+    await updateCountry(next);
+  }, [countryDraft, user, updateCountry]);
 
   // ─── Actions: garage ───────────────────────────────────────
   const handleAddCar = useCallback(async () => {
@@ -807,6 +816,35 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               )}
             </View>
             <Text style={styles.rankSubtitle}>{rank.name}</Text>
+            {isSelf && (
+              <View style={styles.nameRow}>
+                {editingCountry ? (
+                  <TextInput
+                    style={styles.countryInput}
+                    value={countryDraft}
+                    onChangeText={setCountryDraft}
+                    autoFocus
+                    onBlur={saveCountry}
+                    onSubmitEditing={saveCountry}
+                    placeholder="Country"
+                    placeholderTextColor="#5A5A6E"
+                  />
+                ) : (
+                  <View style={styles.countryChip}>
+                    <MapPin size={12} color="#8A8A9A" />
+                    <Text style={styles.countryChipText}>{user?.country || "Set your country"}</Text>
+                  </View>
+                )}
+                {!editingCountry && (
+                  <TouchableOpacity
+                    onPress={() => { setCountryDraft(user?.country ?? ""); setEditingCountry(true); }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Pencil size={13} color="#8A8A9A" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
             {primaryCar && (
               <View style={styles.drivingChip}>
                 <Car size={12} color="#FF6B35" />
@@ -1431,6 +1469,20 @@ const styles = StyleSheet.create({
   userName: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
   nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
   rankSubtitle: { fontSize: 14, color: "#FF6B35", fontWeight: "700", marginTop: 2 },
+  countryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: "flex-start",
+  },
+  countryChipText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
+  countryInput: { fontSize: 13, fontWeight: "700", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
   drivingChip: {
     flexDirection: "row",
     alignItems: "center",

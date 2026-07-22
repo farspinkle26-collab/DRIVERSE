@@ -15,8 +15,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, Stack } from "expo-router";
-import { ArrowLeft, Search, SquarePen, MessageCircle, X, Send } from "lucide-react-native";
+import { ArrowLeft, Search, SquarePen, MessageCircle, X, Send, Users } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useGroupChat } from "@/hooks/useGroupChatStore";
 import { supabase } from "@/lib/supabase";
 
 interface DirectMessageRow {
@@ -35,13 +36,16 @@ interface Contact {
 }
 
 interface ConversationRow {
-  partnerId: string;
+  key: string;
+  kind: "dm" | "group";
+  targetId: string; // partnerId for dm, conversationId for group
   name: string;
   avatar?: string;
   lastMessage: string;
   lastSenderIsMe: boolean;
   lastAt: string;
   unread: number;
+  memberCount?: number;
 }
 
 function timeAgo(dateStr: string): string {
@@ -60,6 +64,7 @@ export default function MessagesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
+  const { conversations: groupConversations } = useGroupChat();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -156,8 +161,10 @@ export default function MessagesScreen() {
         unreadByPartner.set(partnerId, (unreadByPartner.get(partnerId) ?? 0) + 1);
       }
     });
-    const list = Array.from(byPartner.entries()).map(([partnerId, last]) => ({
-      partnerId,
+    const dmList: ConversationRow[] = Array.from(byPartner.entries()).map(([partnerId, last]) => ({
+      key: `dm_${partnerId}`,
+      kind: "dm" as const,
+      targetId: partnerId,
       name: profiles[partnerId]?.name ?? "Driver",
       avatar: profiles[partnerId]?.avatar,
       lastMessage: last.content,
@@ -165,11 +172,25 @@ export default function MessagesScreen() {
       lastAt: last.created_at,
       unread: unreadByPartner.get(partnerId) ?? 0,
     }));
+
+    const groupList: ConversationRow[] = groupConversations.map((c) => ({
+      key: `group_${c.id}`,
+      kind: "group" as const,
+      targetId: c.id,
+      name: c.title,
+      lastMessage: c.last_message,
+      lastSenderIsMe: false,
+      lastAt: c.last_at,
+      unread: 0,
+      memberCount: c.member_count,
+    }));
+
+    const list = [...dmList, ...groupList];
     list.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
     if (!query.trim()) return list;
     const q = query.trim().toLowerCase();
     return list.filter((c) => c.name.toLowerCase().includes(q));
-  }, [rows, profiles, user, query]);
+  }, [rows, profiles, user, query, groupConversations]);
 
   const openCompose = useCallback(async () => {
     setComposeOpen(true);
@@ -254,17 +275,21 @@ export default function MessagesScreen() {
       ) : (
         <FlatList
           data={conversations}
-          keyExtractor={(item) => item.partnerId}
+          keyExtractor={(item) => item.key}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.7}
-              onPress={() => router.push(`/messages/${item.partnerId}` as any)}
+              onPress={() => router.push(
+                (item.kind === "group" ? `/messages/group/${item.targetId}` : `/messages/${item.targetId}`) as any
+              )}
             >
               <View style={styles.avatar}>
-                {item.avatar ? (
+                {item.kind === "group" ? (
+                  <Users size={20} color="#FF6B35" />
+                ) : item.avatar ? (
                   <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
                 ) : (
                   <Text style={styles.avatarText}>{item.name[0]?.toUpperCase() ?? "?"}</Text>
@@ -276,7 +301,11 @@ export default function MessagesScreen() {
                   style={[styles.rowPreview, item.unread > 0 && styles.rowPreviewUnread]}
                   numberOfLines={1}
                 >
-                  {item.lastSenderIsMe ? "You: " : ""}{item.lastMessage}
+                  {item.lastMessage
+                    ? `${item.lastSenderIsMe ? "You: " : ""}${item.lastMessage}`
+                    : item.kind === "group"
+                      ? `${item.memberCount ?? 0} members`
+                      : "No messages yet"}
                 </Text>
               </View>
               <View style={{ alignItems: "flex-end", gap: 6 }}>

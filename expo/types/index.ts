@@ -14,6 +14,7 @@ export interface User {
   canSwitchRoles: boolean; // Always false - roles are fixed once set
   registrationCompletedAt?: number;
   verifiedAt?: number;
+  country?: string;
 
 }
 
