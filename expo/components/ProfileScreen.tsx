@@ -33,7 +33,6 @@ import {
   Lock,
   Check,
   X,
-  Send,
   ArrowLeft,
   UserPlus,
   UserCheck,
@@ -52,6 +51,7 @@ import {
   MailOpen,
   Shield,
   HelpCircle,
+  Crown,
 } from "lucide-react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useAuth } from "@/hooks/useAuthStore";
@@ -182,7 +182,7 @@ interface MessageItem {
 }
 
 type FriendState = "none" | "pending_sent" | "pending_received" | "friends" | "self";
-type ProfileTab = "garage" | "trips" | "friends" | "messages";
+type ProfileTab = "garage" | "trips" | "friends";
 
 /**
  * The unified Driveverse profile page. Renders the exact same layout for
@@ -245,11 +245,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   // ─── Friend search (self) ──────────────────────────────────
   const [friendQuery, setFriendQuery] = useState("");
   const [friendResults, setFriendResults] = useState<Array<{ id: string; name: string; level: number; avatar?: string }>>([]);
-
-  // ─── Messages thread ───────────────────────────────────────
-  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [conversationMessages, setConversationMessages] = useState<MessageItem[]>([]);
-  const [messageInput, setMessageInput] = useState("");
 
   // ─── Data loaders ──────────────────────────────────────────
   const loadTargetProfile = useCallback(async () => {
@@ -391,7 +386,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     if (isAuthenticated) loadAll();
   }, [isAuthenticated, targetId, loadAll]);
 
-  // Live-update the viewer's messages as they arrive.
+  // Live-update the viewer's inbox preview (unread badge, feed) as DMs arrive.
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     const channel = supabase
@@ -403,18 +398,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           const msg = payload.new as MessageItem;
           if (msg.sender_id !== user.id && msg.receiver_id !== user.id) return;
           setMessages((prev) => [msg, ...prev]);
-          setConversationMessages((prev) => {
-            const partner = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
-            if (selectedConversation !== partner) return prev;
-            return [...prev, msg];
-          });
         }
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, user, targetId, selectedConversation]);
+  }, [isAuthenticated, user, targetId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -632,33 +622,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }, [user, loadFriends]);
 
   // ─── Actions: messages ─────────────────────────────────────
-  const openConversation = useCallback(async (partnerId: string) => {
-    if (!user) return;
-    setSelectedConversation(partnerId);
-    const { data } = await supabase
-      .from("direct_messages")
-      .select("*")
-      .or(
-        `and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`
-      )
-      .order("created_at", { ascending: true });
-    if (data) setConversationMessages(data as MessageItem[]);
-  }, [user]);
-
-  const sendMessage = useCallback(async () => {
-    if (!user || !selectedConversation || !messageInput.trim()) return;
-    const { error } = await supabase.from("direct_messages").insert({
-      sender_id: user.id,
-      receiver_id: selectedConversation,
-      content: messageInput.trim(),
-    });
-    if (!error) {
-      setMessageInput("");
-      openConversation(selectedConversation);
-      loadInboxes();
-    }
-  }, [user, selectedConversation, messageInput, openConversation, loadInboxes]);
-
   const getFriendInfo = useCallback((partnerId: string): { name: string; avatar?: string } => {
     const f = friends.find((fr) => fr.user_id === partnerId || fr.friend_id === partnerId);
     if (f?.friend_profile?.name) return { name: f.friend_profile.name, avatar: f.friend_profile.avatar };
@@ -667,11 +630,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     return { name: "Driver" };
   }, [friends, pendingRequests]);
 
-  // ─── Header message button jumps to Messages tab ───────────
+  // ─── Header message button opens the full-screen Messages page ─
   const openMessages = useCallback(() => {
-    setActiveTab("messages");
-    if (!isSelf && targetId) openConversation(targetId);
-  }, [isSelf, targetId, openConversation]);
+    if (!isSelf && targetId) router.push(`/messages/${targetId}` as any);
+    else router.push("/messages" as any);
+  }, [isSelf, targetId, router]);
 
   // ─── Helpers ───────────────────────────────────────────────
   const formatDuration = (seconds: number): string => {
@@ -729,7 +692,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     { key: "garage", label: "Garage", icon: Car },
     { key: "trips", label: "Trips", icon: RouteIcon },
     { key: "friends", label: "Friends", icon: Users },
-    { key: "messages", label: "Messages", icon: MessageCircle, badge: unreadMessages },
   ];
 
   return (
@@ -890,7 +852,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 <UserCheck size={15} color="#22C55E" /><Text style={[styles.statusPillText, { color: "#22C55E" }]}>Friends</Text>
               </View>
             )}
-            <TouchableOpacity style={styles.secondaryAction} onPress={() => { if (targetId) { setActiveTab("messages"); openConversation(targetId); } }} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.secondaryAction} onPress={() => { if (targetId) router.push(`/messages/${targetId}` as any); }} activeOpacity={0.85}>
               <MessageCircle size={17} color="#FF6B35" /><Text style={styles.secondaryActionText}>Message</Text>
             </TouchableOpacity>
           </View>
@@ -1056,7 +1018,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   <Text style={styles.feedTitle}>INBOX</Text>
                   <View style={styles.feedHeaderRight}>
                     {unreadMessages > 0 && <View style={styles.feedHeaderBadge}><Text style={styles.feedHeaderBadgeText}>{unreadMessages}</Text></View>}
-                    <TouchableOpacity onPress={() => setActiveTab("messages")}><Text style={styles.feedSeeAll}>See All</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => router.push("/messages" as any)}><Text style={styles.feedSeeAll}>See All</Text></TouchableOpacity>
                   </View>
                 </View>
                 {/* Reward notification */}
@@ -1070,7 +1032,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 {inboxConversations(messages, user?.id).slice(0, 2).map(([partnerId, last]) => {
                   const p = getFriendInfo(partnerId);
                   return (
-                    <TouchableOpacity key={partnerId} style={styles.feedItem} activeOpacity={0.7} onPress={() => { setActiveTab("messages"); openConversation(partnerId); }}>
+                    <TouchableOpacity key={partnerId} style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push(`/messages/${partnerId}` as any)}>
                       <View style={[styles.feedIcon, { backgroundColor: "rgba(59,130,246,0.15)" }]}><MessageCircle size={13} color="#3B82F6" /></View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.feedItemTitle} numberOfLines={1}>{p.name}</Text>
@@ -1190,67 +1152,9 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                       </View>
                     </TouchableOpacity>
                     {isSelf && (
-                      <TouchableOpacity style={styles.friendMsgBtn} onPress={() => { setActiveTab("messages"); openConversation(otherId); }}><MessageCircle size={17} color="#FF6B35" /></TouchableOpacity>
+                      <TouchableOpacity style={styles.friendMsgBtn} onPress={() => router.push(`/messages/${otherId}` as any)}><MessageCircle size={17} color="#FF6B35" /></TouchableOpacity>
                     )}
                   </View>
-                );
-              })
-            )}
-          </View>
-        )}
-
-        {/* ═══ MESSAGES TAB ═══ */}
-        {activeTab === "messages" && (
-          <View style={styles.section}>
-            {!isSelf && !selectedConversation && targetId ? (
-              <View style={styles.emptyState}>
-                <MessageCircle size={40} color="#3A3A4E" />
-                <Text style={styles.emptyText}>Message {profileName}</Text>
-                <TouchableOpacity style={[styles.searchBtn, { marginTop: 12 }]} onPress={() => openConversation(targetId)}><Text style={styles.searchBtnText}>Open Chat</Text></TouchableOpacity>
-              </View>
-            ) : selectedConversation ? (
-              <View>
-                <TouchableOpacity style={styles.convoBack} onPress={() => { setSelectedConversation(null); setConversationMessages([]); }}>
-                  <ArrowLeft size={20} color="#FFFFFF" />
-                  <Text style={styles.convoBackText}>{getFriendInfo(selectedConversation).name}</Text>
-                </TouchableOpacity>
-                <View style={styles.convoMessages}>
-                  {conversationMessages.map((msg) => (
-                    <View key={msg.id} style={[styles.msgBubble, msg.sender_id === user?.id ? styles.msgSent : styles.msgReceived]}>
-                      <Text style={styles.msgText}>{msg.content}</Text>
-                      <Text style={styles.msgTime}>{new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text>
-                    </View>
-                  ))}
-                  {conversationMessages.length === 0 && <Text style={styles.feedEmpty}>No messages yet. Say hello!</Text>}
-                </View>
-                <View style={styles.msgInputRow}>
-                  <TextInput style={styles.msgInput} placeholder="Type a message..." placeholderTextColor="#5A5A6E" value={messageInput} onChangeText={setMessageInput} multiline />
-                  <TouchableOpacity style={[styles.msgSendBtn, !messageInput.trim() && { opacity: 0.4 }]} onPress={sendMessage} disabled={!messageInput.trim()}><Send size={18} color="#FFFFFF" /></TouchableOpacity>
-                </View>
-              </View>
-            ) : messages.length === 0 ? (
-              <View style={styles.emptyState}>
-                <MessageCircle size={40} color="#3A3A4E" />
-                <Text style={styles.emptyText}>No messages</Text>
-                <Text style={styles.emptySub}>Chat with your friends here</Text>
-              </View>
-            ) : (
-              inboxConversations(messages, user?.id).map(([partnerId, last]) => {
-                const p = getFriendInfo(partnerId);
-                return (
-                  <TouchableOpacity key={partnerId} style={styles.convoRow} onPress={() => openConversation(partnerId)} activeOpacity={0.7}>
-                    <View style={styles.convoAvatar}>
-                      {p.avatar ? <Image source={{ uri: p.avatar }} style={styles.friendAvatarImg} /> : <Text style={styles.friendAvatarText}>{p.name[0]?.toUpperCase()}</Text>}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.friendName}>{p.name}</Text>
-                      <Text style={styles.convoPreview} numberOfLines={1}>{last.sender_id === user?.id ? "You: " : ""}{last.content}</Text>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={styles.feedTime}>{timeAgo(last.created_at)}</Text>
-                      {!last.is_read && last.receiver_id === user?.id && <View style={styles.unreadDot} />}
-                    </View>
-                  </TouchableOpacity>
                 );
               })
             )}
@@ -1261,6 +1165,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {isSelf && (
           <View style={styles.settingsSection}>
             <Text style={styles.settingsTitle}>Settings</Text>
+            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/messages" as any)}>
+              <View style={styles.settingLeft}><MessageCircle size={18} color="#3B82F6" /><Text style={styles.settingText}>Messages</Text></View>
+              <View style={styles.settingRight}>
+                {unreadMessages > 0 && <View style={styles.settingBadge}><Text style={styles.settingBadgeText}>{unreadMessages}</Text></View>}
+                <ChevronRight size={16} color="#5A5A6E" />
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/convoy" as any)}>
+              <View style={styles.settingLeft}><Crown size={18} color="#FFD700" /><Text style={styles.settingText}>Convoy</Text></View>
+              <ChevronRight size={16} color="#5A5A6E" />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
               <View style={styles.settingLeft}><Trophy size={18} color="#FFD700" /><Text style={styles.settingText}>Levels & Ranks</Text></View>
               <ChevronRight size={16} color="#5A5A6E" />
@@ -1670,28 +1585,16 @@ const styles = StyleSheet.create({
   friendMsgBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center" },
 
   // Conversation
-  convoBack: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, marginBottom: 8 },
-  convoBackText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
-  convoMessages: { minHeight: 120, marginBottom: 12 },
-  msgBubble: { maxWidth: "78%", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
-  msgSent: { alignSelf: "flex-end", backgroundColor: "#FF6B35" },
-  msgReceived: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.08)" },
-  msgText: { fontSize: 14, color: "#FFFFFF" },
-  msgTime: { fontSize: 9, color: "rgba(255,255,255,0.6)", marginTop: 3, alignSelf: "flex-end" },
-  msgInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  msgInput: { flex: 1, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: "#FFFFFF", fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  msgSendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
-  convoRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  convoAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(59,130,246,0.15)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  convoPreview: { fontSize: 12, color: "#8A8A9A", marginTop: 2 },
-  unreadDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#FF3B6F", marginTop: 5 },
 
   // Settings
   settingsSection: { paddingHorizontal: 16, marginTop: 20 },
   settingsTitle: { fontSize: 13, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.5, marginBottom: 12, textTransform: "uppercase" },
   settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  settingRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   settingText: { fontSize: 15, color: "#FFFFFF", fontWeight: "600" },
+  settingBadge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
+  settingBadgeText: { fontSize: 11, fontWeight: "800", color: "#FFFFFF" },
 
   // Modals
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)" },

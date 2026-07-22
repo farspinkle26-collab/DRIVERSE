@@ -59,6 +59,9 @@ function RootLayoutNav() {
       <Stack.Screen name="ranks" options={{ headerShown: false }} />
       <Stack.Screen name="community" options={{ headerShown: false }} />
       <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="messages/index" options={{ headerShown: false }} />
+      <Stack.Screen name="messages/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="convoy" options={{ headerShown: false }} />
     </Stack>
   );
 }
