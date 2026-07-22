@@ -129,6 +129,40 @@ CREATE POLICY "Users can update their own avatar"
   );
 ```
 
+### Car photo storage bucket
+
+Generated/uploaded car photos (`car_collections.photo_url`) also need a
+public bucket, otherwise the app has nowhere durable to put them and falls
+back to the device's temporary picker URI, which disappears after a
+restart:
+
+```sql
+-- Public bucket that holds car photos
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('car-photos', 'car-photos', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Anyone can view car photos (public read)
+CREATE POLICY "Car photos are publicly readable"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'car-photos');
+
+-- A user may upload/replace only files inside their own folder (userId/...)
+CREATE POLICY "Users can upload their own car photos"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'car-photos'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+CREATE POLICY "Users can update their own car photos"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'car-photos'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+```
+
 ### Let drivers view each other's profile + rank
 
 By default the `profiles` policy only allows viewing your *own* row. Add a
