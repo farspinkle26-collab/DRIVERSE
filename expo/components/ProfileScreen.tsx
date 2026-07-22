@@ -62,6 +62,7 @@ import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
+import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
@@ -551,6 +552,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   // After a successful (simulated) payment, let the driver attach the
   // generated render. Storing a photo_url marks the car as premium.
   const runGeneration = useCallback(async (car: CarItem) => {
+    if (!user) return;
     try {
       if (Platform.OS !== "web") {
         const perm = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
@@ -561,8 +563,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       }
       const result = await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect: [16, 10], quality: 0.9 });
       if (result.canceled || !result.assets?.[0]) return;
-      const uri = result.assets[0].uri;
-      const { error } = await supabase.from("car_collections").update({ photo_url: uri }).eq("id", car.id);
+      const localUri = result.assets[0].uri;
+      // The picker returns a device-local URI that doesn't survive app
+      // restarts, so upload it to Supabase Storage and persist the public URL.
+      const publicUrl = await uploadCarPhoto(user.id, car.id, localUri);
+      const { error } = await supabase.from("car_collections").update({ photo_url: publicUrl }).eq("id", car.id);
       if (error) Alert.alert("Error", error.message);
       else {
         await loadCars();
@@ -571,7 +576,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     } catch {
       Alert.alert("Error", "Could not save your generated car.");
     }
-  }, [loadCars]);
+  }, [user, loadCars]);
 
   const handlePayPremium = useCallback(async () => {
     if (!premiumTargetCar) return;
