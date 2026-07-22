@@ -1,6 +1,7 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { resolveCountry } from "@/lib/geoCountry";
 
 // ─── Types ─────────────────────────────────────────────────
 export type EventType = "meetup" | "convoy" | "cruise" | "race";
@@ -19,6 +20,7 @@ export interface DriveEvent {
   ends_at: string | null;
   max_participants: number; // 0 = unlimited
   status: EventStatus;
+  country: string;
   created_at: string;
   // Derived
   host_name: string;
@@ -53,6 +55,7 @@ interface EventRow {
   ends_at: string | null;
   max_participants: number;
   status: EventStatus;
+  country: string;
   created_at: string;
 }
 
@@ -197,6 +200,9 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in to create an event" };
 
+      const country = await resolveCountry({ latitude: input.latitude, longitude: input.longitude });
+      if (!country) return { error: "Couldn't determine the event's country — check location permissions" };
+
       const { error } = await supabase.from("events").insert({
         creator_id: uid,
         title: input.title.trim(),
@@ -209,6 +215,7 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
         ends_at: input.ends_at ? input.ends_at.toISOString() : null,
         max_participants: input.max_participants ?? 0,
         status: input.starts_at.getTime() <= Date.now() ? "active" : "upcoming",
+        country,
       });
 
       if (error) return { error: error.message };
