@@ -1089,10 +1089,17 @@ export default function MapScreen() {
     })();
   }, [userLocation]);
 
-  // --- Invite an online friend to my party ---
+  // --- Invite an online friend to my convoy ---
   const handleInviteToPartyFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!party) {
-      Alert.alert("No Party Yet", "Create a party from your profile first, then invite friends from the map.");
+      Alert.alert(
+        "No Convoy Yet",
+        "Start a convoy first, then invite friends from the map.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Start a Convoy", onPress: () => router.push("/convoy" as any) },
+        ]
+      );
       return;
     }
     setInvitingToParty(true);
@@ -1106,7 +1113,7 @@ export default function MapScreen() {
     } finally {
       setInvitingToParty(false);
     }
-  }, [party, inviteFriend]);
+  }, [party, inviteFriend, router]);
 
   // --- Ask a meetup from map marker ---
   const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -2948,6 +2955,22 @@ export default function MapScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={styles.onlineUserActionRow}
+                onPress={() => {
+                  const uid = selectedOnlineUser.user_id;
+                  setSelectedOnlineUser(null);
+                  router.push(`/messages/${uid}` as any);
+                }}
+                activeOpacity={0.75}
+              >
+                <View style={styles.onlineUserActionIcon}>
+                  <MessageCircle size={18} color="#38BDF8" strokeWidth={2.2} />
+                </View>
+                <Text style={styles.onlineUserActionLabel}>Message</Text>
+                <ChevronRight size={20} color="#6B6B7D" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[
                   styles.onlineUserActionRow,
                   (invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)) && { opacity: 0.5 },
@@ -2963,8 +2986,8 @@ export default function MapScreen() {
                   {invitingToParty
                     ? "Inviting..."
                     : partyMemberIds.has(selectedOnlineUser.user_id)
-                    ? "Already in Party"
-                    : "Invite to Party"}
+                    ? "Already in Convoy"
+                    : "Invite to Convoy"}
                 </Text>
                 <ChevronRight size={20} color="#6B6B7D" />
               </TouchableOpacity>

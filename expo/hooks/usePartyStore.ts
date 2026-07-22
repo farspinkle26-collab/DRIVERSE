@@ -97,7 +97,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       return {
         id: r.id,
         party_id: r.party_id,
-        party_name: p?.name ?? "Party",
+        party_name: p?.name ?? "Convoy",
         party_color: p?.color ?? "#FFD700",
         leader_name: leader?.name ?? "Driver",
         leader_avatar: leader?.avatar,
@@ -152,7 +152,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       const color = PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)];
       const { error } = await supabase
         .from("parties")
-        .insert({ leader_id: user.id, name: name.trim() || "Party", color })
+        .insert({ leader_id: user.id, name: name.trim() || "Convoy", color })
         .select()
         .single();
       if (error) {
@@ -169,7 +169,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
 
   // ─── Invite an accepted friend into my current party ─────
   const inviteFriend = useCallback(async (friendId: string): Promise<{ ok: boolean; message?: string }> => {
-    if (!user || !state.party) return { ok: false, message: "You need a party first." };
+    if (!user || !state.party) return { ok: false, message: "You need a convoy first." };
     try {
       const { error } = await supabase.from("party_members").insert({
         party_id: state.party.id,
@@ -178,7 +178,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
         status: "invited",
       });
       if (error) {
-        if (error.code === "23505") return { ok: false, message: "Already invited or in a party." };
+        if (error.code === "23505") return { ok: false, message: "Already invited or in a convoy." };
         return { ok: false, message: error.message };
       }
       await loadParty();
@@ -199,7 +199,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
         .eq("party_id", partyId)
         .eq("user_id", user.id);
       if (error) {
-        if (error.code === "23505") return { ok: false, message: "Leave your current party first." };
+        if (error.code === "23505") return { ok: false, message: "Leave your current convoy first." };
         return { ok: false, message: error.message };
       }
       await loadParty();
