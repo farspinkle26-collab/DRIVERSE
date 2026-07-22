@@ -1,10 +1,26 @@
 // Google Maps custom styles for light/dark mode.
 // Light uses Google's default look (empty array) so every default landmark/POI stays visible.
 // Dark is a standard "night mode" style with labels/POIs kept visible, just recolored.
+//
+// Google's own POI/transit icons (schools, government offices, bus stops, etc.) are baked
+// into the map tiles and are not part of our own category-filterable markers (cafes, fuel,
+// shops, etc. — see `visibleCats` in map.tsx). Left on, they show regardless of the app's
+// own Map Layers filters, which makes those filters look broken. So during normal browsing
+// we turn Google's POI/transit icons off entirely — the only pins on the map are then our
+// own filterable markers. While the user is actively picking a location (drop pin / event
+// location), we switch to the POI-visible variant below so they can tap a real place from
+// Google's own database (via onPoiClick) instead of only being able to drop a raw pin.
 
-export const MAP_STYLE_LIGHT: any[] = [];
+const HIDE_POI_LABELS: any[] = [
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+];
 
-export const MAP_STYLE_DARK: any[] = [
+export const MAP_STYLE_LIGHT: any[] = [...HIDE_POI_LABELS];
+
+export const MAP_STYLE_LIGHT_PICK: any[] = [];
+
+export const MAP_STYLE_DARK_PICK: any[] = [
   { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
@@ -119,3 +135,5 @@ export const MAP_STYLE_DARK: any[] = [
     stylers: [{ color: "#4e6d70" }],
   },
 ];
+
+export const MAP_STYLE_DARK: any[] = [...MAP_STYLE_DARK_PICK, ...HIDE_POI_LABELS];
