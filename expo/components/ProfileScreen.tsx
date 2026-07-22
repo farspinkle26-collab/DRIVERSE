@@ -52,6 +52,9 @@ import {
   Shield,
   HelpCircle,
   Crown,
+  Calendar,
+  MoreVertical,
+  Globe2,
 } from "lucide-react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useAuth } from "@/hooks/useAuthStore";
@@ -177,6 +180,7 @@ interface TripItem {
   xp_earned: number;
   was_faster_than_estimation: boolean;
   completed_at: string;
+  is_public: boolean;
 }
 
 function tripDisplayName(trip: TripItem): string {
@@ -258,6 +262,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [editingCountry, setEditingCountry] = useState(false);
   const [countryDraft, setCountryDraft] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [tripMenuTrip, setTripMenuTrip] = useState<TripItem | null>(null);
 
   // ─── Add-car form ──────────────────────────────────────────
   const [showAddCar, setShowAddCar] = useState(false);
@@ -545,6 +550,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     ]);
   }, [loadCars]);
 
+  // ─── Actions: trip privacy ──────────────────────────────────
+  const handleToggleTripVisibility = useCallback(async (trip: TripItem) => {
+    const nextPublic = !trip.is_public;
+    setTripMenuTrip(null);
+    setTrips((prev) => prev.map((t) => (t.id === trip.id ? { ...t, is_public: nextPublic } : t)));
+    const { error } = await supabase.from("trips").update({ is_public: nextPublic }).eq("id", trip.id);
+    if (error) {
+      setTrips((prev) => prev.map((t) => (t.id === trip.id ? { ...t, is_public: !nextPublic } : t)));
+      Alert.alert("Error", "Could not update trip privacy.");
+    }
+  }, []);
+
   const handleSetPrimary = useCallback(async (carId: string) => {
     if (!user) return;
     await supabase.from("car_collections").update({ is_primary: false }).eq("user_id", user.id);
@@ -689,6 +706,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     if (hrs < 24) return `${hrs}h ago`;
     return `${Math.floor(hrs / 24)}d ago`;
   };
+  const tripDateLabel = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const now = new Date();
+    const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    if (isSameDay(d, now)) return `Today, ${time}`;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    if (isSameDay(d, yesterday)) return `Yesterday, ${time}`;
+    return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
+  };
+  const tripCode = (index: number): string => `R-${String(trips.length - index).padStart(3, "0")}`;
 
   // ─── Not authenticated ─────────────────────────────────────
   if (!isAuthenticated && isSelf) {
@@ -1124,7 +1153,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 <Text style={styles.emptySub}>{isSelf ? "Start recording a drive to see it here" : "This driver has no trips yet"}</Text>
               </View>
             ) : (
-              trips.map((trip) => (
+              trips.map((trip, idx) => (
                 <TouchableOpacity
                   key={trip.id}
                   style={styles.tripCard}
@@ -1132,13 +1161,39 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   onPress={() => router.push(`/trip/${trip.id}` as any)}
                 >
                   <View style={styles.tripHeader}>
-                    <View style={styles.tripRoute}>
-                      <MapPin size={14} color="#8A8A9A" />
+                    <View style={styles.tripTitleRow}>
+                      <View style={styles.tripCodeBadge}><Text style={styles.tripCodeText}>{tripCode(idx)}</Text></View>
                       <Text style={styles.tripDest} numberOfLines={1}>{tripDisplayName(trip)}</Text>
+                      {trip.was_faster_than_estimation && (
+                        <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>
+                      )}
+                      {isSelf && !trip.is_public && <Lock size={12} color="#8A8A9A" />}
                     </View>
-                    {trip.was_faster_than_estimation && (
-                      <View style={styles.tripFast}><Zap size={11} color="#FFD700" /><Text style={styles.tripFastText}>FAST</Text></View>
-                    )}
+                    <View style={styles.tripHeaderRight}>
+                      <View style={styles.tripDateBadge}>
+                        <Calendar size={11} color="#B0B0BE" />
+                        <Text style={styles.tripDateText}>{tripDateLabel(trip.completed_at)}</Text>
+                      </View>
+                      {isSelf && (
+                        <TouchableOpacity
+                          style={styles.tripMenuBtn}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          onPress={(e) => { e.stopPropagation(); setTripMenuTrip(trip); }}
+                        >
+                          <MoreVertical size={16} color="#8A8A9A" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.tripAddresses}>
+                    <View style={styles.tripAddressRow}>
+                      <View style={[styles.tripAddressDot, { backgroundColor: "#00D4AA" }]} />
+                      <Text style={styles.tripAddressText} numberOfLines={1}>{trip.origin_name || "Unknown origin"}</Text>
+                    </View>
+                    <View style={styles.tripAddressRow}>
+                      <View style={[styles.tripAddressDot, { backgroundColor: "#FF3B6F" }]} />
+                      <Text style={styles.tripAddressText} numberOfLines={1}>{trip.destination_name || "Unknown destination"}</Text>
+                    </View>
                   </View>
                   <TripMiniMap trip={trip} />
                   <View style={styles.tripStats}>
@@ -1323,6 +1378,41 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => !purchasing && setPremiumOpen(false)} disabled={purchasing}>
             <Text style={styles.premiumCancel}>Maybe later</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* ═══ TRIP PRIVACY MENU ═══ */}
+      <Modal visible={!!tripMenuTrip} transparent animationType="fade" onRequestClose={() => setTripMenuTrip(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setTripMenuTrip(null)} />
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{tripMenuTrip ? tripDisplayName(tripMenuTrip) : ""}</Text>
+            <TouchableOpacity onPress={() => setTripMenuTrip(null)}><X size={20} color="#8A8A9A" /></TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={styles.tripMenuOption}
+            activeOpacity={0.7}
+            onPress={() => tripMenuTrip && handleToggleTripVisibility(tripMenuTrip)}
+          >
+            {tripMenuTrip?.is_public ? (
+              <>
+                <Lock size={18} color="#FF6B35" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tripMenuOptionTitle}>Make Private</Text>
+                  <Text style={styles.tripMenuOptionSub}>Only you will be able to see this trip</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <Globe2 size={18} color="#FF6B35" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tripMenuOptionTitle}>Make Public</Text>
+                  <Text style={styles.tripMenuOptionSub}>Other drivers will be able to see this trip</Text>
+                </View>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </Modal>
@@ -1635,15 +1725,29 @@ const styles = StyleSheet.create({
 
   // Trips
   tripCard: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  tripHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  tripHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10, gap: 8 },
+  tripTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1, flexWrap: "wrap" },
+  tripCodeBadge: { borderWidth: 1, borderColor: "rgba(255,107,53,0.4)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  tripCodeText: { fontSize: 11, fontWeight: "800", color: "#FF6B35" },
+  tripHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  tripDateBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.06)", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 },
+  tripDateText: { fontSize: 11, fontWeight: "700", color: "#B0B0BE" },
+  tripMenuBtn: { padding: 4 },
   tripRoute: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
-  tripDest: { fontSize: 14, fontWeight: "700", color: "#FFFFFF", flex: 1 },
+  tripDest: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
   tripFast: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(255,215,0,0.12)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   tripFastText: { fontSize: 9, fontWeight: "800", color: "#FFD700" },
+  tripAddresses: { marginBottom: 10, gap: 6 },
+  tripAddressRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tripAddressDot: { width: 8, height: 8, borderRadius: 4 },
+  tripAddressText: { fontSize: 12.5, fontWeight: "600", color: "#B0B0BE", flex: 1 },
   tripStats: { flexDirection: "row", justifyContent: "space-between" },
   tripStat: { flexDirection: "row", alignItems: "center", gap: 4 },
   tripStatText: { fontSize: 12, fontWeight: "700", color: "#B0B0BE" },
   tripMapWrap: { height: 120, borderRadius: 12, overflow: "hidden", marginBottom: 10, backgroundColor: "#12121C" },
+  tripMenuOption: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, marginBottom: 8 },
+  tripMenuOptionTitle: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  tripMenuOptionSub: { fontSize: 12, color: "#8A8A9A", marginTop: 2 },
   tripMapDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: "#0A0A0F" },
 
   // Friend search + cards
