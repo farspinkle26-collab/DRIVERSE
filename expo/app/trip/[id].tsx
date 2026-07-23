@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil } from "lucide-react-native";
@@ -154,6 +155,8 @@ export default function TripDetailScreen() {
               customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               onMapReady={fitToPoints}
             >
+              <MapboxTileLayer dark={isDark} />
+
               {coords.length > 1 && (
                 <>
                   <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />

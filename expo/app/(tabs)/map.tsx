@@ -13,6 +13,7 @@ import {
   Keyboard,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import Svg, { Circle as SvgCircle, Path as SvgPath } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -1619,6 +1620,8 @@ export default function MapScreen() {
         customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         followsUserLocation={false}
       >
+        <MapboxTileLayer dark={isDark} />
+
         {/* Landmark Markers — neon badge image + name + distance label (design spec).
             Always rendered, regardless of recording/online/party/chat state, so the
             map's POI layer never disappears mid-session. */}

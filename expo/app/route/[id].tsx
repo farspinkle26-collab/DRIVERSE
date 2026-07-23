@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import * as Linking from "expo-linking";
@@ -280,6 +281,8 @@ export default function RouteDetailScreen() {
               pitchEnabled={false}
               rotateEnabled={false}
             >
+              <MapboxTileLayer dark={isDark} />
+
               {coords.length > 1 && (
                 <>
                   <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
