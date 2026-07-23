@@ -192,8 +192,6 @@ CREATE TABLE IF NOT EXISTS public.payment_transactions (
   currency TEXT DEFAULT 'IDR',
   status TEXT CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'cancelled')) DEFAULT 'pending',
   payment_url TEXT,
-  xendit_invoice_id TEXT,
-  xendit_payment_id TEXT,
   paid_at TIMESTAMP WITH TIME ZONE,
   expired_at TIMESTAMP WITH TIME ZONE,
   failure_code TEXT,

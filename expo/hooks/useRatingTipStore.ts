@@ -213,7 +213,7 @@ export const [RatingTipContext, useRatingTip] = createContextHook(() => {
         createdAt: Date.now(),
       };
 
-      // Process tip payment through Xendit
+      // Process tip payment
       if (tipData.paymentMethod === 'separate_payment') {
         // For separate payment, create a new payment transaction
         const paymentResult = await processPayment({
@@ -228,7 +228,6 @@ export const [RatingTipContext, useRatingTip] = createContextHook(() => {
         });
 
         if (paymentResult) {
-          newTip.xenditPaymentId = paymentResult.xenditPaymentId;
           newTip.status = 'processing';
         } else {
           throw new Error('Failed to process tip payment');
@@ -280,8 +279,7 @@ export const [RatingTipContext, useRatingTip] = createContextHook(() => {
 
   const updateTipStatus = useCallback(async (
     tipId: string,
-    status: TipTransaction['status'],
-    xenditPaymentId?: string
+    status: TipTransaction['status']
   ): Promise<boolean> => {
     try {
       setLoading(true);
@@ -292,9 +290,8 @@ export const [RatingTipContext, useRatingTip] = createContextHook(() => {
           const updatedTip = {
             ...tip,
             status,
-            xenditPaymentId: xenditPaymentId || tip.xenditPaymentId,
           };
-          
+
           if (status === 'completed') {
             updatedTip.completedAt = Date.now();
           }

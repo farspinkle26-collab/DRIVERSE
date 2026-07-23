@@ -2,14 +2,10 @@ import React, { useEffect, useState, useRef } from "react";
 import { StyleSheet, Text, View, ScrollView, Image, Platform, TouchableOpacity, Animated } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MapPin, Truck, Wrench, AlertTriangle, Shield, Car, Plus, Zap, User, Search, Info } from "lucide-react-native";
+import { Truck, Shield, Car, User, Info } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Button from "@/components/Button";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useTowing } from "@/hooks/useTowingStore";
 import { useTheme } from "@/hooks/useThemeStore";
-import RequestCard from "@/components/RequestCard";
-import DriverCard from "@/components/DriverCard";
 import Card from "@/components/Card";
 import TowingTypeDetailModal from "@/components/TowingTypeDetailModal";
 import { towingTypes } from "@/constants/mockData";
@@ -21,11 +17,6 @@ export default function HomeScreen() {
   const { user, isCustomer } = useAuth();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const { 
-    activeRequest, 
-    requestHistory,
-    availableDrivers
-  } = useTowing();
   const [greeting, setGreeting] = useState("Selamat siang");
   const [currentTextIndex, setCurrentTextIndex] = useState(0);
   const [selectedTowingType, setSelectedTowingType] = useState<TowingType | null>(null);
@@ -169,32 +160,6 @@ export default function HomeScreen() {
     ).start();
   }, [galaxyAnim1, galaxyAnim2, galaxyAnim3, galaxyRotate]);
 
-  const handleRequestTow = () => {
-    router.push("/request-tow" as any);
-  };
-
-  const handleViewActiveRequest = () => {
-    router.push({
-      pathname: "/request-details" as any,
-      params: { id: activeRequest?.id }
-    });
-  };
-
-  const handleViewHistory = () => {
-    router.push("/(tabs)/orders" as any);
-  };
-
-  const handleServiceSelect = (serviceType: string) => {
-    router.push({
-      pathname: "/request-tow" as any,
-      params: { serviceType }
-    });
-  };
-
-  const handleTowingPlusPress = () => {
-    router.push("/towing-plus" as any);
-  };
-
   const handleInsurancePress = () => {
     router.push("/(tabs)/member-asuransi" as any);
   };
@@ -205,10 +170,6 @@ export default function HomeScreen() {
 
   const handleGoogleMapsDemo = () => {
     router.push("/google-maps-demo" as any);
-  };
-
-  const handleTowingRecommendation = () => {
-    router.push("/towing-recommendation" as any);
   };
 
   const handleShowTowingInfo = (serviceId: string) => {
@@ -539,17 +500,6 @@ export default function HomeScreen() {
               <Text style={[styles.heroSubtitle, { color: theme.textOnGradient }]}>
                 Minta layanan derek hanya dengan beberapa ketukan
               </Text>
-              <Animated.View style={[styles.heroButtonContainer, { transform: [{ translateX: slideAnim }] }]}>
-                <Button
-                  title="Minta Derek"
-                  onPress={handleRequestTow}
-                  variant="primary"
-                  size="medium"
-                  style={[styles.heroButton, { backgroundColor: theme.white, borderColor: theme.white }]}
-                  textStyle={[styles.heroButtonText, { color: theme.primary }]}
-                  icon={<MapPin size={18} color={theme.primary} />}
-                />
-              </Animated.View>
             </View>
             <Image
               source={{ 
@@ -564,23 +514,6 @@ export default function HomeScreen() {
 
       {/* Quick Access Banners */}
       <View style={styles.quickAccessContainer}>
-        {/* Towing+ Banner */}
-        <Card style={[styles.quickAccessBanner, { borderColor: theme.primary }]}>
-          <TouchableOpacity onPress={handleTowingPlusPress} activeOpacity={0.8}>
-            <View style={styles.bannerContent}>
-              <View style={[styles.bannerIcon, { backgroundColor: theme.primary + '20' }]}>
-                <Plus size={20} color={theme.primary} />
-              </View>
-              <View style={styles.bannerTextContainer}>
-                <Text style={[styles.quickBannerTitle, { color: theme.primary }]}>Towing+</Text>
-                <Text style={[styles.quickBannerSubtitle, { color: theme.textLight }]}>
-                  Transportasi & Golf Car
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Card>
-
         {/* Insurance Banner */}
         <Card style={[styles.quickAccessBanner, { borderColor: '#34C759' }]}>
           <TouchableOpacity onPress={handleInsurancePress} activeOpacity={0.8}>
@@ -597,9 +530,7 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         </Card>
-      </View>
 
-      <View style={styles.quickAccessContainer}>
         {/* ATPM Banner */}
         <Card style={[styles.quickAccessBanner, { borderColor: '#FF9500' }]}>
           <TouchableOpacity onPress={handleAtpmPress} activeOpacity={0.8}>
@@ -616,96 +547,7 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         </Card>
-
-        {/* Towing Recommendation Banner */}
-        <Card style={[styles.quickAccessBanner, { borderColor: '#007AFF' }]}>
-          <TouchableOpacity onPress={handleTowingRecommendation} activeOpacity={0.8}>
-            <View style={styles.bannerContent}>
-              <View style={[styles.bannerIcon, { backgroundColor: '#007AFF' + '20' }]}>
-                <Search size={20} color="#007AFF" />
-              </View>
-              <View style={styles.bannerTextContainer}>
-                <Text style={[styles.quickBannerTitle, { color: '#007AFF' }]}>Cari Derek</Text>
-                <Text style={[styles.quickBannerSubtitle, { color: theme.textLight }]}>
-                  Jenis yang pas untukmu
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Card>
       </View>
-
-      <View style={styles.quickAccessContainer}>
-        {/* Emergency Banner */}
-        <Card style={[styles.quickAccessBanner, { borderColor: '#FF3B30' }]}>
-          <TouchableOpacity onPress={() => handleServiceSelect('accident')} activeOpacity={0.8}>
-            <View style={styles.bannerContent}>
-              <Animated.View 
-                style={[
-                  styles.bannerIcon, 
-                  { 
-                    backgroundColor: '#FF3B30' + '20',
-                    transform: [{ 
-                      rotate: rotateAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0deg', '360deg']
-                      })
-                    }]
-                  }
-                ]}
-              >
-                <AlertTriangle size={20} color="#FF3B30" />
-              </Animated.View>
-              <View style={styles.bannerTextContainer}>
-                <Text style={[styles.quickBannerTitle, { color: '#FF3B30' }]}>Darurat</Text>
-                <Text style={[styles.quickBannerSubtitle, { color: theme.textLight }]}>
-                  Derek Kecelakaan
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Card>
-      </View>
-
-      {/* Active request section */}
-      {activeRequest && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.textDark }]}>Permintaan Aktif</Text>
-          </View>
-          <RequestCard
-            request={activeRequest}
-            onViewDetails={handleViewActiveRequest}
-          />
-        </View>
-      )}
-
-      {/* Recent history section */}
-      {requestHistory.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.textDark }]}>Riwayat Terbaru</Text>
-            <Button
-              title="Lihat Semua"
-              onPress={handleViewHistory}
-              variant="text"
-              size="small"
-            />
-          </View>
-          {requestHistory.slice(0, 2).map((request) => (
-            <RequestCard
-              key={request.id}
-              request={request}
-              onViewDetails={() => router.push({
-                pathname: "/request-details" as any,
-                params: { id: request.id }
-              })}
-            />
-          ))}
-        </View>
-      )}
-
-
 
       {/* All Towing Services section */}
       <View style={styles.section}>
@@ -759,14 +601,6 @@ export default function HomeScreen() {
                   >
                     <Info size={16} color={theme.textLight} />
                   </TouchableOpacity>
-                  <Button
-                    title="Pilih"
-                    onPress={() => handleServiceSelect(service.id)}
-                    variant="outline"
-                    size="small"
-                    style={[styles.serviceButton, { borderColor: service.color }]}
-                    textStyle={{ color: service.color, fontSize: 12 }}
-                  />
                 </View>
               </View>
               <Text style={[styles.serviceDescription, { color: theme.textLight }]}>
@@ -783,7 +617,6 @@ export default function HomeScreen() {
         visible={isModalVisible}
         onClose={handleCloseModal}
         towingType={selectedTowingType}
-        onSelectService={handleServiceSelect}
       />
     </View>
   );

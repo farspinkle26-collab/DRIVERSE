@@ -1,8 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useCallback, useMemo } from 'react';
-import { PaymentSplit, PaymentTransaction, XenditAccount, XenditSplitRule } from '@/types';
+import { PaymentSplit, PaymentTransaction } from '@/types';
 import { supabase } from '@/lib/supabase';
-import xenditService from '@/lib/xendit';
 
 export const [PaymentContext, usePaymentStore] = createContextHook(() => {
   const [loading, setLoading] = useState<boolean>(false);
@@ -10,6 +9,11 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
   const [paymentSplits, setPaymentSplits] = useState<PaymentSplit[]>([]);
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
 
+  // NOTE: this previously created a sub-account with Xendit and persisted it
+  // to a Xendit-specific table; that integration has been removed. This now
+  // just generates a local account identifier so the rest of the payment
+  // split flow (which is provider-agnostic) keeps working. Wire this up to
+  // a real payment provider before using it for actual payouts.
   const createCompanySubAccount = useCallback(async (companyData: {
     companyId: string;
     email: string;
@@ -17,35 +21,15 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
     country?: string;
   }): Promise<string | null> => {
     console.log('Creating sub-account for company:', companyData.companyId);
-    
+
     try {
       setLoading(true);
       setError(null);
 
-      const xenditAccount = await xenditService.createSubAccount({
-        email: companyData.email,
-        businessName: companyData.businessName,
-        country: companyData.country,
-      });
+      const accountId = `acct_${companyData.companyId}_${Date.now()}`;
 
-      const { error: dbError } = await supabase
-        .from('company_xendit_accounts')
-        .insert({
-          company_id: companyData.companyId,
-          xendit_account_id: xenditAccount.id,
-          email: xenditAccount.email,
-          business_name: xenditAccount.public_profile.business_name,
-          status: xenditAccount.status,
-          created_at: new Date().toISOString(),
-        });
-
-      if (dbError) {
-        console.error('Failed to save Xendit account to database:', dbError);
-        throw new Error('Failed to save account information');
-      }
-
-      console.log('Company sub-account created successfully:', xenditAccount.id);
-      return xenditAccount.id;
+      console.log('Company sub-account created successfully:', accountId);
+      return accountId;
     } catch (err) {
       console.error('Error creating company sub-account:', err);
       setError(err instanceof Error ? err.message : 'Failed to create sub-account');
@@ -72,19 +56,18 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
       setLoading(true);
       setError(null);
 
-      const splitRule = await xenditService.createSplitRule({
-        companyAccountId,
-        companyPercentage,
-        platformPercentage,
-      });
+      // NOTE: split rule creation previously delegated to Xendit; that
+      // integration has been removed, so a local split rule id is used
+      // instead. Wire this up to a real payment provider before relying on
+      // it for actual revenue splitting.
+      const splitRuleId = `split_${companyId}_${Date.now()}`;
+      const platformAccountId = process.env.EXPO_PUBLIC_PLATFORM_ACCOUNT_ID || '';
 
-      const platformAccountId = process.env.EXPO_PUBLIC_XENDIT_PLATFORM_ACCOUNT_ID || '';
-      
       const paymentSplit: PaymentSplit = {
         companyId,
         companyAccountId,
         platformAccountId,
-        splitRuleId: splitRule.id,
+        splitRuleId,
         companyPercentage,
         platformPercentage,
         isActive: true,
@@ -112,8 +95,8 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
       }
 
       setPaymentSplits(prev => [...prev, paymentSplit]);
-      console.log('Payment split created successfully:', splitRule.id);
-      return splitRule.id;
+      console.log('Payment split created successfully:', splitRuleId);
+      return splitRuleId;
     } catch (err) {
       console.error('Error creating payment split:', err);
       setError(err instanceof Error ? err.message : 'Failed to create payment split');
@@ -159,20 +142,11 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
         throw new Error('No active payment split found for this company');
       }
 
-      const externalId = `tow_${towRequestId}_${Date.now()}`;
-      
-      const xenditPayment = await xenditService.createPayment({
-        externalId,
-        amount,
-        payerEmail,
-        description,
-        splitRuleId: splitData.split_rule_id,
-        paymentMethod: paymentMethod.toUpperCase(),
-      });
-
+      // NOTE: payment creation previously delegated to Xendit; that
+      // integration has been removed. Wire this up to a real payment
+      // provider before relying on it for actual payment collection.
       const companyAmount = Math.floor(amount * (splitData.company_percentage / 100));
       const platformAmount = amount - companyAmount;
-      const xenditFee = Math.floor(amount * 0.029); // Approximate Xendit fee
       const platformFee = Math.floor(amount * 0.05); // Platform service fee
 
       const transaction: PaymentTransaction = {
@@ -185,7 +159,6 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
         currency: 'IDR',
         status: 'pending',
         paymentMethod,
-        xenditPaymentId: xenditPayment.id,
         splitRuleId: splitData.split_rule_id,
         splits: {
           companyAmount,
@@ -193,7 +166,6 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
           driverAmount: driverId ? Math.floor(companyAmount * 0.8) : undefined,
         },
         fees: {
-          xenditFee,
           platformFee,
         },
         createdAt: Date.now(),
@@ -211,12 +183,10 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
           currency: transaction.currency,
           status: transaction.status,
           payment_method: transaction.paymentMethod,
-          xendit_payment_id: transaction.xenditPaymentId,
           split_rule_id: transaction.splitRuleId,
           company_amount: transaction.splits.companyAmount,
           platform_amount: transaction.splits.platformAmount,
           driver_amount: transaction.splits.driverAmount,
-          xendit_fee: transaction.fees.xenditFee,
           platform_fee: transaction.fees.platformFee,
           created_at: new Date(transaction.createdAt).toISOString(),
         });
@@ -240,8 +210,7 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
 
   const updatePaymentStatus = useCallback(async (
     transactionId: string,
-    status: PaymentTransaction['status'],
-    xenditPaymentId?: string
+    status: PaymentTransaction['status']
   ): Promise<boolean> => {
     try {
       setLoading(true);
@@ -364,7 +333,6 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
         currency: row.currency,
         status: row.status,
         paymentMethod: row.payment_method,
-        xenditPaymentId: row.xendit_payment_id,
         splitRuleId: row.split_rule_id,
         splits: {
           companyAmount: row.company_amount,
@@ -372,7 +340,6 @@ export const [PaymentContext, usePaymentStore] = createContextHook(() => {
           driverAmount: row.driver_amount,
         },
         fees: {
-          xenditFee: row.xendit_fee,
           platformFee: row.platform_fee,
         },
         createdAt: new Date(row.created_at).getTime(),

@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthContext } from "@/hooks/useAuthStore";
-import { TowingContext } from "@/hooks/useTowingStore";
 import { ThemeContext } from "@/hooks/useThemeStore";
 import { TransactionContext } from "@/hooks/useTransactionStore";
 import { PaymentContext } from "@/hooks/usePaymentStore";
@@ -39,18 +38,11 @@ function RootLayoutNav() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="select-car" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="request-tow" />
-      <Stack.Screen name="request-details" />
-      <Stack.Screen name="map-selection" />
-      <Stack.Screen name="location-confirmation" />
-      <Stack.Screen name="towing-recommendation" />
-      <Stack.Screen name="track-order" />
       <Stack.Screen name="terms-and-conditions" />
       <Stack.Screen name="top-up" options={{ headerShown: false }} />
       <Stack.Screen name="transaction-history" options={{ headerShown: false }} />
       <Stack.Screen name="payment-history" options={{ headerShown: false }} />
       <Stack.Screen name="top-up-history" options={{ headerShown: false }} />
-      <Stack.Screen name="payment-checkout" options={{ headerShown: false }} />
       <Stack.Screen name="chat" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
@@ -101,32 +93,30 @@ export default function RootLayout() {
             <AuthContext>
               <PaymentContext>
                 <TransactionContext>
-                  <TowingContext>
-                    <RealtimeContext>
-                      <NotificationContext>
-                        <ChatContext>
-                        <XPProvider>
-                          <QuestsProvider>
-                            <OnlineUsersProvider>
-                              <PartyProvider>
-                                <EventsProvider>
-                                  <GroupChatProvider>
-                                    <RoutesProvider>
-                                      <ActiveCarProvider>
-                                        <RootLayoutNav />
-                                        <NotificationBanner />
-                                      </ActiveCarProvider>
-                                    </RoutesProvider>
-                                  </GroupChatProvider>
-                                </EventsProvider>
-                              </PartyProvider>
-                            </OnlineUsersProvider>
-                          </QuestsProvider>
-                        </XPProvider>
-                      </ChatContext>
-                      </NotificationContext>
-                    </RealtimeContext>
-                  </TowingContext>
+                  <RealtimeContext>
+                    <NotificationContext>
+                      <ChatContext>
+                      <XPProvider>
+                        <QuestsProvider>
+                          <OnlineUsersProvider>
+                            <PartyProvider>
+                              <EventsProvider>
+                                <GroupChatProvider>
+                                  <RoutesProvider>
+                                    <ActiveCarProvider>
+                                      <RootLayoutNav />
+                                      <NotificationBanner />
+                                    </ActiveCarProvider>
+                                  </RoutesProvider>
+                                </GroupChatProvider>
+                              </EventsProvider>
+                            </PartyProvider>
+                          </OnlineUsersProvider>
+                        </QuestsProvider>
+                      </XPProvider>
+                    </ChatContext>
+                    </NotificationContext>
+                  </RealtimeContext>
                 </TransactionContext>
               </PaymentContext>
             </AuthContext>

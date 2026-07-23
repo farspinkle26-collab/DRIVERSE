@@ -18,7 +18,7 @@ The app now enforces **strict account separation** with three distinct account t
 
 **Permissions**:
 - ✅ Request towing services
-- ✅ Pay via Xendit (virtual account, e-wallet, bank transfer)
+- ✅ Pay for services (virtual account, e-wallet, bank transfer)
 - ✅ Chat with assigned driver only
 - ✅ Rate and tip drivers after service completion
 - ✅ View order history and receipts
@@ -48,7 +48,7 @@ The app now enforces **strict account separation** with three distinct account t
 
 **Permissions**:
 - ✅ Accept towing jobs (one at a time)
-- ✅ Receive payments via Xendit payouts
+- ✅ Receive payouts to bank account or e-wallet
 - ✅ Chat with assigned customers
 - ✅ View job history and earnings
 - ✅ Update availability status
@@ -121,14 +121,14 @@ The app now enforces **strict account separation** with three distinct account t
 ## 💰 Payment & Payout System
 
 ### Customer Payments
-- Pay via **Xendit** (virtual account, e-wallet, bank transfer)
+- Pay via virtual account, e-wallet, or bank transfer
 - Payments are **split automatically**:
   - Driver/Company receives their share
   - Platform takes commission
-  - Xendit processes transaction fees
+  - Payment processing fees are deducted
 
 ### Driver Payouts
-- Receive payments via **Xendit disbursements**
+- Receive payments via bank disbursements
 - Payout to verified bank account or e-wallet
 - **Independent drivers**: Keep 70-80% of service fee
 - **Company drivers**: Split based on company agreement
