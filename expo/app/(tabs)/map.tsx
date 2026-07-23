@@ -79,17 +79,13 @@ import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
-import CreateEventModal, {
-  EventTypeIcon,
-  eventTypeColor,
-  eventTypeLabel,
-} from "@/components/CreateEventModal";
+import { EventTypeIcon, eventTypeColor, eventTypeLabel } from "@/components/EventMeta";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -620,10 +616,6 @@ export default function MapScreen() {
 
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
-  const [isEventPickMode, setIsEventPickMode] = useState(false);
-  const [eventCoordinate, setEventCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [eventLocationName, setEventLocationName] = useState<string | null>(null);
-  const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [eventActionBusy, setEventActionBusy] = useState(false);
   // Keep the selected event fresh as realtime updates flow in
@@ -1229,42 +1221,14 @@ export default function MapScreen() {
     setRouteSteps([]);
   }, []);
 
-  // --- Map press: drop the event pin at tapped location (only when event pick mode is ON) ---
-  const mapPressCooldownRef = useRef(0);
-  const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }, placeName?: string) => {
-    if (!isEventPickMode) return;
-    const now = Date.now();
-    if (now - mapPressCooldownRef.current < 200) return;
-    mapPressCooldownRef.current = now;
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-
-    // Event building mode: drop the event pin and open the builder
-    setIsEventPickMode(false);
-    setEventCoordinate({ latitude, longitude });
-    setEventLocationName(placeName ?? null);
-    setShowCreateEvent(true);
-    mapRef.current?.animateCamera(
-      { center: { latitude, longitude }, zoom: 16, pitch: 40 },
-      { duration: 400 }
-    );
-  }, [isEventPickMode]);
-
-  // --- POI tap: pick a real place from Google's own map database (only while
-  // actively picking an event location — see MAP_STYLE_*_PICK, which turns
-  // Google's native POI icons back on for this interaction). ---
-  const handlePoiClick = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number }; name?: string } }) => {
-    if (!isEventPickMode) return;
-    handleMapPress({ nativeEvent: { coordinate: event.nativeEvent.coordinate } }, event.nativeEvent.name);
-  }, [isEventPickMode, handleMapPress]);
-
   // --- Event handlers ---
-  const toggleEventPickMode = useCallback(() => {
+  const openCreateEvent = useCallback(() => {
     if (!user) {
       Alert.alert("Sign In Required", "Create an account to build events on the map");
       return;
     }
-    setIsEventPickMode((prev) => !prev);
-  }, [user]);
+    router.push("/create-event" as any);
+  }, [user, router]);
 
   // --- Drive: instant one-tap toggle to go live on the map (the app's main action) ---
   const toggleDrive = useCallback(() => {
@@ -1278,12 +1242,6 @@ export default function MapScreen() {
       goOnline();
     }
   }, [user, isUserOnline, goOnline, goOffline]);
-
-  const handleEventCreated = useCallback(() => {
-    setShowCreateEvent(false);
-    setEventCoordinate(null);
-    setEventLocationName(null);
-  }, []);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
@@ -1658,13 +1616,7 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={
-          isEventPickMode
-            ? (isDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
-            : (isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
-        }
-        onPress={handleMapPress}
-        onPoiClick={handlePoiClick}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         followsUserLocation={false}
       >
         {/* Landmark Markers — neon badge image + name + distance label (design spec).
@@ -1951,15 +1903,6 @@ export default function MapScreen() {
             </SettledMarker>
           );
         })}
-
-        {/* Pending event pin (placed, builder open) */}
-        {eventCoordinate && showCreateEvent && (
-          <Marker coordinate={eventCoordinate} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.customPin}>
-              <Flag size={30} color="#FF6B35" fill="#FF6B3530" />
-            </View>
-          </Marker>
-        )}
 
         {/* User marker — coded SVG puck (no bitmap asset) */}
         {userLocation && (
@@ -2434,7 +2377,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   TOP CHROME — greeting pill + featured event banner   */}
       {/* ===================================================== */}
-      {!isRecording && !isEventPickMode && !searchOpen && (
+      {!isRecording && !searchOpen && (
         <Animated.View
           style={[styles.topChrome, { top: insets.top + 10, opacity: fadeIn }]}
           pointerEvents="box-none"
@@ -2549,11 +2492,11 @@ export default function MapScreen() {
 
           <View style={styles.labeledBtn}>
             <TouchableOpacity
-              style={[styles.actionBtn, isEventPickMode && styles.actionBtnActive]}
-              onPress={toggleEventPickMode}
+              style={styles.actionBtn}
+              onPress={openCreateEvent}
               activeOpacity={0.7}
             >
-              <MapPin size={18} color={isEventPickMode ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+              <MapPin size={18} color="#FFFFFF" strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={styles.actionBtnLabel}>Event</Text>
           </View>
@@ -2691,7 +2634,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   LIVE FEED — bottom-left panel                        */}
       {/* ===================================================== */}
-      {hudIdle && !searchOpen && !isEventPickMode && (
+      {hudIdle && !searchOpen && (
         <Animated.View
           style={[styles.liveFeedPanel, { bottom: insets.bottom + 168, opacity: fadeIn }]}
         >
@@ -3142,14 +3085,6 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* --- Event pick mode banner --- */}
-      {isEventPickMode && (
-        <View style={[styles.eventPickBanner, { top: insets.top + 16 }]} pointerEvents="none">
-          <Flag size={14} color="#FF6B35" />
-          <Text style={styles.eventPickBannerText}>Tap the map to place your event</Text>
-        </View>
-      )}
-
       {/* --- Selected event card --- */}
       {selectedEvent && !isRecording && (() => {
         const ev = selectedEvent;
@@ -3259,19 +3194,6 @@ export default function MapScreen() {
           </View>
         );
       })()}
-
-      {/* --- Event builder modal --- */}
-      <CreateEventModal
-        visible={showCreateEvent}
-        coordinate={eventCoordinate}
-        locationName={eventLocationName}
-        onClose={() => {
-          setShowCreateEvent(false);
-          setEventCoordinate(null);
-          setEventLocationName(null);
-        }}
-        onCreated={handleEventCreated}
-      />
 
       {/* --- Save & Share Route modal --- */}
       <SaveRouteModal
@@ -5338,25 +5260,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "800",
-  },
-  eventPickBanner: {
-    position: "absolute",
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(10, 10, 20, 0.92)",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.35)",
-    zIndex: 200,
-  },
-  eventPickBannerText: {
-    color: "#FF6B35",
-    fontSize: 13,
-    fontWeight: "600",
   },
   eventCard: {
     position: "absolute",
