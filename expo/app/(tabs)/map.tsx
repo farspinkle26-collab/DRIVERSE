@@ -2578,6 +2578,20 @@ export default function MapScreen() {
 
           <View style={styles.labeledBtn}>
             <TouchableOpacity
+              style={[styles.actionBtn, placesLayerOpen && styles.actionBtnActive]}
+              onPress={() => {
+                setPlacesLayerOpen((v) => !v);
+                setSelectedPlace(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <Coffee size={18} color={placesLayerOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Places</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
               style={styles.actionBtn}
               onPress={openCreateEvent}
               activeOpacity={0.7}
