@@ -12,6 +12,7 @@ import {
   TextInput,
   Keyboard,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
@@ -89,7 +90,7 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
 import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
@@ -480,7 +481,20 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark } = useTheme();
+
+  // Map tile/style preference — intentionally separate from the app-wide theme so that
+  // switching the map's Light/Dark style doesn't flip the rest of the app's UI theme.
+  const [mapStyleDark, setMapStyleDark] = useState<boolean>(isDark);
+  useEffect(() => {
+    AsyncStorage.getItem("mapStyleDark").then((stored) => {
+      if (stored === "true" || stored === "false") setMapStyleDark(stored === "true");
+    }).catch(() => {});
+  }, []);
+  const setMapStyle = useCallback((dark: boolean) => {
+    setMapStyleDark(dark);
+    AsyncStorage.setItem("mapStyleDark", String(dark)).catch(() => {});
+  }, []);
 
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -1628,13 +1642,17 @@ export default function MapScreen() {
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+        customMapStyle={
+          showDropPinHint
+            ? (mapStyleDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
+            : (mapStyleDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
+        }
         followsUserLocation={false}
         onPress={handleMapPress}
         onLongPress={handleMapLongPress}
         onRegionChangeComplete={handlePlacesRegionChange}
       >
-        <MapboxTileLayer dark={isDark} />
+        <MapboxTileLayer dark={mapStyleDark} />
 
         {placesLayerOpen && (
           <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
@@ -2642,20 +2660,20 @@ export default function MapScreen() {
           <Text style={styles.filtersTitle}>Map Style</Text>
           <View style={styles.mapStyleToggle}>
             <TouchableOpacity
-              style={[styles.mapStyleOption, !isDark && styles.mapStyleOptionActive]}
+              style={[styles.mapStyleOption, !mapStyleDark && styles.mapStyleOptionActive]}
               activeOpacity={0.7}
-              onPress={() => { if (isDark) toggleTheme(); }}
+              onPress={() => setMapStyle(false)}
             >
-              <Sun size={16} color={!isDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
-              <Text style={[styles.mapStyleOptionText, !isDark && styles.mapStyleOptionTextActive]}>Light</Text>
+              <Sun size={16} color={!mapStyleDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
+              <Text style={[styles.mapStyleOptionText, !mapStyleDark && styles.mapStyleOptionTextActive]}>Light</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.mapStyleOption, isDark && styles.mapStyleOptionActive]}
+              style={[styles.mapStyleOption, mapStyleDark && styles.mapStyleOptionActive]}
               activeOpacity={0.7}
-              onPress={() => { if (!isDark) toggleTheme(); }}
+              onPress={() => setMapStyle(true)}
             >
-              <Moon size={16} color={isDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
-              <Text style={[styles.mapStyleOptionText, isDark && styles.mapStyleOptionTextActive]}>Dark</Text>
+              <Moon size={16} color={mapStyleDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
+              <Text style={[styles.mapStyleOptionText, mapStyleDark && styles.mapStyleOptionTextActive]}>Dark</Text>
             </TouchableOpacity>
           </View>
 
