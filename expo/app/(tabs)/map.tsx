@@ -1172,7 +1172,7 @@ export default function MapScreen() {
       Alert.alert("Sign In Required", "Create an account to build events on the map");
       return;
     }
-    router.push("/create-event" as any);
+    router.push({ pathname: "/community", params: { tab: "events" } } as any);
   }, [user, router]);
 
   // --- Drive: instant one-tap toggle to go live on the map (the app's main action) ---
@@ -2659,7 +2659,7 @@ export default function MapScreen() {
           <View style={styles.labeledBtn}>
             <TouchableOpacity
               style={styles.stackBtn}
-              onPress={() => router.push("/(tabs)/drive" as any)}
+              onPress={() => router.push({ pathname: "/community", params: { tab: "convoy" } } as any)}
               activeOpacity={0.7}
             >
               <Users size={20} color="#FFFFFF" strokeWidth={2.2} />

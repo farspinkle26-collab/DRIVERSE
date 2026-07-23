@@ -60,7 +60,6 @@ function RootLayoutNav() {
       <Stack.Screen name="convoy/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]/manage" options={{ headerShown: false }} />
-      <Stack.Screen name="create-event" options={{ headerShown: false, presentation: "modal" }} />
     </Stack>
   );
 }
