@@ -22,15 +22,13 @@ import {
   Navigation2,
   RefreshCw,
 } from "lucide-react-native";
-import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
-import { searchNearby } from "@/lib/mapboxApi";
+import { fetchNearbyPlaces } from "@/lib/placesApi";
 
 type PlaceKind = "cafe" | "workshop";
 
 const KIND_CONFIG: Record<PlaceKind, {
   title: string;
   subtitle: string;
-  mapboxQueries: string[];
   icon: React.FC<{ size: number; color: string }>;
   color: string;
   emptyLabel: string;
@@ -38,7 +36,6 @@ const KIND_CONFIG: Record<PlaceKind, {
   cafe: {
     title: "Café Finder",
     subtitle: "Nearest pit stops & hangouts",
-    mapboxQueries: ["cafe", "kafe", "coffee shop"],
     icon: Coffee,
     color: "#8B5CF6",
     emptyLabel: "cafés",
@@ -46,12 +43,19 @@ const KIND_CONFIG: Record<PlaceKind, {
   workshop: {
     title: "Workshops",
     subtitle: "Nearest tuning & repair shops",
-    mapboxQueries: ["car repair", "bengkel mobil", "auto workshop"],
     icon: Wrench,
     color: "#F59E0B",
     emptyLabel: "workshops",
   },
 };
+
+function vicinityFromTags(tags: Record<string, string>): string | undefined {
+  if (tags["addr:full"]) return tags["addr:full"];
+  const street = tags["addr:street"];
+  const houseNumber = tags["addr:housenumber"];
+  if (street) return houseNumber ? `${street} ${houseNumber}` : street;
+  return undefined;
+}
 
 interface NearbyPlace {
   id: string;
@@ -97,30 +101,24 @@ export default function NearbyPlacesScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchNearby = useCallback(async (coords: { latitude: number; longitude: number }) => {
-    if (!MAPBOX_ACCESS_TOKEN) {
-      setError("Mapbox access token not configured");
-      setPlaces([]);
-      return;
-    }
-    try {
-      const candidates = await searchNearby(config.mapboxQueries, coords);
+    const { places: candidates, error: fetchError } = await fetchNearbyPlaces({
+      lat: coords.latitude,
+      lng: coords.longitude,
+      category: kind,
+    });
 
-      const mapped: NearbyPlace[] = candidates.map((place) => ({
-        id: place.id,
-        name: place.name,
-        vicinity: place.address,
-        lat: place.latitude,
-        lng: place.longitude,
-        distanceMeters: haversineMeters(coords, { latitude: place.latitude, longitude: place.longitude }),
-      }));
-      mapped.sort((a, b) => a.distanceMeters - b.distanceMeters);
-      setPlaces(mapped);
-      setError(mapped.length === 0 ? `No nearby ${config.emptyLabel} found` : null);
-    } catch {
-      setPlaces([]);
-      setError("Could not reach Mapbox");
-    }
-  }, [config.mapboxQueries, config.emptyLabel]);
+    const mapped: NearbyPlace[] = candidates.map((place) => ({
+      id: place.id,
+      name: place.name,
+      vicinity: vicinityFromTags(place.tags),
+      lat: place.lat,
+      lng: place.lng,
+      distanceMeters: haversineMeters(coords, { latitude: place.lat, longitude: place.lng }),
+    }));
+    mapped.sort((a, b) => a.distanceMeters - b.distanceMeters);
+    setPlaces(mapped);
+    setError(fetchError ?? (mapped.length === 0 ? `No nearby ${config.emptyLabel} found` : null));
+  }, [kind, config.emptyLabel]);
 
   const locateAndFetch = useCallback(async () => {
     setError(null);
