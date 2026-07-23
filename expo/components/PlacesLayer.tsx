@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { StyleSheet, View, Text, TouchableOpacity, Modal, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
-import { Marker } from "react-native-maps";
+import { Marker } from "@/components/AppMap";
 import { X, Plus, MapPin } from "lucide-react-native";
 import Card from "@/components/Card";
 import Input from "@/components/Input";
