@@ -14,6 +14,9 @@ import {
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
+import { usePlaces } from "@/hooks/usePlaces";
+import type { NormalizedPlace } from "@/lib/placesApi";
 import Svg, { Circle as SvgCircle, Path as SvgPath } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -488,6 +491,13 @@ export default function MapScreen() {
   // Cafe state
   const [cafes, setCafes] = useState<CafePOI[]>([]);
   const [loadingCafes, setLoadingCafes] = useState(false);
+
+  // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass)
+  const places = usePlaces();
+  const [placesLayerOpen, setPlacesLayerOpen] = useState(false);
+  const [selectedPlace, setSelectedPlace] = useState<NormalizedPlace | null>(null);
+  const [submitPlaceCoord, setSubmitPlaceCoord] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [showSubmitPlaceModal, setShowSubmitPlaceModal] = useState(false);
 
   // Selected destination (cafe or custom tapped location)
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
@@ -1220,6 +1230,31 @@ export default function MapScreen() {
     setShowDropPinHint(false);
   }, [showDropPinHint]);
 
+  // --- Nearby places (OSM + community): fetch on category change or map pan ---
+  useEffect(() => {
+    if (!placesLayerOpen || !userLocation) return;
+    places.fetchForRegion(userLocation.latitude, userLocation.longitude, places.category);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placesLayerOpen, places.category, userLocation]);
+
+  const handlePlacesRegionChange = useCallback((region: { latitude: number; longitude: number }) => {
+    if (!placesLayerOpen) return;
+    places.fetchForRegion(region.latitude, region.longitude, places.category);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placesLayerOpen, places.category]);
+
+  // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
+  const handleMapLongPress = useCallback((event: any) => {
+    if (!placesLayerOpen) return;
+    if (!user) {
+      Alert.alert("Sign In Required", "Create an account to submit a place");
+      return;
+    }
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSubmitPlaceCoord({ latitude, longitude });
+    setShowSubmitPlaceModal(true);
+  }, [placesLayerOpen, user]);
+
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
     const { error } = await joinEvent(ev.id);
@@ -1596,8 +1631,14 @@ export default function MapScreen() {
         customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         followsUserLocation={false}
         onPress={handleMapPress}
+        onLongPress={handleMapLongPress}
+        onRegionChangeComplete={handlePlacesRegionChange}
       >
         <MapboxTileLayer dark={isDark} />
+
+        {placesLayerOpen && (
+          <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
+        )}
 
         {/* Landmark Markers — neon badge image + name + distance label (design spec).
             Always rendered, regardless of recording/online/party/chat state, so the
@@ -1914,6 +1955,53 @@ export default function MapScreen() {
           </SettledMarker>
         )}
       </MapView>
+
+      {/* ===================================================== */}
+      {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
+      {/* ===================================================== */}
+      {placesLayerOpen && !isRecording && (
+        <>
+          <PlacesFilterBar
+            active={places.category}
+            onChange={(cat) => {
+              places.setCategory(cat);
+              setSelectedPlace(null);
+            }}
+            style={[styles.placesFilterBar, { top: insets.top + 10 }]}
+          />
+          {places.loading && (
+            <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
+              <ActivityIndicator size="small" color="#FF6B35" />
+              <Text style={styles.placesLoadingText}>Loading nearby places…</Text>
+            </View>
+          )}
+          {places.error && !places.loading && (
+            <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
+              <Text style={styles.placesLoadingText}>{places.error}</Text>
+            </View>
+          )}
+          <SubmitPlaceFab
+            onPress={() => {
+              if (!user) {
+                Alert.alert("Sign In Required", "Create an account to submit a place");
+                return;
+              }
+              setSubmitPlaceCoord(userLocation);
+              setShowSubmitPlaceModal(true);
+            }}
+            style={styles.placesFab}
+          />
+        </>
+      )}
+
+      <PlaceDetailSheet place={selectedPlace} onClose={() => setSelectedPlace(null)} />
+
+      <SubmitPlaceModal
+        visible={showSubmitPlaceModal}
+        onClose={() => setShowSubmitPlaceModal(false)}
+        coordinate={submitPlaceCoord}
+        onSubmit={places.submitPlace}
+      />
 
       {/* --- Loading overlay --- */}
       {locating && (
@@ -2468,6 +2556,20 @@ export default function MapScreen() {
               <SlidersHorizontal size={18} color={filtersOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={styles.actionBtnLabel}>Filters</Text>
+          </View>
+
+          <View style={styles.labeledBtn}>
+            <TouchableOpacity
+              style={[styles.actionBtn, placesLayerOpen && styles.actionBtnActive]}
+              onPress={() => {
+                setPlacesLayerOpen((v) => !v);
+                setSelectedPlace(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <Coffee size={18} color={placesLayerOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+            </TouchableOpacity>
+            <Text style={styles.actionBtnLabel}>Places</Text>
           </View>
 
           <View style={styles.labeledBtn}>
@@ -3233,6 +3335,37 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  // Nearby places layer (OSM + community)
+  placesFilterBar: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 5,
+    justifyContent: "center",
+  },
+  placesLoadingPill: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(20,20,28,0.9)",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    zIndex: 5,
+  },
+  placesLoadingText: {
+    color: "#EAEAEA",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  placesFab: {
+    position: "absolute",
+    right: 16,
+    bottom: 140,
+    zIndex: 5,
   },
   // Loading
   loadingOverlay: {

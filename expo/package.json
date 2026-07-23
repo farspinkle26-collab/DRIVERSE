@@ -5,7 +5,8 @@
   "scripts": {
     "start": "bunx rork start -p b1wgosfqgvf871n3ggg51",
     "start-web": "bunx rork start -p b1wgosfqgvf871n3ggg51 --web",
-    "start-web-dev": "DEBUG=expo* bunx rork start -p b1wgosfqgvf871n3ggg51 --web"
+    "start-web-dev": "DEBUG=expo* bunx rork start -p b1wgosfqgvf871n3ggg51 --web",
+    "test": "bun test supabase/functions"
   },
   "dependencies": {
     "@ai-sdk/react": "^2.0.72",
