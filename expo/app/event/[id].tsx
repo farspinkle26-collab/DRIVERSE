@@ -13,7 +13,7 @@ import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Clock, Users, Check, Settings, MessageCircle } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useEvents } from "@/hooks/useEventsStore";
-import { eventTypeColor, eventTypeLabel, EventTypeIcon } from "@/components/CreateEventModal";
+import { eventTypeColor, eventTypeLabel, EventTypeIcon } from "@/components/EventMeta";
 import { supabase } from "@/lib/supabase";
 
 interface EventDetail {

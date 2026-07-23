@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
-import * as Location from "expo-location";
 import {
   ArrowLeft,
   Users,
@@ -27,7 +26,7 @@ import {
 import { useAuth } from "@/hooks/useAuthStore";
 import { useEvents } from "@/hooks/useEventsStore";
 import { useParty } from "@/hooks/usePartyStore";
-import CreateEventModal, { eventTypeColor, EventTypeIcon } from "@/components/CreateEventModal";
+import { eventTypeColor, EventTypeIcon } from "@/components/EventMeta";
 import CreateConvoyModal from "@/components/CreateConvoyModal";
 
 const ACCENT = "#3B82F6"; // Community blue (matches the Drive feature card)
@@ -57,10 +56,7 @@ export default function CommunityScreen() {
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const [createEventOpen, setCreateEventOpen] = useState(false);
   const [createConvoyOpen, setCreateConvoyOpen] = useState(false);
-  const [coordinate, setCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,29 +94,14 @@ export default function CommunityScreen() {
     if (result.error) setJoinError(result.error);
   }, [joinEvent, leaveEvent]);
 
-  const openCreateEvent = useCallback(async () => {
+  const openCreateEvent = useCallback(() => {
     if (!user?.country) {
       setJoinError("Set your country in your profile before creating an event");
       return;
     }
     setLocationError(null);
-    setLocating(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setLocationError("Location permission needed to pin an event");
-        setLocating(false);
-        return;
-      }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setCoordinate({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-      setCreateEventOpen(true);
-    } catch {
-      setLocationError("Couldn't get your location");
-    } finally {
-      setLocating(false);
-    }
-  }, [user?.country]);
+    router.push("/create-event" as any);
+  }, [user?.country, router]);
 
   const handleCreate = () => {
     if (tab === "convoy") setCreateConvoyOpen(true);
@@ -142,9 +123,8 @@ export default function CommunityScreen() {
           onPress={handleCreate}
           style={[styles.iconBtn, { backgroundColor: ACCENT + "26" }]}
           hitSlop={8}
-          disabled={locating}
         >
-          {locating ? <ActivityIndicator size="small" color={ACCENT} /> : <Plus size={20} color={ACCENT} />}
+          <Plus size={20} color={ACCENT} />
         </TouchableOpacity>
       </View>
 
@@ -353,12 +333,6 @@ export default function CommunityScreen() {
         ) : null}
       </ScrollView>
 
-      <CreateEventModal
-        visible={createEventOpen}
-        coordinate={coordinate}
-        onClose={() => setCreateEventOpen(false)}
-        onCreated={() => { setCreateEventOpen(false); fetchEvents(); }}
-      />
       <CreateConvoyModal
         visible={createConvoyOpen}
         onClose={() => setCreateConvoyOpen(false)}
