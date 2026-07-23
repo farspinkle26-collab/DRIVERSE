@@ -473,6 +473,8 @@ export default function MapScreen() {
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
   // Whether the selected pin has been confirmed (kept for marker emphasis styling)
   const [locationChosen, setLocationChosen] = useState(false);
+  // Hint shown right after going online, prompting the driver to drop a pin
+  const [showDropPinHint, setShowDropPinHint] = useState(false);
 
   // Navigation / routing state
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
@@ -1182,11 +1184,20 @@ export default function MapScreen() {
       return;
     }
     if (isUserOnline) {
+      setShowDropPinHint(false);
       goOffline();
     } else {
       goOnline();
+      setShowDropPinHint(true);
     }
   }, [user, isUserOnline, goOnline, goOffline]);
+
+  // Auto-dismiss the "drop the pin anywhere" hint a few seconds after going online
+  useEffect(() => {
+    if (!showDropPinHint) return;
+    const timer = setTimeout(() => setShowDropPinHint(false), 4000);
+    return () => clearTimeout(timer);
+  }, [showDropPinHint]);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
@@ -2635,6 +2646,14 @@ export default function MapScreen() {
               </TouchableOpacity>
             ))
           )}
+        </Animated.View>
+      )}
+
+      {/* Hint shown right after tapping Drive, prompting the driver to drop a pin */}
+      {isUserOnline && showDropPinHint && (
+        <Animated.View style={[styles.dropPinHint, { opacity: fadeIn }]} pointerEvents="none">
+          <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
+          <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
         </Animated.View>
       )}
 
@@ -4876,6 +4895,30 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.1)",
     shadowColor: "#000",
     shadowOpacity: 0.35,
+  },
+  dropPinHint: {
+    position: "absolute",
+    top: "42%",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(16, 16, 26, 0.94)",
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 107, 53, 0.4)",
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  dropPinHintText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
   onlineBannerLeft: {
     flexDirection: "row",
