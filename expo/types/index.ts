@@ -37,15 +37,6 @@ export interface BreakdownInfo {
   notes?: string;
 }
 
-export interface TowingType {
-  id: string;
-  name: string;
-  price: string;
-  description: string;
-  detailedDescription: string;
-  icon: string;
-}
-
 export interface ServiceType {
   id: string;
   name: string;
@@ -419,7 +410,6 @@ export interface CompanyRegistration {
     driverAppName?: string;
     hasCustomerApp: boolean;
     customerAppName?: string;
-    integratesWithTowingOnline: boolean;
     apiIntegrationCapable: boolean;
     gpsTrackingProvider?: string;
   };
