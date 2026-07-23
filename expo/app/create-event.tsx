@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import MapView, { PROVIDER_GOOGLE, Region } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
@@ -162,7 +163,9 @@ export default function CreateEventScreen() {
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={initialRegion}
               onRegionChangeComplete={handleRegionChangeComplete}
-            />
+            >
+              <MapboxTileLayer />
+            </MapView>
             <View style={styles.centerPin} pointerEvents="none">
               <Flag size={30} color="#FF6B35" fill="#FF6B3530" />
             </View>

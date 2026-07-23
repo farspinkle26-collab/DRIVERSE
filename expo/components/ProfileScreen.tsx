@@ -57,6 +57,7 @@ import {
   Globe2,
 } from "lucide-react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "./MapboxTileLayer";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -118,6 +119,8 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
         rotateEnabled={false}
         liteMode={Platform.OS === "android"}
       >
+        <MapboxTileLayer dark={isDark} />
+
         {hasPath && (
           <>
             <Polyline coordinates={coords} strokeWidth={7} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />

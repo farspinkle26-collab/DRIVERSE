@@ -5,6 +5,7 @@ import * as Location from "expo-location";
 import { Location as LocationType } from "@/types";
 import Card from "./Card";
 import GoogleMapsSearch from "./GoogleMapsSearch";
+import MapboxTileLayer from "./MapboxTileLayer";
 import { useTheme } from "@/hooks/useThemeStore";
 
 interface InteractiveMapViewProps {
@@ -374,6 +375,8 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
         onPress={interactive && !showCenterPin ? handleMapPress : undefined}
         onRegionChangeComplete={showCenterPin ? handleRegionChangeComplete : undefined}
       >
+        <MapboxTileLayer />
+
         {pickup && (
           <Marker
             coordinate={{ latitude: pickup.latitude, longitude: pickup.longitude }}
