@@ -44,7 +44,6 @@ import {
   Search,
   SlidersHorizontal,
   LocateFixed,
-  Plus,
   MessageCircle,
   ChevronDown,
   User,
@@ -507,9 +506,6 @@ export default function MapScreen() {
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [navigating, setNavigating] = useState(false);
   const [loadingRoute, setLoadingRoute] = useState(false);
-
-  // --- Pick mode --- (toggle to allow dropping a custom pin on the map)
-  const [isPickMode, setIsPickMode] = useState(false);
 
   // --- Recording state ---
   const [isRecording, setIsRecording] = useState(false);
@@ -1223,7 +1219,7 @@ export default function MapScreen() {
     // Also clear any leftover trip state from a cancelled navigation
     // (e.g. STOP tapped before the trip qualified for the Trip Summary
     // card), otherwise recordedPath stays non-empty and permanently
-    // hides the Create Event/Convoy/Chat stack and online banner.
+    // hides the Drive/Convoy/Chat stack and online banner.
     setRecordedPath([]);
     setTripDistance(0);
     setElapsedMs(0);
@@ -1233,56 +1229,33 @@ export default function MapScreen() {
     setRouteSteps([]);
   }, []);
 
-  // --- Toggle pick mode ---
-  const togglePickMode = useCallback(() => {
-    setIsPickMode((prev) => !prev);
-    // Clear any pending destination when leaving pick mode
-    if (isPickMode) {
-      setSelectedDestination(null);
-      setLocationChosen(false);
-      setRouteInfo(null);
-    }
-  }, [isPickMode]);
-
-  // --- Map press: drop a pin at tapped location (only when pick mode is ON) ---
+  // --- Map press: drop the event pin at tapped location (only when event pick mode is ON) ---
   const mapPressCooldownRef = useRef(0);
   const handleMapPress = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }, placeName?: string) => {
-    if (!isPickMode && !isEventPickMode) return;
+    if (!isEventPickMode) return;
     const now = Date.now();
     if (now - mapPressCooldownRef.current < 200) return;
     mapPressCooldownRef.current = now;
     const { latitude, longitude } = event.nativeEvent.coordinate;
 
     // Event building mode: drop the event pin and open the builder
-    if (isEventPickMode) {
-      setIsEventPickMode(false);
-      setEventCoordinate({ latitude, longitude });
-      setEventLocationName(placeName ?? null);
-      setShowCreateEvent(true);
-      mapRef.current?.animateCamera(
-        { center: { latitude, longitude }, zoom: 16, pitch: 40 },
-        { duration: 400 }
-      );
-      return;
-    }
-    setSelectedDestination({ type: "location", lat: latitude, lng: longitude, name: placeName });
-    setLocationChosen(false);
-    setRouteInfo(null);
-    // Turn off pick mode after placing a pin (single-use)
-    setIsPickMode(false);
+    setIsEventPickMode(false);
+    setEventCoordinate({ latitude, longitude });
+    setEventLocationName(placeName ?? null);
+    setShowCreateEvent(true);
     mapRef.current?.animateCamera(
-      { center: { latitude, longitude }, zoom: 17, pitch: 40 },
-      { duration: 500 }
+      { center: { latitude, longitude }, zoom: 16, pitch: 40 },
+      { duration: 400 }
     );
-  }, [isPickMode, isEventPickMode]);
+  }, [isEventPickMode]);
 
   // --- POI tap: pick a real place from Google's own map database (only while
-  // actively picking a destination or event location — see MAP_STYLE_*_PICK,
-  // which turns Google's native POI icons back on for this interaction). ---
+  // actively picking an event location — see MAP_STYLE_*_PICK, which turns
+  // Google's native POI icons back on for this interaction). ---
   const handlePoiClick = useCallback((event: { nativeEvent: { coordinate: { latitude: number; longitude: number }; name?: string } }) => {
-    if (!isPickMode && !isEventPickMode) return;
+    if (!isEventPickMode) return;
     handleMapPress({ nativeEvent: { coordinate: event.nativeEvent.coordinate } }, event.nativeEvent.name);
-  }, [isPickMode, isEventPickMode, handleMapPress]);
+  }, [isEventPickMode, handleMapPress]);
 
   // --- Event handlers ---
   const toggleEventPickMode = useCallback(() => {
@@ -1291,8 +1264,20 @@ export default function MapScreen() {
       return;
     }
     setIsEventPickMode((prev) => !prev);
-    setIsPickMode(false);
   }, [user]);
+
+  // --- Drive: instant one-tap toggle to go live on the map (the app's main action) ---
+  const toggleDrive = useCallback(() => {
+    if (!user) {
+      Alert.alert("Sign In Required", "Create an account to start driving");
+      return;
+    }
+    if (isUserOnline) {
+      goOffline();
+    } else {
+      goOnline();
+    }
+  }, [user, isUserOnline, goOnline, goOffline]);
 
   const handleEventCreated = useCallback(() => {
     setShowCreateEvent(false);
@@ -1674,7 +1659,7 @@ export default function MapScreen() {
         pitchEnabled
         rotateEnabled
         customMapStyle={
-          isPickMode || isEventPickMode
+          isEventPickMode
             ? (isDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
             : (isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
         }
@@ -2564,13 +2549,13 @@ export default function MapScreen() {
 
           <View style={styles.labeledBtn}>
             <TouchableOpacity
-              style={[styles.actionBtn, isPickMode && styles.actionBtnActive]}
-              onPress={togglePickMode}
+              style={[styles.actionBtn, isEventPickMode && styles.actionBtnActive]}
+              onPress={toggleEventPickMode}
               activeOpacity={0.7}
             >
-              <MapPin size={18} color={isPickMode ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+              <MapPin size={18} color={isEventPickMode ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
             </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Drop Pin</Text>
+            <Text style={styles.actionBtnLabel}>Event</Text>
           </View>
 
           {routeInfo && (
@@ -2764,7 +2749,7 @@ export default function MapScreen() {
       )}
 
       {/* ===================================================== */}
-      {/*   ACTION STACK — Create Event / Convoy / Chat          */}
+      {/*   ACTION STACK — Drive / Convoy / Chat                 */}
       {/* ===================================================== */}
       {hudIdle && !searchOpen && (
         <Animated.View
@@ -2772,17 +2757,13 @@ export default function MapScreen() {
         >
           <View style={styles.labeledBtn}>
             <TouchableOpacity
-              style={[styles.createEventBtn, isEventPickMode && styles.createEventBtnActive]}
-              onPress={toggleEventPickMode}
+              style={[styles.driveBtn, isUserOnline && styles.driveBtnActive]}
+              onPress={toggleDrive}
               activeOpacity={0.8}
             >
-              {isEventPickMode ? (
-                <X size={26} color="#FFFFFF" strokeWidth={2.5} />
-              ) : (
-                <Plus size={26} color="#FFFFFF" strokeWidth={2.5} />
-              )}
+              <Car size={26} color="#FFFFFF" strokeWidth={2.5} />
             </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>{isEventPickMode ? "Cancel" : "Create Event"}</Text>
+            <Text style={styles.actionBtnLabel}>{isUserOnline ? "Driving" : "Drive"}</Text>
           </View>
 
           <View style={styles.labeledBtn}>
@@ -3977,7 +3958,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   // ========================
-  //  ACTION STACK (Create Event / Convoy / Chat)
+  //  ACTION STACK (Drive / Convoy / Chat)
   // ========================
   actionStack: {
     position: "absolute",
@@ -3986,7 +3967,7 @@ const styles = StyleSheet.create({
     gap: 12,
     zIndex: 130,
   },
-  createEventBtn: {
+  driveBtn: {
     width: 54,
     height: 54,
     borderRadius: 27,
@@ -4001,8 +3982,9 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 10,
   },
-  createEventBtnActive: {
-    backgroundColor: "#E5502A",
+  driveBtnActive: {
+    backgroundColor: "#22C55E",
+    shadowColor: "#22C55E",
   },
   stackBtn: {
     width: 46,
