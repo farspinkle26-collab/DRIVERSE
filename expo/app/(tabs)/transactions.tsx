@@ -11,11 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useThemeStore';
 import { useTransactions } from '@/hooks/useTransactionStore';
-import { useAuth } from '@/hooks/useAuthStore';
-import { useRealtime } from '@/hooks/useRealtimeStore';
-import { useTowing } from '@/hooks/useTowingStore';
-import { router } from 'expo-router';
-import { 
+import {
   CreditCard, 
   ArrowUpRight, 
   ArrowDownLeft, 
@@ -43,9 +39,6 @@ export default function TransactionsScreen() {
     distributePayment,
     createSampleTransactions
   } = useTransactions();
-  const { user } = useAuth();
-  const { sendRequestToNearestDriver } = useRealtime();
-  const { requestHistory, getRequestById } = useTowing();
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'completed' | 'pending' | 'failed'>('all');
 
@@ -55,45 +48,15 @@ export default function TransactionsScreen() {
     const pendingTxns = transactions.filter(t => t.status === 'pending' || t.status === 'processing');
     for (const txn of pendingTxns) {
       const result = await checkPaymentStatus(txn.id);
-      
-      // If payment is completed and we should start driver search
-      if (result.success && result.status === 'completed' && result.shouldStartDriverSearch) {
-        console.log('🚗 Payment completed! Starting driver search for transaction:', txn.id);
-        
-        // Distribute payment first
+
+      // If payment is completed, distribute it
+      if (result.success && result.status === 'completed') {
         await distributePayment(txn.id);
-        
-        // Find the tow request and start driver search
-        const towRequest = getRequestById(txn.towRequestId);
-        if (towRequest) {
-          console.log('🚗 Found tow request, sending to nearest driver:', towRequest.id);
-          const searchSuccess = await sendRequestToNearestDriver(towRequest);
-          
-          if (searchSuccess) {
-            Alert.alert(
-              'Pembayaran Berhasil!',
-              'Pembayaran Anda telah dikonfirmasi. Kami sedang mencari driver terdekat untuk Anda.',
-              [
-                {
-                  text: 'Lihat Status',
-                  onPress: () => {
-                    router.push({
-                      pathname: '/request-details' as any,
-                      params: { id: towRequest.id }
-                    });
-                  }
-                },
-                { text: 'OK' }
-              ]
-            );
-          } else {
-            Alert.alert(
-              'Pembayaran Berhasil',
-              'Pembayaran Anda telah dikonfirmasi, namun terjadi masalah saat mencari driver. Silakan hubungi customer service.',
-              [{ text: 'OK' }]
-            );
-          }
-        }
+        Alert.alert(
+          'Pembayaran Berhasil!',
+          'Pembayaran Anda telah dikonfirmasi.',
+          [{ text: 'OK' }]
+        );
       }
     }
     setTimeout(() => setRefreshing(false), 1000);
@@ -186,35 +149,14 @@ export default function TransactionsScreen() {
         text: 'Cek Status Pembayaran',
         onPress: async () => {
           const result = await checkPaymentStatus(transaction.id);
-          
-          if (result.success && result.status === 'completed' && result.shouldStartDriverSearch) {
-            // Distribute payment first
+
+          if (result.success && result.status === 'completed') {
             await distributePayment(transaction.id);
-            
-            // Find the tow request and start driver search
-            const towRequest = getRequestById(transaction.towRequestId);
-            if (towRequest) {
-              const searchSuccess = await sendRequestToNearestDriver(towRequest);
-              
-              if (searchSuccess) {
-                Alert.alert(
-                  'Pembayaran Berhasil!',
-                  'Pembayaran Anda telah dikonfirmasi. Kami sedang mencari driver terdekat untuk Anda.',
-                  [
-                    {
-                      text: 'Lihat Status',
-                      onPress: () => {
-                        router.push({
-                          pathname: '/request-details' as any,
-                          params: { id: towRequest.id }
-                        });
-                      }
-                    },
-                    { text: 'OK' }
-                  ]
-                );
-              }
-            }
+            Alert.alert(
+              'Pembayaran Berhasil!',
+              'Pembayaran Anda telah dikonfirmasi.',
+              [{ text: 'OK' }]
+            );
           }
         }
       });
@@ -401,35 +343,14 @@ export default function TransactionsScreen() {
                         style={[styles.checkStatusButton, { backgroundColor: theme.primary + '20' }]}
                         onPress={async () => {
                           const result = await checkPaymentStatus(transaction.id);
-                          
-                          if (result.success && result.status === 'completed' && result.shouldStartDriverSearch) {
-                            // Distribute payment first
+
+                          if (result.success && result.status === 'completed') {
                             await distributePayment(transaction.id);
-                            
-                            // Find the tow request and start driver search
-                            const towRequest = getRequestById(transaction.towRequestId);
-                            if (towRequest) {
-                              const searchSuccess = await sendRequestToNearestDriver(towRequest);
-                              
-                              if (searchSuccess) {
-                                Alert.alert(
-                                  'Pembayaran Berhasil!',
-                                  'Pembayaran Anda telah dikonfirmasi. Kami sedang mencari driver terdekat untuk Anda.',
-                                  [
-                                    {
-                                      text: 'Lihat Status',
-                                      onPress: () => {
-                                        router.push({
-                                          pathname: '/request-details' as any,
-                                          params: { id: towRequest.id }
-                                        });
-                                      }
-                                    },
-                                    { text: 'OK' }
-                                  ]
-                                );
-                              }
-                            }
+                            Alert.alert(
+                              'Pembayaran Berhasil!',
+                              'Pembayaran Anda telah dikonfirmasi.',
+                              [{ text: 'OK' }]
+                            );
                           }
                         }}
                       >

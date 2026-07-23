@@ -163,7 +163,7 @@
 - 🔄 **Admin dashboard** for verification workflow
 
 ### **Payment Integration**
-- 🔄 **Xendit setup** for real payments
+- 🔄 **Payment provider setup** for real payments
 - 🔄 **Split payment** configuration
 - 🔄 **Payout system** for drivers and companies
 - 🔄 **Financial reporting** features

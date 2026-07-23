@@ -97,7 +97,7 @@ export default function PaymentSetupScreen({
         setPaymentSetupComplete(true);
         Alert.alert(
           'Success',
-          'Payment system has been set up successfully! Your company can now receive payments through Xendit.'
+          'Payment system has been set up successfully!'
         );
       } else {
         Alert.alert('Error', error || 'Failed to setup payment system');
@@ -178,7 +178,7 @@ export default function PaymentSetupScreen({
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Building2 size={32} color="#3B82F6" />
-          <Text style={styles.title}>Xendit Payment Integration</Text>
+          <Text style={styles.title}>Payment Integration</Text>
           <Text style={styles.subtitle}>
             Setup automatic payment splitting for {companyName}
           </Text>
@@ -337,7 +337,7 @@ export default function PaymentSetupScreen({
             1. When customers pay for towing services, payments are automatically split
           </Text>
           <Text style={styles.infoText}>
-            2. Your company receives the configured percentage directly to your Xendit account
+            2. Your company receives the configured percentage directly
           </Text>
           <Text style={styles.infoText}>
             3. The platform fee is automatically deducted

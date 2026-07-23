@@ -494,56 +494,6 @@ export interface CompanyReport {
   generatedAt: number;
 }
 
-// Xendit Payment Integration Types
-export interface XenditAccount {
-  id: string;
-  created: string;
-  updated: string;
-  email: string;
-  type: 'OWNED' | 'MANAGED';
-  public_profile: {
-    business_name: string;
-  };
-  country: string;
-  status: 'INVITED' | 'REGISTERED' | 'LIVE' | 'UNDER_REVIEW';
-}
-
-export interface XenditSplitRule {
-  id: string;
-  created: string;
-  updated: string;
-  split_rule_items: {
-    account_id: string;
-    amount?: number;
-    percentage?: number;
-    flat_amount?: number;
-  }[];
-  status: 'ACTIVE' | 'INACTIVE';
-}
-
-export interface XenditPayment {
-  id: string;
-  external_id: string;
-  user_id: string;
-  payment_method: string;
-  status: 'PENDING' | 'PAID' | 'SETTLED' | 'EXPIRED' | 'FAILED';
-  merchant_name: string;
-  amount: number;
-  paid_amount?: number;
-  bank_code?: string;
-  paid_at?: string;
-  payer_email?: string;
-  description?: string;
-  adjusted_received_amount?: number;
-  fees_paid_amount?: number;
-  updated: string;
-  created: string;
-  currency: string;
-  payment_channel: string;
-  payment_destination?: string;
-  split_rule_id?: string;
-}
-
 export interface PaymentSplit {
   companyId: string;
   companyAccountId: string;
@@ -566,7 +516,6 @@ export interface PaymentTransaction {
   currency: 'IDR';
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'refunded';
   paymentMethod: 'bank_transfer' | 'e_wallet' | 'credit_card' | 'qr_code';
-  xenditPaymentId?: string;
   splitRuleId?: string;
   splits: {
     companyAmount: number;
@@ -574,14 +523,12 @@ export interface PaymentTransaction {
     driverAmount?: number;
   };
   fees: {
-    xenditFee: number;
     platformFee: number;
   };
   distributionDetails?: {
     distributedAt: number;
     driverPaid: number;
     platformPaid: number;
-    xenditFeeDeducted: number;
   };
   createdAt: number;
   completedAt?: number;
@@ -624,10 +571,7 @@ export interface PayoutDetails {
   verificationStatus: 'pending' | 'verified' | 'failed' | 'requires_update';
   verificationFailureReason?: string;
   lastVerificationAttempt?: number;
-  
-  // Xendit disbursement details
-  xenditRecipientId?: string; // Xendit recipient ID for disbursements
-  
+
   createdAt: number;
   updatedAt: number;
 }
@@ -647,9 +591,6 @@ export interface DisbursementRequest {
   amount: number;
   currency: 'IDR';
   payoutDetailsId: string;
-  
-  // Xendit disbursement details
-  xenditDisbursementId?: string;
   externalId: string;
   
   status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -701,7 +642,6 @@ export interface TipTransaction {
   currency: 'IDR';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   paymentMethod: 'same_as_service' | 'separate_payment';
-  xenditPaymentId?: string;
   createdAt: number;
   completedAt?: number;
   failureReason?: string;

@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { PaymentTransaction } from "@/types";
 import { useAuth } from "@/hooks/useAuthStore";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import xenditService from "@/lib/xendit";
 
 const TRANSACTIONS_STORAGE_KEY = 'payment_transactions';
 
@@ -69,7 +68,6 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
       // Calculate splits (90% to company, 10% to platform)
       const companyAmount = Math.floor(amount * 0.9);
       const platformAmount = amount - companyAmount;
-      const xenditFee = Math.floor(amount * 0.03); // 3% Xendit fee
       const platformFee = Math.floor(amount * 0.05); // 5% platform fee
 
       const transaction: PaymentTransaction = {
@@ -88,7 +86,6 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
           driverAmount: driverId ? Math.floor(companyAmount * 0.8) : undefined, // 80% of company share goes to driver
         },
         fees: {
-          xenditFee,
           platformFee,
         },
         createdAt: Date.now(),
@@ -108,129 +105,22 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
     }
   }, [user, transactions, saveTransactions]);
 
-  // Create Xendit Virtual Account for payment
-  const createVirtualAccount = useCallback(async (transaction: PaymentTransaction): Promise<{
-    success: boolean;
-    paymentUrl?: string;
-    virtualAccountNumber?: string;
-    virtualAccountId?: string;
-    error?: string;
-  }> => {
-    if (!user) return { success: false, error: 'User not authenticated' };
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Create Xendit Virtual Account directly
-      const virtualAccount = await xenditService.createVirtualAccount({
-        externalId: transaction.id,
-        amount: transaction.amount,
-        payerEmail: user.email,
-        description: `Pembayaran Derek #${transaction.towRequestId.slice(-6)}`,
-        bankCode: 'BCA', // Default to BCA, can be made configurable
-      });
-
-      // Update transaction with Virtual Account details
-      const updatedTransactions = transactions.map(t => 
-        t.id === transaction.id 
-          ? { 
-              ...t, 
-              xenditPaymentId: virtualAccount.id, 
-              status: 'processing' as const,
-              // Store additional VA details in a custom field if needed
-            }
-          : t
-      );
-      
-      setTransactions(updatedTransactions);
-      await saveTransactions(updatedTransactions);
-
-      return {
-        success: true,
-        virtualAccountNumber: virtualAccount.account_number,
-        virtualAccountId: virtualAccount.id,
-        // For web compatibility, we can create a simple payment page URL
-        paymentUrl: `https://checkout.xendit.co/web/${virtualAccount.id}`,
-      };
-    } catch (err) {
-      console.error('Failed to create virtual account:', err);
-      setError('Gagal membuat virtual account');
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      };
-    } finally {
-      setLoading(false);
-    }
-  }, [user, transactions, saveTransactions]);
-
-  // Check payment status for Virtual Account
+  // Check payment status for a pending/processing transaction.
+  // NOTE: this previously delegated to a Xendit Virtual Account status
+  // check; that integration has been removed, so this now just reports
+  // the transaction's current locally-tracked status.
   const checkPaymentStatus = useCallback(async (transactionId: string): Promise<{
     success: boolean;
     status?: PaymentTransaction['status'];
     error?: string;
-    shouldStartDriverSearch?: boolean;
   }> => {
     const transaction = transactions.find(t => t.id === transactionId);
-    if (!transaction || !transaction.xenditPaymentId) {
+    if (!transaction) {
       return { success: false, error: 'Transaction not found' };
     }
 
-    try {
-      // Check Virtual Account payments to see if it has been paid
-      const vaPayments = await xenditService.getVirtualAccountPayments(transaction.xenditPaymentId);
-      
-      let status: PaymentTransaction['status'] = 'processing';
-      let shouldStartDriverSearch = false;
-      
-      if (vaPayments && vaPayments.length > 0) {
-        // If there are payments, check the latest one
-        const latestPayment = vaPayments[vaPayments.length - 1];
-        if (latestPayment.status === 'COMPLETED') {
-          status = 'completed';
-          // Only start driver search if this is the first time we detect completion
-          shouldStartDriverSearch = transaction.status !== 'completed';
-        } else if (latestPayment.status === 'FAILED') {
-          status = 'failed';
-        }
-      } else {
-        // Check VA status to see if it's expired
-        try {
-          const vaStatus = await xenditService.getVirtualAccountStatus(transaction.xenditPaymentId);
-          if (vaStatus.status === 'EXPIRED') {
-            status = 'failed';
-          }
-        } catch (vaError) {
-          console.log('Could not check VA status:', vaError);
-          // Keep status as processing if we can't check VA status
-        }
-      }
-
-      // Update transaction status
-      const updatedTransactions = transactions.map(t => 
-        t.id === transactionId 
-          ? { 
-              ...t, 
-              status, 
-              completedAt: status === 'completed' ? Date.now() : t.completedAt,
-              failureReason: status === 'failed' ? 'Payment expired or failed' : undefined
-            }
-          : t
-      );
-      
-      setTransactions(updatedTransactions);
-      await saveTransactions(updatedTransactions);
-
-      return { success: true, status, shouldStartDriverSearch };
-    } catch (err) {
-      console.error('Failed to check payment status:', err);
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      };
-    }
-  }, [transactions, saveTransactions]);
+    return { success: true, status: transaction.status };
+  }, [transactions]);
 
   // Format currency
   const formatCurrency = useCallback((amount: number) => {
@@ -274,21 +164,18 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
       console.log('💰 Company amount:', transaction.splits.companyAmount);
       console.log('💰 Platform amount:', transaction.splits.platformAmount);
       console.log('💰 Driver amount:', transaction.splits.driverAmount);
-      console.log('💰 Xendit fee:', transaction.fees.xenditFee);
       console.log('💰 Platform fee:', transaction.fees.platformFee);
-      
+
       // In a real implementation, this would:
       // 1. Transfer money to driver's account (if driverId exists)
       // 2. Transfer platform fee to developer account
-      // 3. Handle Xendit fees
-      // 4. Update transaction with distribution details
-      
+      // 3. Update transaction with distribution details
+
       // For now, we'll just log the distribution
       const distributionDetails = {
         distributedAt: Date.now(),
         driverPaid: transaction.splits.driverAmount || 0,
         platformPaid: transaction.splits.platformAmount,
-        xenditFeeDeducted: transaction.fees.xenditFee,
       };
       
       // Update transaction with distribution info
@@ -329,14 +216,12 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
         currency: 'IDR',
         status: 'processing',
         paymentMethod: 'bank_transfer',
-        xenditPaymentId: 'va_sample_001',
         splits: {
           companyAmount: 765000,
           platformAmount: 85000,
           driverAmount: 612000,
         },
         fees: {
-          xenditFee: 25500,
           platformFee: 42500,
         },
         createdAt: Date.now() - 3600000, // 1 hour ago
@@ -350,13 +235,11 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
         currency: 'IDR',
         status: 'completed',
         paymentMethod: 'bank_transfer',
-        xenditPaymentId: 'va_sample_002',
         splits: {
           companyAmount: 1080000,
           platformAmount: 120000,
         },
         fees: {
-          xenditFee: 36000,
           platformFee: 60000,
         },
         createdAt: Date.now() - 86400000, // 1 day ago
@@ -376,7 +259,6 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
           platformAmount: 59500,
         },
         fees: {
-          xenditFee: 17850,
           platformFee: 29750,
         },
         createdAt: Date.now() - 1800000, // 30 minutes ago
@@ -397,7 +279,6 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
     loading,
     error,
     createPaymentTransaction,
-    createVirtualAccount,
     checkPaymentStatus,
     distributePayment,
     formatCurrency,
@@ -416,7 +297,6 @@ export const [TransactionContext, useTransactions] = createContextHook(() => {
     loading,
     error,
     createPaymentTransaction,
-    createVirtualAccount,
     checkPaymentStatus,
     distributePayment,
     formatCurrency,
