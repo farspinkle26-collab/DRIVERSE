@@ -453,6 +453,26 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
+// ─── EyeIcon ─────────────────────────────────────────────
+// Visibility toggle glyph: open eye when visible to others, slashed eye
+// when hidden. Drawn in code (SVG) to match the app's other in-map icons.
+function EyeIcon({ visible, color, size = 14 }: { visible: boolean; color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <SvgPath
+        d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinejoin="round"
+      />
+      <SvgCircle cx="12" cy="12" r="3.2" stroke={color} strokeWidth={2} />
+      {!visible && (
+        <SvgPath d="M3 3L21 21" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      )}
+    </Svg>
+  );
+}
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
@@ -1180,8 +1200,8 @@ export default function MapScreen() {
   }, [user, router]);
 
   // --- Drive: toggles drop-pin mode only. Fully independent of online/offline
-  // status, which is controlled separately by the online banner's Go
-  // Online/Go Offline buttons. ---
+  // status, which is controlled separately by the online banner's Visibility
+  // switch. ---
   const toggleDrive = useCallback(() => {
     if (!user) {
       Alert.alert("Sign In Required", "Create an account to start driving");
@@ -2735,27 +2755,32 @@ export default function MapScreen() {
                 </TouchableOpacity>
               </View>
             ) : !isUserOnline ? (
-              /* OFFLINE — compact banner with green Go Online pill */
+              /* VISIBILITY OFF — compact banner with Visibility switch */
               <View style={[styles.onlineBanner, styles.onlineBannerOffline]}>
                 <View style={styles.onlineBannerLeft}>
                   <View style={[styles.onlineBannerDot, { backgroundColor: "#6A6A7E" }]} />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>You're Offline</Text>
+                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>Visibility Off</Text>
                     <Text style={styles.onlineBannerSub}>
-                      Hidden from the map. Go online to join the action.
+                      You're hidden from the map. Turn on visibility to be seen.
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.onlineBannerBtnGreen}
+                  style={styles.visibilitySwitchTrack}
                   onPress={goOnline}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: false }}
+                  accessibilityLabel="Turn visibility on"
                 >
-                  <Text style={styles.onlineBannerBtnGreenText}>Go Online</Text>
+                  <View style={styles.visibilitySwitchKnob}>
+                    <EyeIcon visible={false} color="#6A6A7E" size={13} />
+                  </View>
                 </TouchableOpacity>
               </View>
             ) : (
-              /* ONLINE — glowing green banner (design spec) */
+              /* VISIBILITY ON — glowing green banner (design spec) */
               <View style={styles.onlineBanner}>
                 <View style={styles.onlineBannerLeft}>
                   <Animated.View
@@ -2765,7 +2790,7 @@ export default function MapScreen() {
                     ]}
                   />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={styles.onlineBannerTitle}>You're Online</Text>
+                    <Text style={styles.onlineBannerTitle}>Visibility On</Text>
                     <Text style={styles.onlineBannerSub}>
                       {onlineCount > 0
                         ? `Your location is visible to others. ${onlineCount} driver${onlineCount !== 1 ? "s" : ""} on the map.`
@@ -2774,11 +2799,16 @@ export default function MapScreen() {
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={styles.goOfflineBtn}
+                  style={[styles.visibilitySwitchTrack, styles.visibilitySwitchTrackOn]}
                   onPress={goOffline}
-                  activeOpacity={0.7}
+                  activeOpacity={0.85}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: true }}
+                  accessibilityLabel="Turn visibility off"
                 >
-                  <Text style={styles.goOfflineBtnText}>Go Offline</Text>
+                  <View style={[styles.visibilitySwitchKnob, styles.visibilitySwitchKnobOn]}>
+                    <EyeIcon visible={true} color="#0E7A3C" size={13} />
+                  </View>
                 </TouchableOpacity>
               </View>
             )}
@@ -4970,18 +5000,45 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#06130B",
   },
-  goOfflineBtn: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 12,
+  // Visibility on/off switch — replaces the old Go Online/Go Offline pill
+  // with a single, self-explanatory iOS-style toggle.
+  visibilitySwitchTrack: {
+    flexDirection: "row",
+    width: 52,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingHorizontal: 2,
   },
-  goOfflineBtnText: {
-    fontSize: 12.5,
-    fontWeight: "700",
-    color: "#E0E0EA",
+  visibilitySwitchTrackOn: {
+    backgroundColor: "#22C55E",
+    borderColor: "#22C55E",
+    justifyContent: "flex-end",
+    shadowColor: "#22C55E",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  visibilitySwitchKnob: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  visibilitySwitchKnobOn: {
+    backgroundColor: "#FFFFFF",
   },
   // ─── Online player markers on map ────────────────────
   playerMarkerWrap: {
