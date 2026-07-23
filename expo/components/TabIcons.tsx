@@ -121,16 +121,6 @@ export const WalletIcon = ({ color, size = 24 }: IconProps) => (
   </Svg>
 );
 
-export const TowingPlusIcon = ({ color, size = 24 }: IconProps) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Rect x={2} y={8} width={14} height={8} rx={2} stroke={color} strokeWidth={2} />
-    <Rect x={16} y={6} width={6} height={10} rx={2} stroke={color} strokeWidth={2} />
-    <Circle cx={7} cy={18} r={2} stroke={color} strokeWidth={2} />
-    <Circle cx={17} cy={18} r={2} stroke={color} strokeWidth={2} />
-    <Path d="M9 12H11M10 11V13" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-  </Svg>
-);
-
 export const InsuranceIcon = ({ color, size = 24 }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M12 2L3 7V12C3 16.55 6.84 20.74 12 22C17.16 20.74 21 16.55 21 12V7L12 2Z" stroke={color} strokeWidth={2} />

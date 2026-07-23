@@ -308,7 +308,7 @@ export default function TransactionsScreen() {
                     </View>
                     <View style={styles.transactionDetails}>
                       <Text style={[styles.transactionDescription, { color: theme.textDark }]}>
-                        Pembayaran Derek #{transaction.towRequestId.slice(-6)}
+                        Pembayaran Layanan #{transaction.towRequestId.slice(-6)}
                       </Text>
                       <Text style={[styles.transactionDate, { color: theme.textLight }]}>
                         {formatDate(transaction.createdAt)} • {getPaymentMethodText(transaction.paymentMethod)}

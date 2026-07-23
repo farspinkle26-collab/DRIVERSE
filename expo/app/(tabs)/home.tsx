@@ -2,14 +2,11 @@ import React, { useEffect, useState, useRef } from "react";
 import { StyleSheet, Text, View, ScrollView, Image, Platform, TouchableOpacity, Animated } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Truck, Shield, Car, User, Info } from "lucide-react-native";
+import { Shield, Car, User } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import Card from "@/components/Card";
-import TowingTypeDetailModal from "@/components/TowingTypeDetailModal";
-import { towingTypes } from "@/constants/mockData";
-import { TowingType } from "@/types";
 
 // Home Screen - Shows different content based on user type
 export default function HomeScreen() {
@@ -19,11 +16,8 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [greeting, setGreeting] = useState("Selamat siang");
   const [currentTextIndex, setCurrentTextIndex] = useState(0);
-  const [selectedTowingType, setSelectedTowingType] = useState<TowingType | null>(null);
-  const [isModalVisible, setIsModalVisible] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const galaxyAnim1 = useRef(new Animated.Value(0)).current;
   const galaxyAnim2 = useRef(new Animated.Value(0)).current;
@@ -32,7 +26,6 @@ export default function HomeScreen() {
   
   const animatedTexts = [
     "Temanmu di Jalan",
-    "Layanan Derek 24/7",
     "Cepat & Terpercaya",
     "Siap Membantu Anda"
   ];
@@ -91,24 +84,6 @@ export default function HomeScreen() {
       ])
     ).start();
   }, [slideAnim]);
-
-  // Pulse animation for service icons
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: true,
-        })
-      ])
-    ).start();
-  }, [pulseAnim]);
 
   // Rotation animation for emergency icon
   useEffect(() => {
@@ -171,147 +146,6 @@ export default function HomeScreen() {
   const handleGoogleMapsDemo = () => {
     router.push("/google-maps-demo" as any);
   };
-
-  const handleShowTowingInfo = (serviceId: string) => {
-    const towingType = towingTypes.find(type => {
-      // Map service IDs to towing type IDs
-      const serviceToTypeMap: { [key: string]: string } = {
-        'hydraulic': '1',
-        'ladder': '2', 
-        'accident': '3',
-        'service': '4',
-        'roller_tire': '5',
-        'free_wheel': '6',
-        'selfloader': '10',
-        'dolly': '5', // Uses same as roller_tire for now
-        'double_deck': '7',
-        'moge_transport': '8',
-        'basement_towing': '9'
-      };
-      return type.id === serviceToTypeMap[serviceId];
-    });
-    
-    if (towingType) {
-      setSelectedTowingType(towingType);
-      setIsModalVisible(true);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setIsModalVisible(false);
-    setSelectedTowingType(null);
-  };
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      minimumFractionDigits: 0,
-    }).format(price);
-  };
-
-  const towingServices = [
-    {
-      id: "hydraulic",
-      title: "Hidraulik",
-      description: towingTypes[0]?.description || "Derek dengan sistem hidraulik",
-      basePrice: 800000,
-      pricePerKm: 20000,
-      iconUrl: towingTypes[0]?.icon,
-      color: "#FF3B30"
-    },
-    {
-      id: "ladder",
-      title: "Tangga",
-      description: towingTypes[1]?.description || "Derek dengan tanduk di belakang",
-      basePrice: 595000,
-      pricePerKm: 15000,
-      iconUrl: towingTypes[1]?.icon,
-      color: "#007AFF"
-    },
-    {
-      id: "accident",
-      title: "Katrol",
-      description: towingTypes[2]?.description || "Derek dengan sistem katrol di belakang",
-      basePrice: 1200000,
-      pricePerKm: 50000,
-      iconUrl: towingTypes[2]?.icon,
-      color: "#FF9500"
-    },
-    {
-      id: "service",
-      title: "Service Car",
-      description: towingTypes[3]?.description || "Layanan perbaikan di tempat",
-      basePrice: 350000,
-      pricePerKm: 0,
-      maxDistance: 8,
-      iconUrl: towingTypes[3]?.icon,
-      color: "#34C759"
-    },
-    {
-      id: "roller_tire",
-      title: "Derek Sepatu Roda",
-      description: towingTypes[4]?.description || "Derek dengan sepatu roda di belakang",
-      basePrice: 2000000,
-      pricePerKm: 30000,
-      iconUrl: towingTypes[4]?.icon,
-      color: "#8E44AD"
-    },
-    {
-      id: "free_wheel",
-      title: "Free Wheel",
-      description: towingTypes[5]?.description || "Alat bantu netral matic/lock sistem (hanya ban)",
-      basePrice: 600000,
-      pricePerKm: 0,
-      iconUrl: towingTypes[5]?.icon,
-      color: "#E67E22"
-    },
-    {
-      id: "selfloader",
-      title: "Selfloader",
-      description: towingTypes[9]?.description || "Derek dengan sistem self-loading",
-      basePrice: 2500000,
-      pricePerKm: 50000,
-      iconUrl: towingTypes[9]?.icon,
-      color: "#2C3E50"
-    },
-    {
-      id: "dolly",
-      title: "Dolly",
-      description: towingTypes[4]?.description || "Derek dengan sepatu roda di belakang",
-      basePrice: 5000000,
-      pricePerKm: 100000,
-      iconUrl: towingTypes[4]?.icon,
-      color: "#C0392B"
-    },
-    {
-      id: "double_deck",
-      title: "Double Deck",
-      description: towingTypes[6]?.description || "Derek untuk multiple kendaraan",
-      basePrice: 4000000,
-      pricePerKm: 0,
-      iconUrl: towingTypes[6]?.icon,
-      color: "#16A085"
-    },
-    {
-      id: "moge_transport",
-      title: "Moge",
-      description: towingTypes[7]?.description || "Derek khusus untuk motor besar",
-      basePrice: 500000,
-      pricePerKm: 8000,
-      iconUrl: towingTypes[7]?.icon,
-      color: "#D35400"
-    },
-    {
-      id: "basement_towing",
-      title: "Derek Basement",
-      description: "Rp1.000.000 per kasus",
-      basePrice: 1000000,
-      pricePerKm: 0,
-      iconUrl: "https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/rgm4m2b4uacm3vlp8fzmp",
-      color: "#7D3C98"
-    }
-  ];
 
   // Keep app accessible without authentication
   const displayUser = user || {
@@ -482,13 +316,13 @@ export default function HomeScreen() {
                   resizeMode="contain"
                 />
                 <Text style={[styles.appName, { color: theme.textOnGradient }]}>
-                  Towing Online
+                  Driverse
                 </Text>
               </View>
-              <Animated.Text 
+              <Animated.Text
                 style={[
-                  styles.heroTitle, 
-                  { 
+                  styles.heroTitle,
+                  {
                     color: theme.textOnGradient,
                     opacity: fadeAnim,
                     transform: [{ scale: fadeAnim }]
@@ -498,7 +332,7 @@ export default function HomeScreen() {
                 {animatedTexts[currentTextIndex]}
               </Animated.Text>
               <Text style={[styles.heroSubtitle, { color: theme.textOnGradient }]}>
-                Minta layanan derek hanya dengan beberapa ketukan
+                Jelajahi fitur berkendara favoritmu
               </Text>
             </View>
             <Image
@@ -548,76 +382,7 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </Card>
       </View>
-
-      {/* All Towing Services section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Animated.Text 
-            style={[
-              styles.sectionTitle, 
-              { 
-                color: theme.textDark,
-                transform: [{ scale: pulseAnim }]
-              }
-            ]}
-          >
-            Semua Layanan Derek & Towing
-          </Animated.Text>
-        </View>
-        {towingServices.map((service) => (
-          <Card key={service.id} style={[styles.serviceCard, { borderLeftColor: service.color }]}>
-            <View style={styles.serviceContent}>
-              <View style={styles.serviceHeader}>
-                <Animated.View 
-                  style={[
-                    styles.serviceIcon, 
-                    { 
-                      backgroundColor: service.color + '20',
-                      transform: [{ scale: pulseAnim }]
-                    }
-                  ]}
-                >
-                  {service.iconUrl ? (
-                    <Image 
-                      source={{ uri: service.iconUrl }} 
-                      style={styles.serviceIconImage}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <Truck size={24} color={service.color} />
-                  )}
-                </Animated.View>
-                <View style={styles.serviceInfo}>
-                  <Text style={[styles.serviceTitle, { color: theme.textDark }]}>{service.title}</Text>
-                  <Text style={[styles.servicePrice, { color: service.color }]}>
-                    {service.pricePerKm === 0 ? formatPrice(service.basePrice) : `Mulai ${formatPrice(service.basePrice)}`}
-                  </Text>
-                </View>
-                <View style={styles.serviceActions}>
-                  <TouchableOpacity
-                    onPress={() => handleShowTowingInfo(service.id)}
-                    style={[styles.infoButton, { backgroundColor: '#F5F5F5' }]}
-                    activeOpacity={0.7}
-                  >
-                    <Info size={16} color={theme.textLight} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <Text style={[styles.serviceDescription, { color: theme.textLight }]}>
-                {service.description}
-              </Text>
-            </View>
-          </Card>
-        ))}
-      </View>
       </ScrollView>
-      
-      {/* Towing Type Detail Modal */}
-      <TowingTypeDetailModal
-        visible={isModalVisible}
-        onClose={handleCloseModal}
-        towingType={selectedTowingType}
-      />
     </View>
   );
 }
@@ -775,65 +540,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 20,
     opacity: 0.8,
   },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  serviceCard: {
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    padding: 16,
-  },
-  serviceContent: {
-    gap: 12,
-  },
-  serviceHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  serviceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  serviceIconImage: {
-    width: 30,
-    height: 30,
-  },
-  serviceInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  serviceTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  servicePrice: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  serviceButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    minWidth: 60,
-  },
-  serviceDescription: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginLeft: 60,
-  },
   quickAccessContainer: {
     flexDirection: "row",
     gap: 12,
@@ -884,18 +590,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     color: "#FF3B30",
-  },
-  serviceActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  infoButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
   },
   loadingContainer: {
     justifyContent: 'center',
