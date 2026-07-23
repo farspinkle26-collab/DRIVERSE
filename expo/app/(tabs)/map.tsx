@@ -473,7 +473,9 @@ export default function MapScreen() {
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
   // Whether the selected pin has been confirmed (kept for marker emphasis styling)
   const [locationChosen, setLocationChosen] = useState(false);
-  // Hint shown right after going online, prompting the driver to drop a pin
+  // Drive/drop-pin mode: independent of online status. While true, the map is
+  // listening for a tap to place a destination pin, and the "Drop the pin
+  // anywhere" hint is shown.
   const [showDropPinHint, setShowDropPinHint] = useState(false);
 
   // Navigation / routing state
@@ -1177,26 +1179,25 @@ export default function MapScreen() {
     router.push({ pathname: "/community", params: { tab: "events" } } as any);
   }, [user, router]);
 
-  // --- Drive: instant one-tap toggle to go live on the map (the app's main action) ---
+  // --- Drive: toggles drop-pin mode only. Fully independent of online/offline
+  // status, which is controlled separately by the online banner's Go
+  // Online/Go Offline buttons. ---
   const toggleDrive = useCallback(() => {
     if (!user) {
       Alert.alert("Sign In Required", "Create an account to start driving");
       return;
     }
-    if (isUserOnline) {
-      setShowDropPinHint(false);
-      goOffline();
-    } else {
-      goOnline();
-      setShowDropPinHint(true);
-    }
-  }, [user, isUserOnline, goOnline, goOffline]);
+    setShowDropPinHint((v) => !v);
+  }, [user]);
 
-  // Auto-dismiss the "drop the pin anywhere" hint a few seconds after going online
-  useEffect(() => {
+  // --- Drop a destination pin wherever the driver taps the map, while drive mode is active ---
+  const handleMapPress = useCallback((event: any) => {
     if (!showDropPinHint) return;
-    const timer = setTimeout(() => setShowDropPinHint(false), 4000);
-    return () => clearTimeout(timer);
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
+    setLocationChosen(true);
+    setRouteInfo(null);
+    setShowDropPinHint(false);
   }, [showDropPinHint]);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
@@ -1574,6 +1575,7 @@ export default function MapScreen() {
         rotateEnabled
         customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         followsUserLocation={false}
+        onPress={handleMapPress}
       >
         <MapboxTileLayer dark={isDark} />
 
@@ -2649,8 +2651,8 @@ export default function MapScreen() {
         </Animated.View>
       )}
 
-      {/* Hint shown right after tapping Drive, prompting the driver to drop a pin */}
-      {isUserOnline && showDropPinHint && (
+      {/* Hint shown while drive/drop-pin mode is active, prompting the driver to tap the map */}
+      {showDropPinHint && (
         <Animated.View style={[styles.dropPinHint, { opacity: fadeIn }]} pointerEvents="none">
           <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
           <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
@@ -2666,13 +2668,13 @@ export default function MapScreen() {
         >
           <View style={styles.labeledBtn}>
             <TouchableOpacity
-              style={[styles.driveBtn, isUserOnline && styles.driveBtnActive]}
+              style={[styles.driveBtn, showDropPinHint && styles.driveBtnActive]}
               onPress={toggleDrive}
               activeOpacity={0.8}
             >
               <Car size={26} color="#FFFFFF" strokeWidth={2.5} />
             </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>{isUserOnline ? "Driving" : "Drive"}</Text>
+            <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
           </View>
 
           <View style={styles.labeledBtn}>
