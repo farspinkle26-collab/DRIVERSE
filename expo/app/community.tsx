@@ -105,18 +105,8 @@ export default function CommunityScreen() {
     if (result.error) setJoinError(result.error);
   }, [joinEvent, leaveEvent]);
 
-  const openCreateEvent = useCallback(() => {
-    if (!user?.country) {
-      setJoinError("Set your country in your profile before creating an event");
-      return;
-    }
-    setLocationError(null);
-    router.push("/create-event" as any);
-  }, [user?.country, router]);
-
   const handleCreate = () => {
     if (tab === "convoy") setCreateConvoyOpen(true);
-    else openCreateEvent();
   };
 
   return (
@@ -130,13 +120,17 @@ export default function CommunityScreen() {
           <ArrowLeft size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.topTitle}>Community</Text>
-        <TouchableOpacity
-          onPress={handleCreate}
-          style={[styles.iconBtn, { backgroundColor: ACCENT + "26" }]}
-          hitSlop={8}
-        >
-          <Plus size={20} color={ACCENT} />
-        </TouchableOpacity>
+        {tab === "convoy" ? (
+          <TouchableOpacity
+            onPress={handleCreate}
+            style={[styles.iconBtn, { backgroundColor: ACCENT + "26" }]}
+            hitSlop={8}
+          >
+            <Plus size={20} color={ACCENT} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.iconBtn} />
+        )}
       </View>
 
       {/* Tabs */}
