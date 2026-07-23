@@ -147,7 +147,7 @@ const DRIVE_FEATURES: DriveFeature[] = [
     color: "#3B82F6",
     bgColor: "#3B82F615",
     image: FEATURE_IMAGES.community,
-    route: "/community",
+    route: "/community?tab=convoy",
   },
 ];
 

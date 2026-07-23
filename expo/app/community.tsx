@@ -53,6 +53,17 @@ export default function CommunityScreen() {
 
   const [tab, setTab] = useState<"convoy" | "events">(params.tab === "events" ? "events" : "convoy");
   const [refreshing, setRefreshing] = useState(false);
+
+  // Re-sync the active tab whenever we're navigated here with a new `tab`
+  // param, even if this screen instance is already mounted (e.g. going
+  // Drive -> Community -> back -> Drive -> Community again reuses it, so
+  // the useState initial value alone won't reflect the new param).
+  useEffect(() => {
+    if (params.tab === "events" || params.tab === "convoy") {
+      setTab(params.tab);
+    }
+  }, [params.tab]);
+
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
