@@ -13,8 +13,8 @@ import {
   KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AppMapView, { Marker, Polyline } from "@/components/AppMap";
-import type { AppMapViewHandle } from "@/components/AppMap";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import * as Linking from "expo-linking";
@@ -41,6 +41,7 @@ import { useRoutes, RouteComment, RouteVisibility } from "@/hooks/useRoutesStore
 import { useAuth } from "@/hooks/useAuthStore";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
 
 function fmtDuration(seconds: number): string {
@@ -74,7 +75,7 @@ export default function RouteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const mapRef = useRef<AppMapViewHandle>(null);
+  const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const { user } = useAuth();
   const { getRoute, toggleKudos, fetchComments, addComment, deleteComment, deleteRoute, updateRoute } = useRoutes();
@@ -268,17 +269,20 @@ export default function RouteDetailScreen() {
         >
           {/* Map */}
           <View style={styles.mapWrap}>
-            <AppMapView
+            <MapView
               ref={mapRef}
               style={StyleSheet.absoluteFill}
-              dark={isDark}
+              provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
               onMapReady={fitToRoute}
+              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               scrollEnabled={false}
               zoomEnabled={false}
               pitchEnabled={false}
               rotateEnabled={false}
             >
+              <MapboxTileLayer dark={isDark} />
+
               {coords.length > 1 && (
                 <>
                   <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
@@ -295,7 +299,7 @@ export default function RouteDetailScreen() {
                   <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
                 </Marker>
               )}
-            </AppMapView>
+            </MapView>
           </View>
 
           <View style={styles.body}>

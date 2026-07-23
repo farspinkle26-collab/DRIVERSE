@@ -11,6 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.rork.towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
+      "config": {
+        "googleMapsApiKey": "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628"
+      },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
@@ -30,6 +33,11 @@
         "backgroundColor": "#060609"
       },
       "package": "app.rork.towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628"
+        }
+      },
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
@@ -93,12 +101,6 @@
         "expo-document-picker",
         {
           "iCloudContainerEnvironment": "Production"
-        }
-      ],
-      [
-        "@rnmapbox/maps",
-        {
-          "RNMapboxMapsDownloadToken": ""
         }
       ]
     ],

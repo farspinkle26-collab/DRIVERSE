@@ -1,5 +1,6 @@
-// Public Mapbox access token (pk.*) used by @rnmapbox/maps at runtime and by
-// the REST helpers in lib/mapboxApi.ts. Safe to ship in the client bundle.
+// Mapbox raster tile overlay used on top of react-native-maps for iOS/Android.
+// We keep react-native-maps (Google-backed on native) as the map engine and simply
+// paint Mapbox's raster tiles over it via <UrlTile>, so no native SDK / prebuild is needed.
 export const MAPBOX_ACCESS_TOKEN =
   process.env.EXPO_PUBLIC_MAPBOX_TOKEN ||
   process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ||
@@ -8,7 +9,8 @@ export const MAPBOX_ACCESS_TOKEN =
   process.env.MAPBOX_TOKEN ||
   "pk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yd3pncGZyMGFtdzM1b25ycWV4czNtZCJ9.RPoVghBq7PNmSj1WvvHmVA";
 
-// Mapbox's own vector styles, built primarily from OpenStreetMap data, used
-// directly as the MapView's styleURL (no third-party map engine involved).
-export const MAPBOX_STYLE_URL_LIGHT = "mapbox://styles/mapbox/streets-v12";
-export const MAPBOX_STYLE_URL_DARK = "mapbox://styles/mapbox/dark-v11";
+export const MAPBOX_STYLE_LIGHT = "streets-v12";
+export const MAPBOX_STYLE_DARK = "dark-v11";
+
+export const getMapboxTileUrlTemplate = (styleId: string): string =>
+  `https://api.mapbox.com/styles/v1/mapbox/${styleId}/tiles/256/{z}/{x}/{y}@2x?access_token=${MAPBOX_ACCESS_TOKEN}`;

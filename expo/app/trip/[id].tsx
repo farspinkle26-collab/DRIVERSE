@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AppMapView, { Marker, Polyline } from "@/components/AppMap";
-import type { AppMapViewHandle } from "@/components/AppMap";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
 
 interface TripDetail {
@@ -43,7 +44,7 @@ export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const mapRef = useRef<AppMapViewHandle>(null);
+  const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,13 +147,16 @@ export default function TripDetailScreen() {
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
           <View style={styles.mapWrap}>
-            <AppMapView
+            <MapView
               ref={mapRef}
               style={StyleSheet.absoluteFill}
-              dark={isDark}
+              provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
+              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               onMapReady={fitToPoints}
             >
+              <MapboxTileLayer dark={isDark} />
+
               {coords.length > 1 && (
                 <>
                   <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
@@ -179,7 +183,7 @@ export default function TripDetailScreen() {
                   <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
                 </Marker>
               )}
-            </AppMapView>
+            </MapView>
           </View>
 
           <View style={styles.body}>

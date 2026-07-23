@@ -56,8 +56,8 @@ import {
   MoreVertical,
   Globe2,
 } from "lucide-react-native";
-import AppMapView, { Marker, Polyline } from "@/components/AppMap";
-import type { AppMapViewHandle } from "@/components/AppMap";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "./MapboxTileLayer";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -69,10 +69,11 @@ import { supabase } from "@/lib/supabase";
 import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const { isDark } = useTheme();
-  const mapRef = useRef<AppMapViewHandle>(null);
+  const mapRef = useRef<MapView>(null);
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
   const hasPath = coords.length > 1;
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
@@ -91,8 +92,8 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
 
   const region = regionForPath(fitPoints, hasPath ? 1.4 : 1.8);
 
-  // initialRegion alone can render at a stale/default zoom before the
-  // native view has laid out, so fit explicitly once ready.
+  // initialRegion alone can render at a stale/default zoom in liteMode on
+  // Android before the view has laid out, so fit explicitly once ready.
   const fitToPoints = () => {
     if (fitPoints.length > 1) {
       mapRef.current?.fitToCoordinates(fitPoints, {
@@ -104,18 +105,22 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
 
   return (
     <View style={styles.tripMapWrap} pointerEvents="none">
-      <AppMapView
+      <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        dark={isDark}
+        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={region}
         onMapReady={fitToPoints}
         onLayout={fitToPoints}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         scrollEnabled={false}
         zoomEnabled={false}
         pitchEnabled={false}
         rotateEnabled={false}
+        liteMode={Platform.OS === "android"}
       >
+        <MapboxTileLayer dark={isDark} />
+
         {hasPath && (
           <>
             <Polyline coordinates={coords} strokeWidth={7} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
@@ -133,7 +138,7 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
             <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
           </Marker>
         ) : null}
-      </AppMapView>
+      </MapView>
     </View>
   );
 }

@@ -155,16 +155,13 @@ export default function NearbyPlacesScreen() {
 
   const openDirections = useCallback((place: NearbyPlace) => {
     const label = encodeURIComponent(place.name);
-    // iOS: Apple Maps. Android: the platform's generic geo intent, which
-    // lets the user pick whatever navigation app they have installed
-    // (never tied to any specific provider). Web fallback: OpenStreetMap.
     const url = Platform.select({
       ios: `maps://app?daddr=${place.lat},${place.lng}&q=${label}`,
-      android: `geo:${place.lat},${place.lng}?q=${place.lat},${place.lng}(${label})`,
-      default: `https://www.openstreetmap.org/directions?to=${place.lat}%2C${place.lng}`,
+      android: `google.navigation:q=${place.lat},${place.lng}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}&destination_place_id=${place.id}`,
     });
     Linking.openURL(url as string).catch(() => {
-      Linking.openURL(`https://www.openstreetmap.org/directions?to=${place.lat}%2C${place.lng}`);
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`);
     });
   }, []);
 
