@@ -52,7 +52,7 @@ export default function LoadingScreen({ onFinish }: LoadingScreenProps) {
           ]}
         >
           <Image
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/j5u8jdxb3kxx5o8r3ahhk' }}
+            source={require('@/assets/images/driverse-logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width,
     height,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0A0A0F',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -76,17 +76,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logoContainer: {
-    shadowColor: '#000',
+    shadowColor: '#FF1E3C',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 0,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 12,
   },
   logo: {
-    width: 300,
-    height: 300,
+    width: 280,
+    height: 280,
   },
 });
