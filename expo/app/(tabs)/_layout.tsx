@@ -79,14 +79,6 @@ export default function TabLayout() {
       <Tabs.Screen name="map" />
       <Tabs.Screen name="drive" />
       <Tabs.Screen name="profile" />
-
-      {/* Screens inside the (tabs) group that are pushed as full pages and
-          must not appear as their own pill button. */}
-      <Tabs.Screen name="home" options={{ href: null }} />
-      <Tabs.Screen name="orders" options={{ href: null }} />
-      <Tabs.Screen name="atpm" options={{ href: null }} />
-      <Tabs.Screen name="member-asuransi" options={{ href: null }} />
-      <Tabs.Screen name="transactions" options={{ href: null }} />
     </Tabs>
   );
 }
