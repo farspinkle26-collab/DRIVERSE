@@ -13,8 +13,8 @@ import {
   Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "@/components/MapboxTileLayer";
+import AppMapView, { Marker, Polyline } from "@/components/AppMap";
+import type { AppMapViewHandle } from "@/components/AppMap";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { usePlaces } from "@/hooks/usePlaces";
 import type { NormalizedPlace } from "@/lib/placesApi";
@@ -90,7 +90,6 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
 import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
@@ -407,17 +406,17 @@ const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
 // ─── PlayerPuck ──────────────────────────────────────────
 // The player's own map marker, drawn entirely in code (SVG) instead of a
 // bitmap asset, so it can never ship cropped, half-loaded, or missing.
-// Styled after Google Maps' own navigation arrow (blue chevron, white
-// outline, soft halo) so it reads as familiar rather than blocking the
-// map. The arrow points up and the parent Marker's `rotation={heading}` +
-// `flat` steer it with the vehicle.
+// A familiar blue navigation-arrow style (chevron, white outline, soft
+// halo) so it reads clearly without blocking the map. The arrow points up
+// and the parent Marker's `rotation={heading}` + `flat` steer it with the
+// vehicle.
 const PLAYER_PUCK_SIZE = 36;
 function PlayerPuck() {
   return (
     <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 36 36">
       {/* soft blue halo */}
       <SvgCircle cx="18" cy="18" r="17" fill="#4285F4" opacity={0.16} />
-      {/* navigation chevron, Google Maps blue-dot style */}
+      {/* navigation chevron, blue-dot style */}
       <SvgPath
         d="M18 6 L27 27 L18 22 L9 27 Z"
         fill="#4285F4"
@@ -479,7 +478,7 @@ function EyeIcon({ visible, color, size = 14 }: { visible: boolean; color: strin
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<AppMapViewHandle>(null);
   const router = useRouter();
   const { isDark } = useTheme();
 
@@ -876,7 +875,7 @@ export default function MapScreen() {
               }
               lastCoordTimeRef.current = now;
 
-              // --- Third-person chase camera (Google Maps navigation style) ---
+              // --- Third-person chase camera (turn-by-turn navigation style) ---
               // Determine the direction of travel, preferring GPS course while
               // moving, falling back to the bearing between fixes, then holding
               // the last heading when stationary so the view doesn't spin.
@@ -1630,30 +1629,20 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       {/* --- Map --- */}
-      <MapView
+      <AppMapView
         ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
         initialRegion={initialRegion}
         showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={
-          showDropPinHint
-            ? (mapStyleDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
-            : (mapStyleDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
-        }
-        followsUserLocation={false}
+        dark={mapStyleDark}
         onPress={handleMapPress}
         onLongPress={handleMapLongPress}
         onRegionChangeComplete={handlePlacesRegionChange}
       >
-        <MapboxTileLayer dark={mapStyleDark} />
-
         {placesLayerOpen && (
           <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
         )}
@@ -1972,7 +1961,7 @@ export default function MapScreen() {
             </View>
           </SettledMarker>
         )}
-      </MapView>
+      </AppMapView>
 
       {/* ===================================================== */}
       {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
