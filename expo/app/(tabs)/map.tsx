@@ -2578,20 +2578,6 @@ export default function MapScreen() {
 
           <View style={styles.labeledBtn}>
             <TouchableOpacity
-              style={[styles.actionBtn, placesLayerOpen && styles.actionBtnActive]}
-              onPress={() => {
-                setPlacesLayerOpen((v) => !v);
-                setSelectedPlace(null);
-              }}
-              activeOpacity={0.7}
-            >
-              <Coffee size={18} color={placesLayerOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Places</Text>
-          </View>
-
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
               style={styles.actionBtn}
               onPress={openCreateEvent}
               activeOpacity={0.7}
@@ -2793,7 +2779,7 @@ export default function MapScreen() {
 
       {/* Hint shown while drive/drop-pin mode is active, prompting the driver to tap the map */}
       {showDropPinHint && (
-        <Animated.View style={[styles.dropPinHint, { top: insets.top + 16, opacity: fadeIn }]} pointerEvents="none">
+        <Animated.View style={[styles.dropPinHint, { top: insets.top + 90, opacity: fadeIn }]} pointerEvents="none">
           <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
           <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
         </Animated.View>
