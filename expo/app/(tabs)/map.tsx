@@ -87,10 +87,10 @@ import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
+import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
-const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLEMAPS ?? "";
 
 // --- Major Indonesian cities for nationwide search ---
 const INDONESIAN_CITIES = [
@@ -129,18 +129,16 @@ interface CafePOI {
   category: LandmarkCategory;
 }
 
-/** Detect landmark category from Google Places types */
-function detectCategory(placeTypes: string[]): LandmarkCategory {
-  const t = placeTypes.map((s) => s.toLowerCase());
-  if (t.some((s) => s.includes("charging") || s === "electric_vehicle_charging_station")) return "charging";
-  if (t.some((s) => s.includes("car_wash"))) return "carwash";
-  if (t.some((s) => s.includes("car_repair"))) return "workshop";
-  if (t.some((s) => s.includes("gas") || s === "gas_station")) return "spbu";
-  if (t.some((s) => s.includes("restaurant") || s.includes("food"))) return "restaurant";
-  if (t.some((s) => s.includes("cafe"))) return "cafe";
-  if (t.some((s) => s.includes("store") || s.includes("shop") || s.includes("mall") || s === "shopping_mall")) return "shopping";
-  return "restaurant";
-}
+// --- Mapbox Geocoding search terms used to populate each landmark category ---
+const LANDMARK_CATEGORY_QUERIES: { category: LandmarkCategory; query: string }[] = [
+  { category: "cafe", query: "cafe" },
+  { category: "restaurant", query: "restaurant" },
+  { category: "spbu", query: "gas station" },
+  { category: "shopping", query: "shopping mall" },
+  { category: "carwash", query: "car wash" },
+  { category: "workshop", query: "car repair" },
+  { category: "charging", query: "ev charging station" },
+];
 
 type SelectedDestination =
   | { type: "cafe"; data: CafePOI }
@@ -154,7 +152,7 @@ interface RouteInfo {
   durationSeconds: number;
 }
 
-// A single turn-by-turn maneuver parsed from the Google Directions leg.steps[]
+// A single turn-by-turn maneuver parsed from the Mapbox Directions leg.steps[]
 interface RouteStep {
   maneuver: string;
   instruction: string;
@@ -166,30 +164,42 @@ interface RouteStep {
   cumulativeMeters: number;
 }
 
-function stripHtmlTags(s: string): string {
-  return s.replace(/<[^>]*>/g, "");
+/** Mapbox Directions maneuver {type, modifier} -> the maneuver-key strings maneuverMeta() understands */
+function mapboxManeuverKey(type: string, modifier?: string): string {
+  const mod = modifier ?? "";
+  switch (type) {
+    case "turn":
+      if (mod === "uturn") return "uturn-right";
+      if (mod === "sharp right") return "turn-sharp-right";
+      if (mod === "sharp left") return "turn-sharp-left";
+      if (mod === "slight right") return "turn-slight-right";
+      if (mod === "slight left") return "turn-slight-left";
+      if (mod === "right") return "turn-right";
+      if (mod === "left") return "turn-left";
+      return "straight";
+    case "merge":
+      return "merge";
+    case "fork":
+      if (mod.includes("left")) return "fork-left";
+      if (mod.includes("right")) return "fork-right";
+      return "straight";
+    case "on ramp":
+    case "off ramp":
+      if (mod.includes("left")) return "ramp-left";
+      if (mod.includes("right")) return "ramp-right";
+      return "straight";
+    case "roundabout":
+    case "rotary":
+    case "roundabout turn":
+      return mod.includes("left") ? "roundabout-left" : "roundabout-right";
+    case "uturn":
+      return "uturn-right";
+    default:
+      return "straight";
+  }
 }
 
-function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"');
-}
-
-/** Directions API steps give html_instructions like "Turn <b>right</b> onto <b>Jl. Foo</b>" */
-function parseStepHtml(html: string): { instruction: string; street: string } {
-  const decoded = decodeHtmlEntities(html ?? "");
-  const bMatches = [...decoded.matchAll(/<b>(.*?)<\/b>/g)].map((m) => stripHtmlTags(m[1]));
-  const street = bMatches.length > 0 ? bMatches[bMatches.length - 1] : "";
-  const instruction = stripHtmlTags(decoded).replace(/\s+/g, " ").trim();
-  return { instruction, street };
-}
-
-/** Google Directions maneuver enum -> icon + short display label */
+/** Maneuver key -> icon + short display label */
 function maneuverMeta(maneuver: string): { Icon: typeof ArrowUp; label: string } {
   switch (maneuver) {
     case "turn-right": return { Icon: CornerUpRight, label: "Turn Right" };
@@ -221,41 +231,6 @@ interface TripRecord {
   durationMs: number;
   startedAt: number;
   endedAt?: number;
-}
-
-// --- Google Polyline Decoder ---
-function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  const points: { latitude: number; longitude: number }[] = [];
-  let index = 0;
-  const len = encoded.length;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < len) {
-    let b: number;
-    let shift = 0;
-    let result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-    lat += dlat;
-
-    shift = 0;
-    result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
-    lng += dlng;
-
-    points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
-  return points;
 }
 
 // --- Haversine distance (meters) ---
@@ -634,35 +609,28 @@ export default function MapScreen() {
 
   // --- Fetch cafes from a specific city ---
   const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
-    if (!GOOGLE_API_KEY) return [];
-    const types = ["cafe", "restaurant", "gas_station", "shopping_mall", "store", "car_wash", "car_repair", "electric_vehicle_charging_station"];
+    if (!MAPBOX_ACCESS_TOKEN) return [];
     const allResults: CafePOI[] = [];
     const seen = new Set<string>();
 
-    for (const type of types) {
+    for (const { category, query } of LANDMARK_CATEGORY_QUERIES) {
       try {
-        const url =
-          `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&type=${type}&key=${GOOGLE_API_KEY}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data.status === "OK" && data.results) {
-          for (const place of data.results) {
-            if (seen.has(place.place_id)) continue;
-            seen.add(place.place_id);
-            allResults.push({
-              id: place.place_id,
-              name: place.name,
-              lat: place.geometry.location.lat,
-              lng: place.geometry.location.lng,
-              rating: place.rating,
-              vicinity: place.vicinity ?? cityName,
-              types: place.types ?? [],
-              category: detectCategory(place.types ?? []),
-            });
-          }
+        const places = await searchPlaces(query, { latitude: lat, longitude: lng });
+        for (const place of places) {
+          if (seen.has(place.id)) continue;
+          seen.add(place.id);
+          allResults.push({
+            id: place.id,
+            name: place.name,
+            lat: place.latitude,
+            lng: place.longitude,
+            vicinity: place.fullAddress ?? cityName,
+            types: [],
+            category,
+          });
         }
       } catch {
-        // Skip failed city
+        // Skip failed category
       }
     }
     return allResults;
@@ -670,7 +638,7 @@ export default function MapScreen() {
 
   // --- Fetch cafes from ALL Indonesian cities ---
   const fetchAllIndonesiaCafes = useCallback(async () => {
-    if (!GOOGLE_API_KEY) return;
+    if (!MAPBOX_ACCESS_TOKEN) return;
     setLoadingCafes(true);
 
     const seen = new Set<string>();
@@ -696,75 +664,51 @@ export default function MapScreen() {
 
   // --- Fetch directions from user location to destination ---
   const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
-    if (!GOOGLE_API_KEY) {
-      Alert.alert("Route Unavailable", "Maps API key is missing, so a route can't be calculated.");
+    if (!MAPBOX_ACCESS_TOKEN) {
+      Alert.alert("Route Unavailable", "Mapbox access token is missing, so a route can't be calculated.");
       setNavigating(false);
       return;
     }
     setLoadingRoute(true);
     try {
-      const url =
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&key=${GOOGLE_API_KEY}&mode=driving`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const result = await getDirectionsWithSteps(origin, dest);
 
-      if (data.status !== "OK" || !data.routes?.[0]) {
-        console.warn("Directions API error:", data.status, data.error_message);
-      }
+      if (result) {
+        estimatedDurationRef.current = result.durationSeconds;
+        setRouteInfo({
+          coordinates: result.coordinates,
+          distanceKm: fmtKm(result.distanceMeters),
+          distanceMeters: result.distanceMeters,
+          durationMin: fmtDuration(result.durationSeconds),
+          durationSeconds: result.durationSeconds,
+        });
 
-      if (data.status === "OK" && data.routes?.[0]) {
-        const route = data.routes[0];
-        const leg = route.legs[0];
-        const polyline = route.overview_polyline?.points;
-        if (polyline) {
-          const coords = decodePolyline(polyline);
-          const estSecs = leg.duration.value;
-          estimatedDurationRef.current = estSecs;
-          setRouteInfo({
-            coordinates: coords,
-            distanceKm: fmtKm(leg.distance.value),
-            distanceMeters: leg.distance.value,
-            durationMin: fmtDuration(estSecs),
-            durationSeconds: estSecs,
-          });
+        // Turn-by-turn steps for the driving-mode instruction card
+        let cumulative = 0;
+        const steps: RouteStep[] = result.steps.map((s) => {
+          cumulative += s.distanceMeters;
+          return {
+            maneuver: mapboxManeuverKey(s.maneuverType, s.maneuverModifier),
+            instruction: s.instruction,
+            street: s.street,
+            distanceMeters: s.distanceMeters,
+            durationSeconds: s.durationSeconds,
+            cumulativeMeters: cumulative,
+          };
+        });
+        setRouteSteps(steps);
 
-          // Parse turn-by-turn steps for the driving-mode instruction card
-          let cumulative = 0;
-          const steps: RouteStep[] = (leg.steps ?? []).map((s: { maneuver?: string; html_instructions?: string; distance?: { value: number }; duration?: { value: number } }) => {
-            cumulative += s.distance?.value ?? 0;
-            const { instruction, street } = parseStepHtml(s.html_instructions ?? "");
-            return {
-              maneuver: s.maneuver ?? "straight",
-              instruction,
-              street,
-              distanceMeters: s.distance?.value ?? 0,
-              durationSeconds: s.duration?.value ?? 0,
-              cumulativeMeters: cumulative,
-            };
-          });
-          setRouteSteps(steps);
-
-          mapRef.current?.fitToCoordinates(coords, {
-            edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
-            animated: true,
-          });
-        } else {
-          setNavigating(false);
-          Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
-        }
+        mapRef.current?.fitToCoordinates(result.coordinates, {
+          edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
+          animated: true,
+        });
       } else {
         setNavigating(false);
-        const isKeyIssue = data.status === "REQUEST_DENIED" || data.status === "OVER_QUERY_LIMIT";
-        Alert.alert(
-          "Route Unavailable",
-          isKeyIssue
-            ? "The maps service rejected the request. The Google Maps API key may be missing the Directions API or have restrictions that block it."
-            : "No driving route could be found to this destination."
-        );
+        Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
       }
     } catch {
       setNavigating(false);
-      Alert.alert("Route Unavailable", "Couldn't reach the maps service. Check your connection and try again.");
+      Alert.alert("Route Unavailable", "Couldn't reach Mapbox. Check your connection and try again.");
     } finally {
       setLoadingRoute(false);
     }

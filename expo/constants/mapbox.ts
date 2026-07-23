@@ -7,7 +7,7 @@ export const MAPBOX_ACCESS_TOKEN =
   process.env.EXPO_PUBLIC_MAPBOX ||
   process.env.MAPBOX_ACCESS_TOKEN ||
   process.env.MAPBOX_TOKEN ||
-  "";
+  "pk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yd3pncGZyMGFtdzM1b25ycWV4czNtZCJ9.RPoVghBq7PNmSj1WvvHmVA";
 
 export const MAPBOX_STYLE_LIGHT = "streets-v12";
 export const MAPBOX_STYLE_DARK = "dark-v11";

@@ -4,9 +4,10 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from "react-native
 import * as Location from "expo-location";
 import { Location as LocationType } from "@/types";
 import Card from "./Card";
-import GoogleMapsSearch from "./GoogleMapsSearch";
+import MapboxSearch from "./MapboxSearch";
 import MapboxTileLayer from "./MapboxTileLayer";
 import { useTheme } from "@/hooks/useThemeStore";
+import { getDirections, reverseGeocode } from "@/lib/mapboxApi";
 
 interface InteractiveMapViewProps {
   pickup: LocationType | null;
@@ -24,10 +25,6 @@ interface InteractiveMapViewProps {
   /** Whether to show the search bar overlay */
   showSearch?: boolean;
 }
-
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLEMAPS || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628";
-
-console.log('🗺️ InteractiveMapView - API Key configured:', GOOGLE_MAPS_API_KEY ? `Yes (${GOOGLE_MAPS_API_KEY.substring(0, 8)}...)` : 'No');
 
 const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
   pickup,
@@ -74,42 +71,17 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
       ]);
     };
 
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "your_google_maps_api_key_here") {
-      console.log('🗺️ No valid API key, using straight-line distance');
-      fallbackToStraightLine();
-      return;
-    }
-
     try {
-      const originStr = `${origin.latitude},${origin.longitude}`;
-      const destinationStr = `${destination.latitude},${destination.longitude}`;
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destinationStr}&key=${GOOGLE_MAPS_API_KEY}&language=id`;
-      
-      console.log('🗺️ Fetching route from Directions API...');
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      console.log('🗺️ Directions API status:', data.status);
-      
-      if (data.status !== 'OK') {
-        console.warn('🗺️ Directions API returned non-OK status:', data.status, data.error_message || '');
+      const result = await getDirections(origin, destination);
+      if (!result) {
+        console.warn('🗺️ Mapbox directions returned no route');
         fallbackToStraightLine();
         return;
       }
-      
-      if (data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-        const points = decodePolyline(route.overview_polyline.points);
-        console.log('🗺️ Route decoded:', points.length, 'points');
-        setRouteCoordinates(points);
-        
-        const leg = route.legs[0];
-        setDistance(leg.distance.value / 1000);
-        setDuration(leg.duration.value / 60);
-      } else {
-        console.warn('🗺️ No routes found in Directions API response');
-        fallbackToStraightLine();
-      }
+
+      setRouteCoordinates(result.coordinates);
+      setDistance(result.distanceKm);
+      setDuration(result.durationMin);
     } catch (error) {
       console.error('🗺️ Error calculating route:', error);
       fallbackToStraightLine();
@@ -225,56 +197,13 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
     return R * c;
   };
 
-  const decodePolyline = (encoded: string) => {
-    const points = [];
-    let index = 0;
-    const len = encoded.length;
-    let lat = 0;
-    let lng = 0;
-
-    while (index < len) {
-      let b;
-      let shift = 0;
-      let result = 0;
-      do {
-        b = encoded.charAt(index++).charCodeAt(0) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      const dlat = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.charAt(index++).charCodeAt(0) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      const dlng = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
-      lng += dlng;
-
-      points.push({
-        latitude: lat / 1e5,
-        longitude: lng / 1e5,
-      });
-    }
-
-    return points;
-  };
-
   const reverseGeocodeCoordinate = async (latitude: number, longitude: number): Promise<string> => {
     try {
-      if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== "your_google_maps_api_key_here") {
-        const response = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}&language=id`
-        );
-        const data = await response.json();
-        if (data.results && data.results.length > 0) {
-          return data.results[0].formatted_address;
-        }
+      const mapboxAddress = await reverseGeocode(latitude, longitude);
+      if (mapboxAddress) {
+        return mapboxAddress;
       }
-      
+
       const results = await Location.reverseGeocodeAsync({ latitude, longitude });
       if (results.length > 0) {
         const addr = results[0];
@@ -417,7 +346,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
       {/* Search bar overlay - always at top when showSearch is true */}
       {showSearch && (
         <View style={styles.searchOverlay}>
-          <GoogleMapsSearch
+          <MapboxSearch
             onLocationSelect={(location) => {
               if (currentStep === 'pickup') {
                 onLocationChange?.(location, dropoff);
@@ -439,7 +368,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
             }}
             placeholder="Cari lokasi..."
             currentLocation={currentLocation}
-            style={styles.googleSearch}
+            style={styles.mapboxSearch}
             autoFocus={false}
           />
         </View>
@@ -462,7 +391,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
               👆 Ketuk peta untuk memilih lokasi {currentStep === 'pickup' ? 'penjemputan' : 'tujuan'}
             </Text>
           </View>
-          <GoogleMapsSearch
+          <MapboxSearch
             onLocationSelect={(location) => {
               if (currentStep === 'pickup') {
                 onLocationChange?.(location, dropoff);
@@ -472,7 +401,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
             }}
             placeholder="Atau cari lokasi di sini..."
             currentLocation={pickup || undefined}
-            style={styles.googleSearch}
+            style={styles.mapboxSearch}
             autoFocus={false}
           />
         </View>
@@ -614,7 +543,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
   },
-  googleSearch: {
+  mapboxSearch: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
     shadowColor: '#000',

@@ -19,21 +19,18 @@ import {
   Coffee,
   Wrench,
   MapPin,
-  Star,
   Navigation2,
-  Clock,
   RefreshCw,
 } from "lucide-react-native";
-
-const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLEMAPS || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "";
+import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
+import { searchNearby } from "@/lib/mapboxApi";
 
 type PlaceKind = "cafe" | "workshop";
 
 const KIND_CONFIG: Record<PlaceKind, {
   title: string;
   subtitle: string;
-  googleType: string;
-  keyword?: string;
+  mapboxQueries: string[];
   icon: React.FC<{ size: number; color: string }>;
   color: string;
   emptyLabel: string;
@@ -41,7 +38,7 @@ const KIND_CONFIG: Record<PlaceKind, {
   cafe: {
     title: "Café Finder",
     subtitle: "Nearest pit stops & hangouts",
-    googleType: "cafe",
+    mapboxQueries: ["cafe", "kafe", "coffee shop"],
     icon: Coffee,
     color: "#8B5CF6",
     emptyLabel: "cafés",
@@ -49,7 +46,7 @@ const KIND_CONFIG: Record<PlaceKind, {
   workshop: {
     title: "Workshops",
     subtitle: "Nearest tuning & repair shops",
-    googleType: "car_repair",
+    mapboxQueries: ["car repair", "bengkel mobil", "auto workshop"],
     icon: Wrench,
     color: "#F59E0B",
     emptyLabel: "workshops",
@@ -60,9 +57,6 @@ interface NearbyPlace {
   id: string;
   name: string;
   vicinity?: string;
-  rating?: number;
-  userRatingsTotal?: number;
-  openNow?: boolean;
   lat: number;
   lng: number;
   distanceMeters: number;
@@ -103,54 +97,30 @@ export default function NearbyPlacesScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchNearby = useCallback(async (coords: { latitude: number; longitude: number }) => {
-    if (!GOOGLE_API_KEY) {
-      setError("Google Maps API key not configured");
+    if (!MAPBOX_ACCESS_TOKEN) {
+      setError("Mapbox access token not configured");
       setPlaces([]);
       return;
     }
     try {
-      // rankby=distance returns results ordered nearest-first and requires
-      // type/keyword/name instead of a radius.
-      const url =
-        `https://maps.googleapis.com/maps/api/place/nearbysearch/json` +
-        `?location=${coords.latitude},${coords.longitude}` +
-        `&rankby=distance` +
-        `&type=${config.googleType}` +
-        `&key=${GOOGLE_API_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const candidates = await searchNearby(config.mapboxQueries, coords);
 
-      if (data.status === "OK" && Array.isArray(data.results)) {
-        const mapped: NearbyPlace[] = data.results.map((place: any) => {
-          const lat = place.geometry.location.lat;
-          const lng = place.geometry.location.lng;
-          return {
-            id: place.place_id,
-            name: place.name,
-            vicinity: place.vicinity,
-            rating: place.rating,
-            userRatingsTotal: place.user_ratings_total,
-            openNow: place.opening_hours?.open_now,
-            lat,
-            lng,
-            distanceMeters: haversineMeters(coords, { latitude: lat, longitude: lng }),
-          };
-        });
-        mapped.sort((a, b) => a.distanceMeters - b.distanceMeters);
-        setPlaces(mapped);
-        setError(mapped.length === 0 ? `No nearby ${config.emptyLabel} found` : null);
-      } else if (data.status === "ZERO_RESULTS") {
-        setPlaces([]);
-        setError(`No nearby ${config.emptyLabel} found`);
-      } else {
-        setPlaces([]);
-        setError(data.error_message || "Could not load nearby places");
-      }
+      const mapped: NearbyPlace[] = candidates.map((place) => ({
+        id: place.id,
+        name: place.name,
+        vicinity: place.address,
+        lat: place.latitude,
+        lng: place.longitude,
+        distanceMeters: haversineMeters(coords, { latitude: place.latitude, longitude: place.longitude }),
+      }));
+      mapped.sort((a, b) => a.distanceMeters - b.distanceMeters);
+      setPlaces(mapped);
+      setError(mapped.length === 0 ? `No nearby ${config.emptyLabel} found` : null);
     } catch {
       setPlaces([]);
-      setError("Could not reach Google Maps");
+      setError("Could not reach Mapbox");
     }
-  }, [config.googleType, config.emptyLabel]);
+  }, [config.mapboxQueries, config.emptyLabel]);
 
   const locateAndFetch = useCallback(async () => {
     setError(null);
@@ -273,23 +243,6 @@ export default function NearbyPlacesScreen() {
                   <MapPin size={13} color="#8A8A9A" />
                   <Text style={styles.metaText}>{fmtDistance(place.distanceMeters)}</Text>
                 </View>
-                {place.rating != null && (
-                  <View style={styles.metaItem}>
-                    <Star size={13} color="#FBBF24" fill="#FBBF24" />
-                    <Text style={styles.metaText}>
-                      {place.rating.toFixed(1)}
-                      {place.userRatingsTotal ? ` (${place.userRatingsTotal})` : ""}
-                    </Text>
-                  </View>
-                )}
-                {place.openNow != null && (
-                  <View style={styles.metaItem}>
-                    <Clock size={13} color={place.openNow ? "#22C55E" : "#EF4444"} />
-                    <Text style={[styles.metaText, { color: place.openNow ? "#22C55E" : "#EF4444" }]}>
-                      {place.openNow ? "Open now" : "Closed"}
-                    </Text>
-                  </View>
-                )}
               </View>
 
               <View style={styles.directionsBtn}>
