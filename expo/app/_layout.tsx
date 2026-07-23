@@ -7,11 +7,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthContext } from "@/hooks/useAuthStore";
 import { ThemeContext } from "@/hooks/useThemeStore";
-import { TransactionContext } from "@/hooks/useTransactionStore";
-import { PaymentContext } from "@/hooks/usePaymentStore";
 import { ChatContext } from "@/hooks/useChatStore";
 import { NotificationContext } from "@/hooks/useNotificationStore";
-import { RealtimeContext } from "@/hooks/useRealtimeStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
@@ -39,10 +36,6 @@ function RootLayoutNav() {
       <Stack.Screen name="select-car" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="terms-and-conditions" />
-      <Stack.Screen name="top-up" options={{ headerShown: false }} />
-      <Stack.Screen name="transaction-history" options={{ headerShown: false }} />
-      <Stack.Screen name="payment-history" options={{ headerShown: false }} />
-      <Stack.Screen name="top-up-history" options={{ headerShown: false }} />
       <Stack.Screen name="chat" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
@@ -90,34 +83,28 @@ export default function RootLayout() {
           />
           <ThemeContext>
             <AuthContext>
-              <PaymentContext>
-                <TransactionContext>
-                  <RealtimeContext>
-                    <NotificationContext>
-                      <ChatContext>
-                      <XPProvider>
-                        <QuestsProvider>
-                          <OnlineUsersProvider>
-                            <PartyProvider>
-                              <EventsProvider>
-                                <GroupChatProvider>
-                                  <RoutesProvider>
-                                    <ActiveCarProvider>
-                                      <RootLayoutNav />
-                                      <NotificationBanner />
-                                    </ActiveCarProvider>
-                                  </RoutesProvider>
-                                </GroupChatProvider>
-                              </EventsProvider>
-                            </PartyProvider>
-                          </OnlineUsersProvider>
-                        </QuestsProvider>
-                      </XPProvider>
-                    </ChatContext>
-                    </NotificationContext>
-                  </RealtimeContext>
-                </TransactionContext>
-              </PaymentContext>
+              <NotificationContext>
+                <ChatContext>
+                  <XPProvider>
+                    <QuestsProvider>
+                      <OnlineUsersProvider>
+                        <PartyProvider>
+                          <EventsProvider>
+                            <GroupChatProvider>
+                              <RoutesProvider>
+                                <ActiveCarProvider>
+                                  <RootLayoutNav />
+                                  <NotificationBanner />
+                                </ActiveCarProvider>
+                              </RoutesProvider>
+                            </GroupChatProvider>
+                          </EventsProvider>
+                        </PartyProvider>
+                      </OnlineUsersProvider>
+                    </QuestsProvider>
+                  </XPProvider>
+                </ChatContext>
+              </NotificationContext>
             </AuthContext>
           </ThemeContext>
         </GestureHandlerRootView>
