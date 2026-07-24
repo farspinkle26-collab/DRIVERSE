@@ -110,7 +110,7 @@ export default function EventManageScreen() {
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
         <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: insets.top + 140 }} />
+        <ActivityIndicator color="#FF3B30" style={{ marginTop: insets.top + 140 }} />
       </View>
     );
   }
@@ -207,9 +207,9 @@ const styles = StyleSheet.create({
   sectionLabel: { fontSize: 12, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.6, marginBottom: 10, textTransform: "uppercase" },
 
   memberRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,59,48,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   avatarImg: { width: 40, height: 40, borderRadius: 20 },
-  avatarText: { fontSize: 15, fontWeight: "800", color: "#FF6B35" },
+  avatarText: { fontSize: 15, fontWeight: "800", color: "#FF3B30" },
   rowName: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
 
   chatBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderRadius: 14, paddingVertical: 14, marginBottom: 12 },

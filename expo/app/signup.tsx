@@ -40,7 +40,7 @@ const CAR_COLORS = [
   { name: "Midnight Blue", hex: "#3B82F6" },
   { name: "Phantom Black", hex: "#1A1A1A" },
   { name: "Arctic White", hex: "#F9FAFB" },
-  { name: "Solar Orange", hex: "#FF6B35" },
+  { name: "Solar Orange", hex: "#FF3B30" },
   { name: "Toxic Green", hex: "#22C55E" },
   { name: "Royal Purple", hex: "#8B5CF6" },
   { name: "Sunset Yellow", hex: "#F59E0B" },
@@ -332,7 +332,7 @@ export default function SignUpScreen() {
               <View style={styles.stepForm}>
                 <View style={styles.carPreview}>
                   <LinearGradient
-                    colors={[selectedColor?.hex ?? "#FF6B35", selectedColor?.hex ?? "#FF8A50"]}
+                    colors={[selectedColor?.hex ?? "#FF3B30", selectedColor?.hex ?? "#FF6259"]}
                     style={styles.carPreviewBadge}
                   >
                     <Car size={40} color="#FFFFFF" />
@@ -374,7 +374,7 @@ export default function SignUpScreen() {
               disabled={loading || !canGoNext()}
             >
               <LinearGradient
-                colors={canGoNext() ? ["#FF6B35", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
+                colors={canGoNext() ? ["#FF3B30", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.actionBtnGradient}
@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
     borderRadius: 2,
   },
   stepDots: {
@@ -461,8 +461,8 @@ const styles = StyleSheet.create({
     borderColor: "#22C55E",
   },
   stepDotActive: {
-    backgroundColor: "#FF6B3520",
-    borderColor: "#FF6B35",
+    backgroundColor: "#FF3B3020",
+    borderColor: "#FF3B30",
   },
   stepDotText: {
     fontSize: 11,
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
     color: "#5A5A6E",
   },
   stepDotTextActive: {
-    color: "#FF6B35",
+    color: "#FF3B30",
   },
   errorBox: {
     backgroundColor: "rgba(239, 68, 68, 0.1)",
@@ -549,8 +549,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
   makeChipSelected: {
-    backgroundColor: "rgba(255, 107, 53, 0.15)",
-    borderColor: "#FF6B35",
+    backgroundColor: "rgba(255, 59, 48, 0.15)",
+    borderColor: "#FF3B30",
   },
   makeChipText: {
     fontSize: 12,
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     color: "#8A8A9A",
   },
   makeChipTextSelected: {
-    color: "#FF6B35",
+    color: "#FF3B30",
   },
   colorGrid: {
     flexDirection: "row",
@@ -633,6 +633,6 @@ const styles = StyleSheet.create({
   footerLink: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#FF6B35",
+    color: "#FF3B30",
   },
 });

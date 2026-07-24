@@ -138,7 +138,7 @@ export default function TripDetailScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: 60 }} />
+        <ActivityIndicator color="#FF3B30" style={{ marginTop: 60 }} />
       ) : !trip ? (
         <View style={styles.notFound}>
           <RouteIcon size={44} color="#3A3A4E" />
@@ -159,8 +159,8 @@ export default function TripDetailScreen() {
 
               {coords.length > 1 && (
                 <>
-                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
-                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF6B35" lineCap="round" />
+                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,59,48,0.25)" lineCap="round" />
+                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF3B30" lineCap="round" />
                 </>
               )}
               {coords.length > 0 && (
@@ -201,7 +201,7 @@ export default function TripDetailScreen() {
 
             <View style={styles.statsGrid}>
               <View style={styles.statBox}>
-                <RouteIcon size={16} color="#FF6B35" />
+                <RouteIcon size={16} color="#FF3B30" />
                 <Text style={styles.statBoxValue}>{trip.distance_km.toFixed(1)}</Text>
                 <Text style={styles.statBoxLabel}>km</Text>
               </View>

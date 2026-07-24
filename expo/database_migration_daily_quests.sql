@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS public.quest_templates (
   title_template TEXT NOT NULL,              -- may contain placeholders
   description_template TEXT NOT NULL,        -- may contain placeholders
   icon TEXT NOT NULL DEFAULT 'Flame',        -- lucide icon name for the UI
-  accent_color TEXT NOT NULL DEFAULT '#FF6B35',
+  accent_color TEXT NOT NULL DEFAULT '#FF3B30',
 
   -- Place requirement (generic category, not a specific location).
   -- NULL = no place needed. 'any' = a place of any category.
@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS public.daily_quests (
   title TEXT NOT NULL,
   description TEXT NOT NULL,
   icon TEXT NOT NULL DEFAULT 'Flame',
-  accent_color TEXT NOT NULL DEFAULT '#FF6B35',
+  accent_color TEXT NOT NULL DEFAULT '#FF3B30',
   category TEXT NOT NULL DEFAULT 'driving',
   objective_type TEXT NOT NULL DEFAULT 'drive_distance',
   -- Generic place category this quest matches (for indicator routing).
@@ -919,7 +919,7 @@ INSERT INTO public.badges (id, name, description, icon, accent_color, criteria_t
   ('quest_10',       'Getting Rolling',  'Complete 10 quests.',                              'Medal',   '#3B82F6', 'total_completed',      10,  NULL,          2),
   ('quest_50',       'Road Regular',     'Complete 50 quests.',                              'Medal',   '#8B5CF6', 'total_completed',      50,  NULL,          3),
   ('quest_100',      'Century Driver',   'Complete 100 quests.',                             'Trophy',  '#FFD700', 'total_completed',      100, NULL,          4),
-  ('streak_3',       'On a Roll',        'Keep a 3-day quest streak.',                       'Flame',   '#FF6B35', 'streak',               3,   NULL,          5),
+  ('streak_3',       'On a Roll',        'Keep a 3-day quest streak.',                       'Flame',   '#FF3B30', 'streak',               3,   NULL,          5),
   ('streak_7',       'Week Warrior',     'Keep a 7-day quest streak.',                       'Flame',   '#FF3B6F', 'streak',               7,   NULL,          6),
   ('streak_30',      'Unstoppable',      'Keep a 30-day quest streak.',                      'Zap',     '#FBBF24', 'streak',               30,  NULL,          7),
   ('hard_10',        'Hard Charger',     'Complete 10 Hard quests.',                         'Swords',  '#EF4444', 'difficulty_completed', 10,  'hard',        8),
@@ -973,7 +973,7 @@ INSERT INTO public.quest_templates (
   -- ── MEDIUM ──────────────────────────────────────────────────────
   ('u_med_distance', 'medium', 'driving', 'drive_distance',
     'Distance Grinder', 'Cover {target} {unit} on the road today.',
-    'Route', '#FF6B35', NULL, NULL, 25, 60, 5, 'km',
+    'Route', '#FF3B30', NULL, NULL, 25, 60, 5, 'km',
     1, NULL, NULL, NULL, NULL, 1.1, NULL, 1.3),
   ('u_med_mall', 'medium', 'exploration', 'visit_place',
     'Mall Run', 'Visit {place} today.',
@@ -999,7 +999,7 @@ INSERT INTO public.quest_templates (
     1, NULL, NULL, NULL, NULL, 1.4, NULL, 1.2),
   ('u_hard_long_haul', 'hard', 'driving', 'drive_distance',
     'Long Haul', 'Log a serious {target} {unit} on the road.',
-    'Flame', '#FF6B35', NULL, NULL, 40, 90, 10, 'km',
+    'Flame', '#FF3B30', NULL, NULL, 40, 90, 10, 'km',
     1, NULL, NULL, NULL, NULL, 1.3, NULL, 1.2),
   ('u_hard_explore', 'hard', 'exploration', 'visit_places',
     'City Explorer', 'Visit {target} different places today.',

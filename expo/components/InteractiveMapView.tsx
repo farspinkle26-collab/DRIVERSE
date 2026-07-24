@@ -311,7 +311,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
             coordinate={{ latitude: pickup.latitude, longitude: pickup.longitude }}
             title="Penjemputan"
             description={pickup.address}
-            pinColor="#FF6B35"
+            pinColor="#FF3B30"
           />
         )}
         
@@ -336,7 +336,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
         {routeCoordinates.length > 0 && (
           <Polyline
             coordinates={routeCoordinates}
-            strokeColor="#FF6B35"
+            strokeColor="#FF3B30"
             strokeWidth={5}
             geodesic={true}
           />
@@ -434,9 +434,9 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
           )}
 
           {distance > 0 && pickup && dropoff && (
-            <Card style={[styles.locationCard, { backgroundColor: '#FF6B35' + '20' }]}>
-              <Text style={[styles.locationLabel, { color: '#FF6B35' }]}>🛣️ Route</Text>
-              <Text style={[styles.locationAddress, { color: '#FF6B35' }]}>
+            <Card style={[styles.locationCard, { backgroundColor: '#FF3B30' + '20' }]}>
+              <Text style={[styles.locationLabel, { color: '#FF3B30' }]}>🛣️ Route</Text>
+              <Text style={[styles.locationAddress, { color: '#FF3B30' }]}>
                 {distance.toFixed(1)} km • {Math.round(duration)} min
               </Text>
             </Card>
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   tapHint: {
-    backgroundColor: 'rgba(255, 107, 53, 0.9)',
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
