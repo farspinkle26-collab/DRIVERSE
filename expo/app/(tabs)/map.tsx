@@ -1845,7 +1845,7 @@ export default function MapScreen() {
             settleKey={`chosen-${locationChosen}`}
           >
             <View style={styles.customPin} collapsable={false}>
-              <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
+              <MapPin size={locationChosen ? 36 : 28} color="#FF3B30" fill="#FF3B30" />
             </View>
           </SettledMarker>
         )}
@@ -1989,7 +1989,7 @@ export default function MapScreen() {
           />
           {places.loading && (
             <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
-              <ActivityIndicator size="small" color="#FF6B35" />
+              <ActivityIndicator size="small" color="#FF3B30" />
               <Text style={styles.placesLoadingText}>Loading nearby places…</Text>
             </View>
           )}
@@ -2025,7 +2025,7 @@ export default function MapScreen() {
       {locating && (
         <View style={[styles.loadingOverlay, { paddingTop: insets.top + 20 }]} pointerEvents="none">
           <View style={styles.loadingCard}>
-            <ActivityIndicator size="small" color="#FF6B35" />
+            <ActivityIndicator size="small" color="#FF3B30" />
             <Text style={styles.loadingText}>Detecting your location...</Text>
           </View>
         </View>
@@ -2124,7 +2124,7 @@ export default function MapScreen() {
                 }
               }}
             >
-              <Navigation size={16} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
+              <Navigation size={16} color="#FF3B30" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
             </TouchableOpacity>
           </View>
 
@@ -2453,7 +2453,7 @@ export default function MapScreen() {
               onPress={() => router.push("/routes" as any)}
               activeOpacity={0.7}
             >
-              <Share2 size={17} color="#FF6B35" />
+              <Share2 size={17} color="#FF3B30" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2571,7 +2571,7 @@ export default function MapScreen() {
               onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
               activeOpacity={0.7}
             >
-              <SlidersHorizontal size={18} color={filtersOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
+              <SlidersHorizontal size={18} color={filtersOpen ? "#FF3B30" : "#FFFFFF"} strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={styles.actionBtnLabel}>Filters</Text>
           </View>
@@ -2780,7 +2780,7 @@ export default function MapScreen() {
       {/* Hint shown while drive/drop-pin mode is active, prompting the driver to tap the map */}
       {showDropPinHint && (
         <Animated.View style={[styles.dropPinHint, { top: insets.top + 90, opacity: fadeIn }]} pointerEvents="none">
-          <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
+          <MapPin size={18} color="#FF3B30" fill="#FF3B30" />
           <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
         </Animated.View>
       )}
@@ -3387,7 +3387,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.2)",
+    borderColor: "rgba(255, 59, 48, 0.2)",
   },
   loadingText: {
     color: "#8A8A9A",
@@ -3568,7 +3568,7 @@ const styles = StyleSheet.create({
   // Custom location pin (orange, tapped on map)
   customPin: {
     alignItems: "center",
-    shadowColor: "#FF6B35",
+    shadowColor: "#FF3B30",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
@@ -3592,9 +3592,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.1)",
   },
   actionBtnActive: {
-    borderColor: "rgba(255, 107, 53, 0.5)",
-    backgroundColor: "rgba(255, 107, 53, 0.12)",
-    shadowColor: "#FF6B35",
+    borderColor: "rgba(255, 59, 48, 0.5)",
+    backgroundColor: "rgba(255, 59, 48, 0.12)",
+    shadowColor: "#FF3B30",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.35,
     shadowRadius: 12,
@@ -3729,7 +3729,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -3756,7 +3756,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(14, 14, 24, 0.96)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.3)",
+    borderColor: "rgba(255, 59, 48, 0.3)",
     paddingHorizontal: 14,
     height: 48,
     shadowColor: "#000",
@@ -3872,8 +3872,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterCheckOn: {
-    backgroundColor: "#FF6B35",
-    borderColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
+    borderColor: "#FF3B30",
   },
   mapStyleToggle: {
     flexDirection: "row",
@@ -4028,12 +4028,12 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
-    shadowColor: "#FF6B35",
+    shadowColor: "#FF3B30",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 14,
@@ -4128,14 +4128,14 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 13,
     borderWidth: 1.5,
-    borderColor: "#FF6B35",
+    borderColor: "#FF3B30",
   },
   drivingProfileAvatarFallback: {
     width: 26,
     height: 26,
     borderRadius: 13,
     borderWidth: 1.5,
-    borderColor: "#FF6B35",
+    borderColor: "#FF3B30",
     backgroundColor: "#2A2A45",
     justifyContent: "center",
     alignItems: "center",
@@ -4181,7 +4181,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 9,
-    backgroundColor: "rgba(255, 107, 53, 0.16)",
+    backgroundColor: "rgba(255, 59, 48, 0.16)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -4223,7 +4223,7 @@ const styles = StyleSheet.create({
   turnProgressFill: {
     height: 3,
     borderRadius: 2,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
   },
   turnBottomRow: {
     flexDirection: "row",
@@ -4702,7 +4702,7 @@ const styles = StyleSheet.create({
   },
   levelBarLabel: {
     fontSize: 12,
-    color: "#FF6B35",
+    color: "#FF3B30",
     fontWeight: "700",
   },
   levelBarXp: {
@@ -4718,7 +4718,7 @@ const styles = StyleSheet.create({
   },
   levelBarFill: {
     height: 6,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
     borderRadius: 3,
   },
   saveRouteRow: {
@@ -4734,7 +4734,7 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 48,
     borderRadius: 14,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
   },
   saveRouteBtnText: {
     fontSize: 15,
@@ -4747,9 +4747,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(255,107,53,0.12)",
+    backgroundColor: "rgba(255,59,48,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255,107,53,0.3)",
+    borderColor: "rgba(255,59,48,0.3)",
   },
   levelUpText: {
     fontSize: 13,
@@ -5074,10 +5074,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 16, 26, 0.94)",
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: "rgba(255, 107, 53, 0.4)",
+    borderColor: "rgba(255, 59, 48, 0.4)",
     paddingHorizontal: 16,
     paddingVertical: 11,
-    shadowColor: "#FF6B35",
+    shadowColor: "#FF3B30",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 14,

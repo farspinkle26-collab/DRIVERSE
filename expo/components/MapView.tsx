@@ -278,7 +278,7 @@ const MapView: React.FC<MapViewProps> = ({
             <View style={[styles.marker, { backgroundColor: '#22C55E' }]}>
               <Text style={styles.markerText}>A</Text>
             </View>
-            <View style={[styles.routeLine, { backgroundColor: '#FF6B35' }]} />
+            <View style={[styles.routeLine, { backgroundColor: '#FF3B30' }]} />
             <View style={[styles.marker, { backgroundColor: '#EF4444' }]}>
               <Text style={styles.markerText}>B</Text>
             </View>

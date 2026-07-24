@@ -155,7 +155,7 @@ export default function DirectChatScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#FF3B30" style={{ marginTop: 40 }} />
       ) : (
         <FlatList
           ref={listRef}
@@ -211,9 +211,9 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
   iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
   identity: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,59,48,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   avatarImg: { width: 34, height: 34, borderRadius: 17 },
-  avatarText: { fontSize: 14, fontWeight: "800", color: "#FF6B35" },
+  avatarText: { fontSize: 14, fontWeight: "800", color: "#FF3B30" },
   topTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
 
   emptyState: { alignItems: "center", justifyContent: "center" },
@@ -223,12 +223,12 @@ const styles = StyleSheet.create({
   bubbleRowMine: { justifyContent: "flex-end" },
   bubbleRowTheirs: { justifyContent: "flex-start" },
   bubble: { maxWidth: "78%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
-  bubbleMine: { backgroundColor: "#FF6B35", borderBottomRightRadius: 4 },
+  bubbleMine: { backgroundColor: "#FF3B30", borderBottomRightRadius: 4 },
   bubbleTheirs: { backgroundColor: "rgba(255,255,255,0.08)", borderBottomLeftRadius: 4 },
   bubbleText: { color: "#FFFFFF", fontSize: 15, lineHeight: 20 },
   bubbleTime: { color: "rgba(255,255,255,0.4)", fontSize: 10, marginTop: 4, alignSelf: "flex-end" },
 
   inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
   input: { flex: 1, maxHeight: 100, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 16, paddingVertical: 10, color: "#FFFFFF", fontSize: 15 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF3B30", alignItems: "center", justifyContent: "center" },
 });

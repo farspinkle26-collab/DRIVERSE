@@ -285,8 +285,8 @@ export default function RouteDetailScreen() {
 
               {coords.length > 1 && (
                 <>
-                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
-                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF6B35" lineCap="round" />
+                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,59,48,0.25)" lineCap="round" />
+                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF3B30" lineCap="round" />
                 </>
               )}
               {coords.length > 0 && (
@@ -334,7 +334,7 @@ export default function RouteDetailScreen() {
             {/* Stats grid */}
             <View style={styles.statsGrid}>
               <View style={styles.statBox}>
-                <RouteIcon size={16} color="#FF6B35" />
+                <RouteIcon size={16} color="#FF3B30" />
                 <Text style={styles.statBoxValue}>{route.distance_km.toFixed(1)}</Text>
                 <Text style={styles.statBoxLabel}>km</Text>
               </View>
@@ -389,7 +389,7 @@ export default function RouteDetailScreen() {
               Comments {route.comments_count > 0 ? `(${route.comments_count})` : ""}
             </Text>
             {loadingComments ? (
-              <ActivityIndicator color="#FF6B35" style={{ marginTop: 16 }} />
+              <ActivityIndicator color="#FF3B30" style={{ marginTop: 16 }} />
             ) : comments.length === 0 ? (
               <Text style={styles.noComments}>No comments yet. Start the conversation!</Text>
             ) : (
@@ -499,11 +499,11 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(255,107,53,0.15)",
+    backgroundColor: "rgba(255,59,48,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF6B35" },
+  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF3B30" },
   authorName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   subRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   subText: { fontSize: 12, color: "#8A8A9A" },
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     height: 50,
     paddingHorizontal: 22,
     borderRadius: 14,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
   },
   shareText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
   commentsTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF", marginBottom: 12 },
@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#FF6B35",
+    backgroundColor: "#FF3B30",
     justifyContent: "center",
     alignItems: "center",
   },

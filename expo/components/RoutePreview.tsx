@@ -20,7 +20,7 @@ function RoutePreviewBase({
   polyline,
   width = 300,
   height = 130,
-  color = "#FF6B35",
+  color = "#FF3B30",
   strokeWidth = 3,
 }: RoutePreviewProps) {
   const { d, startPt, endPt } = useMemo(() => {

@@ -55,7 +55,7 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
             >
               <IconComponent
                 size={22}
-                color={isActive ? "#FF6B35" : "#5A5A6E"}
+                color={isActive ? "#FF3B30" : "#5A5A6E"}
                 filled={isActive}
               />
             </TouchableOpacity>
@@ -118,8 +118,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tabItemActive: {
-    backgroundColor: "rgba(255, 107, 53, 0.16)",
-    shadowColor: "#FF6B35",
+    backgroundColor: "rgba(255, 59, 48, 0.16)",
+    shadowColor: "#FF3B30",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.45,
     shadowRadius: 12,

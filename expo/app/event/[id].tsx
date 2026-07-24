@@ -88,7 +88,7 @@ export default function EventDetailScreen() {
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
         <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: insets.top + 140 }} />
+        <ActivityIndicator color="#FF3B30" style={{ marginTop: insets.top + 140 }} />
       </View>
     );
   }

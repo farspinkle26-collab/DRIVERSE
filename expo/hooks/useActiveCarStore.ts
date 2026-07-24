@@ -150,7 +150,7 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
           make: (input.make ?? "Custom").trim() || "Custom",
           model: "",
           year: input.year || "2024",
-          color: input.color ?? "#FF6B35",
+          color: input.color ?? "#FF3B30",
           color_name: "Custom",
           hp: input.hp ?? 300,
           mileage_km: 0,
