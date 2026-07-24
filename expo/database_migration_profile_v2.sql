@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.car_collections (
   make TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   year TEXT NOT NULL DEFAULT '',
-  color TEXT NOT NULL DEFAULT '#FF3B30',
+  color TEXT NOT NULL DEFAULT '#FF6B35',
   color_name TEXT NOT NULL DEFAULT 'Orange',
   hp INTEGER NOT NULL DEFAULT 200,
   mileage_km NUMERIC NOT NULL DEFAULT 0,
@@ -215,7 +215,7 @@ CREATE OR REPLACE FUNCTION public.handle_new_user_starter_car()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.car_collections (user_id, name, make, model, year, color, color_name, hp, mileage_km, is_primary)
-  VALUES (NEW.id, 'Starter Ride', 'Honda', 'Civic Type R', '2023', '#FF3B30', 'Championship White', 315, 0, true);
+  VALUES (NEW.id, 'Starter Ride', 'Honda', 'Civic Type R', '2023', '#FF6B35', 'Championship White', 315, 0, true);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

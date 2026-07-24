@@ -56,7 +56,8 @@ import {
   MoreVertical,
   Globe2,
 } from "lucide-react-native";
-import { MapView, Camera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "./MapboxTileLayer";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -66,13 +67,13 @@ import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
-import { decodePolyline, boundsForPath } from "@/lib/polyline";
+import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
-import { MAPBOX_STYLE_URL_STANDARD, getMapboxStaticImageUrl } from "@/constants/mapbox";
-import { lineStringFeature } from "@/lib/geo";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const { isDark } = useTheme();
+  const mapRef = useRef<MapView>(null);
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
   const hasPath = coords.length > 1;
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
@@ -89,64 +90,53 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
           : []),
       ];
 
-  const bounds = boundsForPath(fitPoints);
-  const singlePoint = fitPoints.length === 1 ? fitPoints[0] : null;
+  const region = regionForPath(fitPoints, hasPath ? 1.4 : 1.8);
 
-  if (Platform.OS === "web") {
-    const previewPoint = singlePoint ?? fitPoints[0];
-    return (
-      <View style={styles.tripMapWrap} pointerEvents="none">
-        {previewPoint && (
-          <Image
-            source={{ uri: getMapboxStaticImageUrl(previewPoint.latitude, previewPoint.longitude, { dark: isDark, width: 400, height: 200, zoom: 12 }) }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-          />
-        )}
-      </View>
-    );
-  }
+  // initialRegion alone can render at a stale/default zoom in liteMode on
+  // Android before the view has laid out, so fit explicitly once ready.
+  const fitToPoints = () => {
+    if (fitPoints.length > 1) {
+      mapRef.current?.fitToCoordinates(fitPoints, {
+        edgePadding: { top: 24, right: 24, bottom: 24, left: 24 },
+        animated: false,
+      });
+    }
+  };
 
   return (
     <View style={styles.tripMapWrap} pointerEvents="none">
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
-        styleURL={MAPBOX_STYLE_URL_STANDARD}
+        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+        initialRegion={region}
+        onMapReady={fitToPoints}
+        onLayout={fitToPoints}
+        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
         scrollEnabled={false}
         zoomEnabled={false}
         pitchEnabled={false}
         rotateEnabled={false}
-        scaleBarEnabled={false}
+        liteMode={Platform.OS === "android"}
       >
-        <StyleImport
-          id="basemap"
-          existing
-          config={{ lightPreset: isDark ? "night" : "day", showPointOfInterestLabels: false, showTransitLabels: false }}
-        />
-        <Camera
-          bounds={bounds ? { ...bounds, paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 } : undefined}
-          centerCoordinate={!bounds && singlePoint ? [singlePoint.longitude, singlePoint.latitude] : undefined}
-          zoomLevel={!bounds && singlePoint ? 13 : undefined}
-          animationDuration={0}
-        />
+        <MapboxTileLayer dark={isDark} />
 
         {hasPath && (
           <>
-            <ShapeSource id={`tripMiniGlow-${trip.id}`} shape={lineStringFeature(coords)}>
-              <LineLayer id={`tripMiniGlowLine-${trip.id}`} style={{ lineWidth: 7, lineColor: "rgba(255,59,48,0.25)", lineCap: "round", lineJoin: "round" }} />
-            </ShapeSource>
-            <ShapeSource id={`tripMiniLine-${trip.id}`} shape={lineStringFeature(coords)}>
-              <LineLayer id={`tripMiniLineLine-${trip.id}`} style={{ lineWidth: 3.5, lineColor: "#FF3B30", lineCap: "round", lineJoin: "round" }} />
-            </ShapeSource>
+            <Polyline coordinates={coords} strokeWidth={7} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
+            <Polyline coordinates={coords} strokeWidth={3.5} strokeColor="#FF6B35" lineCap="round" />
           </>
         )}
-        <MarkerView coordinate={[trip.origin_lng, trip.origin_lat]} anchor={{ x: 0.5, y: 0.5 }}>
+        <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
           <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
-        </MarkerView>
+        </Marker>
         {trip.destination_lat && trip.destination_lng ? (
-          <MarkerView coordinate={[trip.destination_lng, trip.destination_lat]} anchor={{ x: 0.5, y: 0.5 }}>
+          <Marker
+            coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
             <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
-          </MarkerView>
+          </Marker>
         ) : null}
       </MapView>
     </View>
@@ -535,7 +525,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       make: newCarMake.trim() || "Custom",
       model: "",
       year: newCarYear || "2024",
-      color: "#FF3B30",
+      color: "#FF6B35",
       color_name: "Custom",
       hp: parseInt(newCarHP, 10) || 300,
       mileage_km: 0,
@@ -738,7 +728,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       <View style={styles.container}>
         <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
         <View style={[styles.loginPrompt, { paddingTop: insets.top + 100 }]}>
-          <LinearGradient colors={["#FF3B30", "#FF3B6F"]} style={styles.loginIcon}>
+          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.loginIcon}>
             <Car size={40} color="#FFFFFF" />
           </LinearGradient>
           <Text style={styles.loginTitle}>Join the Drive</Text>
@@ -746,7 +736,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             Sign up to track your rides, collect cars, earn XP, and connect with fellow drivers.
           </Text>
           <TouchableOpacity style={styles.loginBtn} onPress={() => router.push("/login" as any)} activeOpacity={0.85}>
-            <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.loginBtnGrad}>
+            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.loginBtnGrad}>
               <Text style={styles.loginBtnText}>Sign In</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -759,10 +749,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }
 
   const stats = [
-    { icon: Car, value: cars.length, label: "Cars", color: "#FF3B30" },
-    { icon: Users, value: acceptedFriends.length, label: "Friends", color: "#FF3B30" },
-    { icon: RouteIcon, value: trips.length, label: "Trips", color: "#FF3B30" },
-    { icon: Flame, value: streak, label: "Day Streak", color: "#FF3B30" },
+    { icon: Car, value: cars.length, label: "Cars", color: "#FF6B35" },
+    { icon: Users, value: acceptedFriends.length, label: "Friends", color: "#FF6B35" },
+    { icon: RouteIcon, value: trips.length, label: "Trips", color: "#FF6B35" },
+    { icon: Flame, value: streak, label: "Day Streak", color: "#FF6B35" },
   ];
 
   const TABS: { key: ProfileTab; label: string; icon: typeof Car; badge?: number }[] = [
@@ -778,7 +768,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 120, paddingTop: insets.top + 8 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
       >
         {/* ═══ TOP BAR: back (other) + bell + messages ═══ */}
         <View style={styles.topBar}>
@@ -817,10 +807,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             activeOpacity={isSelf ? 0.85 : 1}
             disabled={!isSelf || uploadingAvatar}
           >
-            <LinearGradient colors={["#FF3B30", "#FF6259"]} style={styles.avatarRing}>
+            <LinearGradient colors={["#FF6B35", "#FF8A50"]} style={styles.avatarRing}>
               <View style={styles.avatarInner}>
                 {uploadingAvatar ? (
-                  <ActivityIndicator color="#FF3B30" />
+                  <ActivityIndicator color="#FF6B35" />
                 ) : profileAvatar ? (
                   <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
                 ) : (
@@ -889,7 +879,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             )}
             {primaryCar && (
               <View style={styles.drivingChip}>
-                <Car size={12} color="#FF3B30" />
+                <Car size={12} color="#FF6B35" />
                 <Text style={styles.drivingChipText} numberOfLines={1}>
                   Driving <Text style={styles.drivingChipCar}>{primaryCar.name}</Text>
                 </Text>
@@ -916,7 +906,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           </View>
           <View style={styles.xpTrack}>
             <LinearGradient
-              colors={["#FF3B30", "#FFD700"]}
+              colors={["#FF6B35", "#FFD700"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={[styles.xpFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]}
@@ -930,7 +920,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           <View style={styles.friendActionRow}>
             {friendState === "none" && (
               <TouchableOpacity style={styles.primaryAction} onPress={handleAddFriendById} disabled={friendActionLoading} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primaryActionGrad}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primaryActionGrad}>
                   {friendActionLoading ? <ActivityIndicator color="#FFFFFF" /> : (<><UserPlus size={17} color="#FFFFFF" /><Text style={styles.primaryActionText}>Add Friend</Text></>)}
                 </LinearGradient>
               </TouchableOpacity>
@@ -959,7 +949,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               </View>
             )}
             <TouchableOpacity style={styles.secondaryAction} onPress={() => { if (targetId) router.push(`/messages/${targetId}` as any); }} activeOpacity={0.85}>
-              <MessageCircle size={17} color="#FF3B30" /><Text style={styles.secondaryActionText}>Message</Text>
+              <MessageCircle size={17} color="#FF6B35" /><Text style={styles.secondaryActionText}>Message</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -986,7 +976,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.7}
             >
-              <tab.icon size={15} color={activeTab === tab.key ? "#FF3B30" : "#5A5A6E"} />
+              <tab.icon size={15} color={activeTab === tab.key ? "#FF6B35" : "#5A5A6E"} />
               <Text style={[styles.contentTabText, activeTab === tab.key && styles.contentTabTextActive]}>{tab.label}</Text>
               {tab.badge ? (
                 <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{tab.badge}</Text></View>
@@ -999,7 +989,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {activeTab === "garage" && (
           <View style={styles.section}>
             {loading ? (
-              <ActivityIndicator color="#FF3B30" style={{ marginTop: 20 }} />
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
             ) : primaryCar ? (
               <FeaturedCar
                 car={primaryCar}
@@ -1038,7 +1028,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 </View>
                 {isSelf && (
                   <TouchableOpacity onPress={() => handleSetPrimary(car.id)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    {car.is_primary ? <CheckCircle2 size={18} color="#FF3B30" /> : <Circle size={18} color="#5A5A6E" />}
+                    {car.is_primary ? <CheckCircle2 size={18} color="#FF6B35" /> : <Circle size={18} color="#5A5A6E" />}
                   </TouchableOpacity>
                 )}
               </TouchableOpacity>
@@ -1060,7 +1050,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               </View>
             ) : (
               <TouchableOpacity style={styles.addCarButton} onPress={() => setShowAddCar(true)} activeOpacity={0.7}>
-                <View style={styles.addCarIcon}><Plus size={20} color="#FF3B30" /></View>
+                <View style={styles.addCarIcon}><Plus size={20} color="#FF6B35" /></View>
                 <Text style={styles.addCarText}>Add a car to your garage</Text>
               </TouchableOpacity>
             ))}
@@ -1158,7 +1148,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {activeTab === "trips" && (
           <View style={styles.section}>
             {loading ? (
-              <ActivityIndicator color="#FF3B30" style={{ marginTop: 20 }} />
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
             ) : trips.length === 0 ? (
               <View style={styles.emptyState}>
                 <RouteIcon size={40} color="#3A3A4E" />
@@ -1210,9 +1200,9 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   </View>
                   <TripMiniMap trip={trip} />
                   <View style={styles.tripStats}>
-                    <View style={styles.tripStat}><RouteIcon size={13} color="#FF3B30" /><Text style={styles.tripStatText}>{trip.distance_km.toFixed(1)} km</Text></View>
-                    <View style={styles.tripStat}><Timer size={13} color="#FF3B30" /><Text style={styles.tripStatText}>{formatDuration(trip.duration_seconds)}</Text></View>
-                    <View style={styles.tripStat}><Gauge size={13} color="#FF3B30" /><Text style={styles.tripStatText}>{trip.avg_speed_kmh.toFixed(0)} km/h</Text></View>
+                    <View style={styles.tripStat}><RouteIcon size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.distance_km.toFixed(1)} km</Text></View>
+                    <View style={styles.tripStat}><Timer size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{formatDuration(trip.duration_seconds)}</Text></View>
+                    <View style={styles.tripStat}><Gauge size={13} color="#FF6B35" /><Text style={styles.tripStatText}>{trip.avg_speed_kmh.toFixed(0)} km/h</Text></View>
                     <View style={styles.tripStat}><Trophy size={13} color="#FFD700" /><Text style={styles.tripStatText}>+{trip.xp_earned}</Text></View>
                   </View>
                 </TouchableOpacity>
@@ -1262,7 +1252,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             )}
 
             {loading ? (
-              <ActivityIndicator color="#FF3B30" style={{ marginTop: 20 }} />
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
             ) : acceptedFriends.length === 0 && friendResults.length === 0 ? (
               <View style={[styles.emptyState, { marginTop: 20 }]}>
                 <Users size={40} color="#3A3A4E" />
@@ -1284,7 +1274,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                       </View>
                     </TouchableOpacity>
                     {isSelf && (
-                      <TouchableOpacity style={styles.friendMsgBtn} onPress={() => router.push(`/messages/${otherId}` as any)}><MessageCircle size={17} color="#FF3B30" /></TouchableOpacity>
+                      <TouchableOpacity style={styles.friendMsgBtn} onPress={() => router.push(`/messages/${otherId}` as any)}><MessageCircle size={17} color="#FF6B35" /></TouchableOpacity>
                     )}
                   </View>
                 );
@@ -1330,7 +1320,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
           <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
-            <View style={styles.modalTitleRow}><Bell size={18} color="#FF3B30" /><Text style={styles.modalTitle}>Notifications</Text></View>
+            <View style={styles.modalTitleRow}><Bell size={18} color="#FF6B35" /><Text style={styles.modalTitle}>Notifications</Text></View>
             <TouchableOpacity onPress={() => setNotifOpen(false)}><X size={20} color="#8A8A9A" /></TouchableOpacity>
           </View>
           <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
@@ -1368,7 +1358,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         <Pressable style={styles.modalBackdrop} onPress={() => !purchasing && setPremiumOpen(false)} />
         <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
           <View style={styles.modalHandle} />
-          <LinearGradient colors={["rgba(255,59,48,0.18)", "rgba(255,59,111,0.06)"]} style={styles.premiumHero}>
+          <LinearGradient colors={["rgba(255,107,53,0.18)", "rgba(255,59,111,0.06)"]} style={styles.premiumHero}>
             <View style={styles.premiumBadge}><Sparkles size={14} color="#FFD700" /><Text style={styles.premiumBadgeText}>PREMIUM</Text></View>
             <Text style={styles.premiumTitle}>Generate Your Car</Text>
             <Text style={styles.premiumDesc}>
@@ -1385,7 +1375,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             <Text style={styles.premiumPrice}>Rp {PREMIUM_CAR_PRICE.toLocaleString("id-ID")}</Text>
           </View>
           <TouchableOpacity style={styles.premiumPayBtn} onPress={handlePayPremium} disabled={purchasing} activeOpacity={0.85}>
-            <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.premiumPayGrad}>
+            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.premiumPayGrad}>
               {purchasing ? <ActivityIndicator color="#FFFFFF" /> : (<><Lock size={16} color="#FFFFFF" /><Text style={styles.premiumPayText}>Pay & Generate</Text></>)}
             </LinearGradient>
           </TouchableOpacity>
@@ -1411,7 +1401,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           >
             {tripMenuTrip?.is_public ? (
               <>
-                <Lock size={18} color="#FF3B30" />
+                <Lock size={18} color="#FF6B35" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.tripMenuOptionTitle}>Make Private</Text>
                   <Text style={styles.tripMenuOptionSub}>Only you will be able to see this trip</Text>
@@ -1419,7 +1409,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               </>
             ) : (
               <>
-                <Globe2 size={18} color="#FF3B30" />
+                <Globe2 size={18} color="#FF6B35" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.tripMenuOptionTitle}>Make Public</Text>
                   <Text style={styles.tripMenuOptionSub}>Other drivers will be able to see this trip</Text>
@@ -1439,11 +1429,11 @@ function CarDriveDataRow({ stats }: { stats?: CarDriveStats }) {
   return (
     <View style={styles.driveDataRow}>
       <View style={styles.driveDataItem}>
-        <RouteIcon size={13} color="#FF3B30" />
+        <RouteIcon size={13} color="#FF6B35" />
         <Text style={styles.driveDataText}>{Math.round(stats.totalDistanceKm).toLocaleString("en-US")} km</Text>
       </View>
       <View style={styles.driveDataItem}>
-        <Gauge size={13} color="#FF3B30" />
+        <Gauge size={13} color="#FF6B35" />
         <Text style={styles.driveDataText}>{stats.avgSpeedKmh.toFixed(0)} km/h avg</Text>
       </View>
       <View style={styles.driveDataItem}>
@@ -1483,7 +1473,7 @@ function FeaturedCar({
               <Text style={styles.carMetaDot}>•</Text>
               <Text style={styles.carMetaText}>{car.year}</Text>
               <Text style={styles.carMetaDot}>•</Text>
-              <Text style={[styles.carMetaText, { color: "#FF3B30" }]}>{car.hp} HP</Text>
+              <Text style={[styles.carMetaText, { color: "#FF6B35" }]}>{car.hp} HP</Text>
             </View>
           </View>
           {isSelf && (
@@ -1506,7 +1496,7 @@ function FeaturedCar({
             </View>
             {isSelf ? (
               <TouchableOpacity style={styles.generateBtn} onPress={onGenerate} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.generateGrad}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.generateGrad}>
                   <Sparkles size={15} color="#FFFFFF" />
                   <Text style={styles.generateText}>Generate My Car</Text>
                 </LinearGradient>
@@ -1563,15 +1553,15 @@ const styles = StyleSheet.create({
   avatarSection: { position: "relative" },
   avatarRing: { width: 70, height: 70, borderRadius: 35, justifyContent: "center", alignItems: "center", padding: 3 },
   avatarInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#0A0A0F", justifyContent: "center", alignItems: "center", overflow: "hidden" },
-  avatarLetter: { fontSize: 26, fontWeight: "800", color: "#FF3B30" },
+  avatarLetter: { fontSize: 26, fontWeight: "800", color: "#FF6B35" },
   avatarImage: { width: 64, height: 64, borderRadius: 32 },
   levelBadge: { position: "absolute", bottom: -2, right: -2, minWidth: 24, height: 24, paddingHorizontal: 5, borderRadius: 12, backgroundColor: "#FFD700", justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: "#060609" },
   levelBadgeText: { fontSize: 12, fontWeight: "800", color: "#000" },
   identityInfo: { flex: 1, paddingTop: 6 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   userName: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
-  nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF3B30", flex: 1, paddingVertical: 0 },
-  rankSubtitle: { fontSize: 14, color: "#FF3B30", fontWeight: "700", marginTop: 2 },
+  nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
+  rankSubtitle: { fontSize: 14, color: "#FF6B35", fontWeight: "700", marginTop: 2 },
   countryChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1585,14 +1575,14 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   countryChipText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
-  countryInput: { fontSize: 13, fontWeight: "700", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF3B30", flex: 1, paddingVertical: 0 },
+  countryInput: { fontSize: 13, fontWeight: "700", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
   drivingChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(255,59,48,0.1)",
+    backgroundColor: "rgba(255,107,53,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(255,59,48,0.25)",
+    borderColor: "rgba(255,107,53,0.25)",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1616,7 +1606,7 @@ const styles = StyleSheet.create({
   xpValue: { fontSize: 12, fontWeight: "700", color: "#8A8A9A" },
   xpTrack: { height: 7, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
   xpFill: { height: "100%", borderRadius: 4 },
-  xpToNext: { fontSize: 11, color: "#FF3B30", fontWeight: "700", marginTop: 6 },
+  xpToNext: { fontSize: 11, color: "#FF6B35", fontWeight: "700", marginTop: 6 },
 
   // Friend action row
   friendActionRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 16 },
@@ -1624,24 +1614,24 @@ const styles = StyleSheet.create({
   primaryAction: { flex: 1, borderRadius: 14, overflow: "hidden" },
   primaryActionGrad: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48 },
   primaryActionText: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
-  secondaryAction: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, paddingHorizontal: 18, borderRadius: 14, backgroundColor: "rgba(255,59,48,0.1)", borderWidth: 1, borderColor: "rgba(255,59,48,0.3)" },
-  secondaryActionText: { fontSize: 15, fontWeight: "700", color: "#FF3B30" },
+  secondaryAction: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, paddingHorizontal: 18, borderRadius: 14, backgroundColor: "rgba(255,107,53,0.1)", borderWidth: 1, borderColor: "rgba(255,107,53,0.3)" },
+  secondaryActionText: { fontSize: 15, fontWeight: "700", color: "#FF6B35" },
   statusPill: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, paddingHorizontal: 16, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.03)", borderWidth: 1 },
   statusPillText: { fontSize: 14, fontWeight: "700" },
 
   // Stat cards
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 16 },
   statCard: { flex: 1, alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  statIconCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,59,48,0.12)", alignItems: "center", justifyContent: "center", marginBottom: 6 },
+  statIconCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center", marginBottom: 6 },
   statValue: { fontSize: 19, fontWeight: "800", color: "#FFFFFF" },
   statLabel: { fontSize: 10, color: "#8A8A9A", marginTop: 1 },
 
   // Content tabs
   contentTabs: { flexDirection: "row", gap: 6, paddingHorizontal: 16, marginBottom: 12 },
   contentTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.03)" },
-  contentTabActive: { backgroundColor: "rgba(255,59,48,0.14)", borderWidth: 1, borderColor: "rgba(255,59,48,0.3)" },
+  contentTabActive: { backgroundColor: "rgba(255,107,53,0.14)", borderWidth: 1, borderColor: "rgba(255,107,53,0.3)" },
   contentTabText: { fontSize: 12, fontWeight: "700", color: "#5A5A6E" },
-  contentTabTextActive: { color: "#FF3B30" },
+  contentTabTextActive: { color: "#FF6B35" },
   tabBadge: { minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
   tabBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
 
@@ -1653,7 +1643,7 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 13, color: "#5A5A6E", textAlign: "center", marginTop: 6 },
 
   // Featured car
-  featuredCard: { borderRadius: 20, overflow: "hidden", marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,59,48,0.25)" },
+  featuredCard: { borderRadius: 20, overflow: "hidden", marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,107,53,0.25)" },
   featuredBg: { padding: 16 },
   featuredAccent: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
   featuredTop: { flexDirection: "row", alignItems: "flex-start", marginBottom: 12 },
@@ -1692,7 +1682,7 @@ const styles = StyleSheet.create({
 
   // Add car
   addCarButton: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderStyle: "dashed", marginBottom: 16 },
-  addCarIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,59,48,0.14)", alignItems: "center", justifyContent: "center" },
+  addCarIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center" },
   addCarText: { fontSize: 14, color: "#8A8A9A", fontWeight: "600" },
   addCarForm: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 16, gap: 10 },
   addCarFormRow: { flexDirection: "row" },
@@ -1700,14 +1690,14 @@ const styles = StyleSheet.create({
   addCarActions: { flexDirection: "row", gap: 10, marginTop: 2 },
   addCarCancel: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)" },
   addCarCancelText: { color: "#8A8A9A", fontWeight: "700" },
-  addCarSubmit: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#FF3B30" },
+  addCarSubmit: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#FF6B35" },
   addCarSubmitText: { color: "#FFFFFF", fontWeight: "700" },
 
   // Rank progress card
   seasonCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 18, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   seasonBadgeWrap: { marginRight: 12 },
   seasonMiddle: { flex: 1 },
-  seasonLabel: { fontSize: 10, fontWeight: "800", color: "#FF3B30", letterSpacing: 1 },
+  seasonLabel: { fontSize: 10, fontWeight: "800", color: "#FF6B35", letterSpacing: 1 },
   seasonName: { fontSize: 17, fontWeight: "800", color: "#FFFFFF", marginTop: 2, marginBottom: 8 },
   seasonTrack: { height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", overflow: "hidden" },
   seasonFill: { height: "100%", borderRadius: 3 },
@@ -1728,7 +1718,7 @@ const styles = StyleSheet.create({
   feedHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   feedHeaderBadge: { minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
   feedHeaderBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
-  feedSeeAll: { fontSize: 10, fontWeight: "700", color: "#FF3B30" },
+  feedSeeAll: { fontSize: 10, fontWeight: "700", color: "#FF6B35" },
   feedItem: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
   feedIcon: { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   feedItemTitle: { fontSize: 11, fontWeight: "700", color: "#FFFFFF" },
@@ -1740,8 +1730,8 @@ const styles = StyleSheet.create({
   tripCard: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   tripHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10, gap: 8 },
   tripTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1, flexWrap: "wrap" },
-  tripCodeBadge: { borderWidth: 1, borderColor: "rgba(255,59,48,0.4)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  tripCodeText: { fontSize: 11, fontWeight: "800", color: "#FF3B30" },
+  tripCodeBadge: { borderWidth: 1, borderColor: "rgba(255,107,53,0.4)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  tripCodeText: { fontSize: 11, fontWeight: "800", color: "#FF6B35" },
   tripHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   tripDateBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.06)", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 },
   tripDateText: { fontSize: 11, fontWeight: "700", color: "#B0B0BE" },
@@ -1767,17 +1757,17 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
   searchInputWrap: { flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   searchInput: { flex: 1, color: "#FFFFFF", fontSize: 14, paddingVertical: 11 },
-  searchBtn: { paddingHorizontal: 18, justifyContent: "center", borderRadius: 12, backgroundColor: "#FF3B30" },
+  searchBtn: { paddingHorizontal: 18, justifyContent: "center", borderRadius: 12, backgroundColor: "#FF6B35" },
   searchBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
   friendCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   friendInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
-  friendAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,59,48,0.12)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  friendAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   friendAvatarImg: { width: 44, height: 44, borderRadius: 22 },
-  friendAvatarText: { fontSize: 17, fontWeight: "800", color: "#FF3B30" },
+  friendAvatarText: { fontSize: 17, fontWeight: "800", color: "#FF6B35" },
   friendName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   friendStatus: { fontSize: 12, color: "#8A8A9A", marginTop: 1 },
-  friendAddBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF3B30", alignItems: "center", justifyContent: "center" },
-  friendMsgBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,59,48,0.12)", alignItems: "center", justifyContent: "center" },
+  friendAddBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  friendMsgBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center" },
 
   // Conversation
 
@@ -1816,7 +1806,7 @@ const styles = StyleSheet.create({
   premiumPerkText: { fontSize: 14, color: "#FFFFFF", fontWeight: "600" },
   premiumPriceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)", marginBottom: 16 },
   premiumPriceLabel: { fontSize: 14, color: "#8A8A9A", fontWeight: "600" },
-  premiumPrice: { fontSize: 22, fontWeight: "800", color: "#FF3B30" },
+  premiumPrice: { fontSize: 22, fontWeight: "800", color: "#FF6B35" },
   premiumPayBtn: { borderRadius: 14, overflow: "hidden", marginBottom: 12 },
   premiumPayGrad: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 52 },
   premiumPayText: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },

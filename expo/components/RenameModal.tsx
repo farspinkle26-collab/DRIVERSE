@@ -70,7 +70,7 @@ export default function RenameModal({
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={["#FF3B30", "#FF3B6F"]}
+                colors={["#FF6B35", "#FF3B6F"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.saveBtnGradient}

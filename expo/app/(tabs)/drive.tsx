@@ -96,8 +96,8 @@ const DRIVE_FEATURES: DriveFeature[] = [
     title: "Quests",
     subtitle: "Daily challenges & rewards",
     icon: Swords,
-    color: "#FF3B30",
-    bgColor: "#FF3B3015",
+    color: "#FF6B35",
+    bgColor: "#FF6B3515",
     image: FEATURE_IMAGES.quests,
   },
   {
@@ -320,7 +320,7 @@ export default function DriveScreen() {
                 onPress={() => setActiveView(tab.key)}
                 activeOpacity={0.7}
               >
-                <tab.icon size={16} color={active ? "#FF3B30" : "#5A5A6E"} />
+                <tab.icon size={16} color={active ? "#FF6B35" : "#5A5A6E"} />
                 <Text
                   style={[
                     styles.viewTabText,
@@ -412,7 +412,7 @@ export default function DriveScreen() {
                   <Text style={styles.statPillText}>{coins}</Text>
                 </View>
                 <View style={styles.statPill}>
-                  <Flame size={13} color="#FF3B30" />
+                  <Flame size={13} color="#FF6B35" />
                   <Text style={styles.statPillText}>{streak}d</Text>
                 </View>
               </View>
@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   viewTabActive: {
-    backgroundColor: "rgba(255, 59, 48, 0.15)",
+    backgroundColor: "rgba(255, 107, 53, 0.15)",
   },
   viewTabText: {
     fontSize: 13,
@@ -494,7 +494,7 @@ const styles = StyleSheet.create({
     color: "#5A5A6E",
   },
   viewTabTextActive: {
-    color: "#FF3B30",
+    color: "#FF6B35",
   },
   viewTabUnderline: {
     position: "absolute",
@@ -504,8 +504,8 @@ const styles = StyleSheet.create({
     width: 28,
     height: 3,
     borderRadius: 2,
-    backgroundColor: "#FF3B30",
-    shadowColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 6,
@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     paddingVertical: 14,
     borderRadius: 14,
     marginTop: 8,
@@ -759,7 +759,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     borderRadius: 2,
-    shadowColor: "#FF3B30",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 4,

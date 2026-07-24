@@ -12,8 +12,8 @@ export const MapIcon = ({ color, size = 24, filled = false }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Defs>
       <LinearGradient id="mapGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF3B30" />
-        <Stop offset="100%" stopColor="#FF6259" />
+        <Stop offset="0%" stopColor="#FF6B35" />
+        <Stop offset="100%" stopColor="#FF8A50" />
       </LinearGradient>
     </Defs>
     <Path
@@ -40,7 +40,7 @@ export const DriveIcon = ({ color, size = 24, filled = false }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Defs>
       <LinearGradient id="driveGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF3B30" />
+        <Stop offset="0%" stopColor="#FF6B35" />
         <Stop offset="100%" stopColor="#FF3B6F" />
       </LinearGradient>
     </Defs>
@@ -75,8 +75,8 @@ export const ProfileIcon = ({ color, size = 24, filled = false }: IconProps) => 
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Defs>
       <LinearGradient id="profileGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF3B30" />
-        <Stop offset="100%" stopColor="#FF6259" />
+        <Stop offset="0%" stopColor="#FF6B35" />
+        <Stop offset="100%" stopColor="#FF8A50" />
       </LinearGradient>
     </Defs>
     <Circle

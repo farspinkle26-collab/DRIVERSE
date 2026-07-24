@@ -3,11 +3,11 @@
 
 const driveverse = {
   // Core brand
-  primary: "#FF3B30",       // Horizon red — main accent
-  primaryBright: "#FF6259",
-  primaryDark: "#D9291F",
-  primaryLight: "#FF6259",
-  primaryGlow: "#FF3B3040",
+  primary: "#FF6B35",       // Horizon orange — main accent
+  primaryBright: "#FF8A50",
+  primaryDark: "#E55A2A",
+  primaryLight: "#FF8A50",
+  primaryGlow: "#FF6B3540",
 
   // Secondary accents
   secondary: "#00D4AA",     // Premium teal
@@ -34,7 +34,7 @@ const driveverse = {
   card: "#12121A",          // (legacy) card bg
 
   // Surface accents
-  surfaceGlow: "#FF3B3008",
+  surfaceGlow: "#FF6B3508",
   surfaceBorder: "#1E1E2E",
   border: "#1E1E2E",        // (legacy)
   borderLight: "#2A2A3A",
@@ -48,10 +48,10 @@ const driveverse = {
   textPrimary: "#FFFFFF",
   textSecondary: "#8A8A9A",
   textMuted: "#5A5A6E",
-  textAccent: "#FF3B30",
+  textAccent: "#FF6B35",
 
   // Map POI colors
-  poiWorkshop: "#FF3B30",
+  poiWorkshop: "#FF6B35",
   poiCafe: "#8B5CF6",
   poiFuel: "#F59E0B",
   poiEV: "#22C55E",
@@ -71,7 +71,7 @@ const driveverse = {
   infoLight: "#60A5FA",
 
   // Gradients (legacy)
-  gradientStart: "#FF3B30",
+  gradientStart: "#FF6B35",
   gradientMiddle: "#FF3B6F",
   gradientEnd: "#00D4AA",
 
@@ -82,8 +82,8 @@ const driveverse = {
   overlayLight: "rgba(0, 0, 0, 0.5)",
   inactive: "#3A3A4E",
   disabled: "#2A2A3A",
-  shadow: "rgba(255, 59, 48, 0.15)",
-  shadowLight: "rgba(255, 59, 48, 0.08)",
+  shadow: "rgba(255, 107, 53, 0.15)",
+  shadowLight: "rgba(255, 107, 53, 0.08)",
   transparent: "transparent",
 } as const;
 
@@ -106,7 +106,7 @@ const driveverseLight: ThemeColors = {
   card: "#FFFFFF",
 
   // Surface accents
-  surfaceGlow: "#FF3B3008",
+  surfaceGlow: "#FF6B3508",
   surfaceBorder: "#E4E4EA",
   border: "#E4E4EA",
   borderLight: "#D5D5DE",
@@ -120,7 +120,7 @@ const driveverseLight: ThemeColors = {
   textPrimary: "#0A0A0F",
   textSecondary: "#5A5A6E",
   textMuted: "#8A8A9A",
-  textAccent: "#FF3B30",
+  textAccent: "#FF6B35",
 
   // Utility
   overlay: "rgba(0, 0, 0, 0.45)",

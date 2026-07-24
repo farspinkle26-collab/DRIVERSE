@@ -36,7 +36,7 @@ import RoutePreview from "@/components/RoutePreview";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const ACTIVITY_META: Record<ActivityType, { label: string; icon: React.FC<{ size: number; color: string }>; color: string }> = {
-  drive: { label: "Drive", icon: Car, color: "#FF3B30" },
+  drive: { label: "Drive", icon: Car, color: "#FF6B35" },
   cruise: { label: "Cruise", icon: Coffee, color: "#8B5CF6" },
   commute: { label: "Commute", icon: Briefcase, color: "#3B82F6" },
   race: { label: "Race", icon: Flame, color: "#FF3B6F" },
@@ -203,12 +203,12 @@ export default function RoutesScreen() {
           </TouchableOpacity>
         </View>
       ) : loadingRoutes && list.length === 0 ? (
-        <ActivityIndicator color="#FF3B30" style={{ marginTop: 60 }} />
+        <ActivityIndicator color="#FF6B35" style={{ marginTop: 60 }} />
       ) : (
         <ScrollView
           contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
         >
           {list.length === 0 ? (
             <View style={styles.empty}>
@@ -268,9 +268,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center" },
-  tabActive: { backgroundColor: "rgba(255,59,48,0.15)" },
+  tabActive: { backgroundColor: "rgba(255,107,53,0.15)" },
   tabText: { fontSize: 13, fontWeight: "700", color: "#5A5A6E" },
-  tabTextActive: { color: "#FF3B30" },
+  tabTextActive: { color: "#FF6B35" },
   // Card
   card: {
     backgroundColor: "rgba(255,255,255,0.03)",
@@ -285,11 +285,11 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "rgba(255,59,48,0.15)",
+    backgroundColor: "rgba(255,107,53,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: { fontSize: 17, fontWeight: "800", color: "#FF3B30" },
+  avatarText: { fontSize: 17, fontWeight: "800", color: "#FF6B35" },
   authorName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   subMetaRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   subMetaText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 13, color: "#5A5A6E", textAlign: "center", marginTop: 6, lineHeight: 19 },
   signInBtn: {
     marginTop: 20,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     paddingHorizontal: 28,
     paddingVertical: 12,
     borderRadius: 12,

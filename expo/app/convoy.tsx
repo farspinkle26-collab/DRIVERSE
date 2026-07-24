@@ -183,11 +183,11 @@ export default function ConvoyScreen() {
         )}
 
         {loading ? (
-          <ActivityIndicator color="#FF3B30" style={{ marginTop: 24 }} />
+          <ActivityIndicator color="#FF6B35" style={{ marginTop: 24 }} />
         ) : !party ? (
           <View style={styles.section}>
             <View style={styles.createCard}>
-              <Radio size={30} color="#FF3B30" />
+              <Radio size={30} color="#FF6B35" />
               <Text style={styles.createTitle}>Start a Convoy</Text>
               <Text style={styles.rowSub}>Name it, then invite friends from here or from the map.</Text>
               <TextInput
@@ -212,7 +212,7 @@ export default function ConvoyScreen() {
 
             <Text style={[styles.sectionLabel, { marginTop: 22 }]}>Browse Open Convoys</Text>
             {loadingPublicParties && publicParties.length === 0 ? (
-              <ActivityIndicator color="#FF3B30" style={{ marginTop: 8 }} />
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 8 }} />
             ) : publicParties.length === 0 ? (
               <Text style={styles.rowSub}>No open convoys yet — start your own above.</Text>
             ) : (
@@ -299,7 +299,7 @@ export default function ConvoyScreen() {
                       onPress={() => handleInvite(f.id, f.name)}
                       disabled={invitingId === f.id}
                     >
-                      {invitingId === f.id ? <ActivityIndicator size="small" color="#FF3B30" /> : <UserPlus size={16} color="#FF3B30" />}
+                      {invitingId === f.id ? <ActivityIndicator size="small" color="#FF6B35" /> : <UserPlus size={16} color="#FF6B35" />}
                     </TouchableOpacity>
                   </View>
                 ))
@@ -340,17 +340,17 @@ const styles = StyleSheet.create({
   createCard: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", padding: 22, gap: 8 },
   createTitle: { fontSize: 17, fontWeight: "800", color: "#FFFFFF", marginTop: 4 },
   createInput: { width: "100%", marginTop: 10, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 14, paddingVertical: 10, color: "#FFFFFF", fontSize: 14, textAlign: "center" },
-  createBtn: { width: "100%", marginTop: 6, backgroundColor: "#FF3B30", borderRadius: 12, paddingVertical: 13, alignItems: "center" },
+  createBtn: { width: "100%", marginTop: 6, backgroundColor: "#FF6B35", borderRadius: 12, paddingVertical: 13, alignItems: "center" },
   createBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
 
   convoyHeaderCard: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", padding: 16 },
   convoyName: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
 
   memberRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,59,48,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   avatarImg: { width: 40, height: 40, borderRadius: 20 },
-  avatarText: { fontSize: 15, fontWeight: "800", color: "#FF3B30" },
-  inviteBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,59,48,0.12)", alignItems: "center", justifyContent: "center" },
+  avatarText: { fontSize: 15, fontWeight: "800", color: "#FF6B35" },
+  inviteBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center" },
 
   leaveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
   leaveBtnText: { color: "#EF4444", fontWeight: "700", fontSize: 14 },

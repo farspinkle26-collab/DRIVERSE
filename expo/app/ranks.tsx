@@ -87,7 +87,7 @@ export default function RanksScreen() {
             </View>
             <View style={styles.track}>
               <LinearGradient
-                colors={["#FF3B30", "#FFD700"]}
+                colors={["#FF6B35", "#FFD700"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={[styles.fill, { width: `${Math.min(xpProgress * 100, 100)}%` }]}

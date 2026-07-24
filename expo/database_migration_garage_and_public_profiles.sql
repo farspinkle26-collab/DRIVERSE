@@ -26,7 +26,7 @@ BEGIN
   INSERT INTO public.car_collections
     (user_id, name, make, model, year, color, color_name, hp, mileage_km, is_primary, category, drivetrain, accel_0_100)
   VALUES
-    (NEW.id, 'Starter Ride', 'Honda', 'Civic Type R', '2023', '#FF3B30', 'Championship White', 315, 0, true, 'sport', 'FWD', '5.4s');
+    (NEW.id, 'Starter Ride', 'Honda', 'Civic Type R', '2023', '#FF6B35', 'Championship White', 315, 0, true, 'sport', 'FWD', '5.4s');
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

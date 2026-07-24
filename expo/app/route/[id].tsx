@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -11,10 +11,10 @@ import {
   Share,
   Platform,
   KeyboardAvoidingView,
-  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MapView, Camera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import * as Linking from "expo-linking";
@@ -39,10 +39,9 @@ import {
 } from "lucide-react-native";
 import { useRoutes, RouteComment, RouteVisibility } from "@/hooks/useRoutesStore";
 import { useAuth } from "@/hooks/useAuthStore";
-import { decodePolyline, boundsForPath } from "@/lib/polyline";
+import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
-import { MAPBOX_STYLE_URL_STANDARD, getMapboxStaticImageUrl } from "@/constants/mapbox";
-import { lineStringFeature } from "@/lib/geo";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
 
 function fmtDuration(seconds: number): string {
@@ -76,6 +75,7 @@ export default function RouteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const { user } = useAuth();
   const { getRoute, toggleKudos, fetchComments, addComment, deleteComment, deleteRoute, updateRoute } = useRoutes();
@@ -106,7 +106,22 @@ export default function RouteDetailScreen() {
     loadComments();
   }, [loadComments]);
 
-  const bounds = useMemo(() => boundsForPath(coords), [coords]);
+  // Fit map to the route once coordinates are available. initialRegion alone
+  // can render at a stale zoom before the native view has laid out, so we
+  // also re-fit as soon as the map reports ready.
+  const fitToRoute = useCallback(() => {
+    if (coords.length > 1) {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
+        animated: true,
+      });
+    }
+  }, [coords]);
+
+  useEffect(() => {
+    const t = setTimeout(fitToRoute, 400);
+    return () => clearTimeout(t);
+  }, [fitToRoute]);
 
   const handleShare = useCallback(async () => {
     if (!route) return;
@@ -220,6 +235,7 @@ export default function RouteDetailScreen() {
 
   const VisIcon = VIS_META[route.visibility].icon;
   const initial = (route.author_name || "D")[0].toUpperCase();
+  const region = regionForPath(coords);
 
   return (
     <View style={styles.container}>
@@ -253,56 +269,37 @@ export default function RouteDetailScreen() {
         >
           {/* Map */}
           <View style={styles.mapWrap}>
-            {Platform.OS === "web" ? (
-              coords[0] ? (
-                <Image
-                  source={{ uri: getMapboxStaticImageUrl(coords[0].latitude, coords[0].longitude, { dark: isDark, width: 600, height: 300, zoom: 12 }) }}
-                  style={StyleSheet.absoluteFill}
-                  resizeMode="cover"
-                />
-              ) : null
-            ) : (
-              <MapView
-                style={StyleSheet.absoluteFill}
-                styleURL={MAPBOX_STYLE_URL_STANDARD}
-                scrollEnabled={false}
-                zoomEnabled={false}
-                pitchEnabled={false}
-                rotateEnabled={false}
-                scaleBarEnabled={false}
-              >
-                <StyleImport
-                  id="basemap"
-                  existing
-                  config={{ lightPreset: isDark ? "night" : "day", showPointOfInterestLabels: false, showTransitLabels: false }}
-                />
-                <Camera
-                  bounds={bounds ? { ...bounds, paddingTop: 60, paddingBottom: 60, paddingLeft: 40, paddingRight: 40 } : undefined}
-                  animationDuration={0}
-                />
+            <MapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFill}
+              provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+              initialRegion={region}
+              onMapReady={fitToRoute}
+              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+            >
+              <MapboxTileLayer dark={isDark} />
 
-                {coords.length > 1 && (
-                  <>
-                    <ShapeSource id="routeGlow" shape={lineStringFeature(coords)}>
-                      <LineLayer id="routeGlowLine" style={{ lineWidth: 8, lineColor: "rgba(255,59,48,0.25)", lineCap: "round", lineJoin: "round" }} />
-                    </ShapeSource>
-                    <ShapeSource id="routeLine" shape={lineStringFeature(coords)}>
-                      <LineLayer id="routeLineLine" style={{ lineWidth: 4, lineColor: "#FF3B30", lineCap: "round", lineJoin: "round" }} />
-                    </ShapeSource>
-                  </>
-                )}
-                {coords.length > 0 && (
-                  <MarkerView coordinate={[coords[0].longitude, coords[0].latitude]} anchor={{ x: 0.5, y: 0.5 }}>
-                    <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
-                  </MarkerView>
-                )}
-                {coords.length > 1 && (
-                  <MarkerView coordinate={[coords[coords.length - 1].longitude, coords[coords.length - 1].latitude]} anchor={{ x: 0.5, y: 1 }}>
-                    <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
-                  </MarkerView>
-                )}
-              </MapView>
-            )}
+              {coords.length > 1 && (
+                <>
+                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,107,53,0.25)" lineCap="round" />
+                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF6B35" lineCap="round" />
+                </>
+              )}
+              {coords.length > 0 && (
+                <Marker coordinate={coords[0]} anchor={{ x: 0.5, y: 0.5 }}>
+                  <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
+                </Marker>
+              )}
+              {coords.length > 1 && (
+                <Marker coordinate={coords[coords.length - 1]} anchor={{ x: 0.5, y: 1 }}>
+                  <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
+                </Marker>
+              )}
+            </MapView>
           </View>
 
           <View style={styles.body}>
@@ -337,7 +334,7 @@ export default function RouteDetailScreen() {
             {/* Stats grid */}
             <View style={styles.statsGrid}>
               <View style={styles.statBox}>
-                <RouteIcon size={16} color="#FF3B30" />
+                <RouteIcon size={16} color="#FF6B35" />
                 <Text style={styles.statBoxValue}>{route.distance_km.toFixed(1)}</Text>
                 <Text style={styles.statBoxLabel}>km</Text>
               </View>
@@ -392,7 +389,7 @@ export default function RouteDetailScreen() {
               Comments {route.comments_count > 0 ? `(${route.comments_count})` : ""}
             </Text>
             {loadingComments ? (
-              <ActivityIndicator color="#FF3B30" style={{ marginTop: 16 }} />
+              <ActivityIndicator color="#FF6B35" style={{ marginTop: 16 }} />
             ) : comments.length === 0 ? (
               <Text style={styles.noComments}>No comments yet. Start the conversation!</Text>
             ) : (
@@ -502,11 +499,11 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(255,59,48,0.15)",
+    backgroundColor: "rgba(255,107,53,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF3B30" },
+  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF6B35" },
   authorName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   subRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   subText: { fontSize: 12, color: "#8A8A9A" },
@@ -561,7 +558,7 @@ const styles = StyleSheet.create({
     height: 50,
     paddingHorizontal: 22,
     borderRadius: 14,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
   },
   shareText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
   commentsTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF", marginBottom: 12 },
@@ -605,7 +602,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     justifyContent: "center",
     alignItems: "center",
   },

@@ -243,7 +243,7 @@ export default function MessagesScreen() {
         </TouchableOpacity>
         <Text style={styles.topTitle}>Messages</Text>
         <TouchableOpacity onPress={openCompose} style={styles.iconBtn} hitSlop={8}>
-          <SquarePen size={20} color="#FF3B30" />
+          <SquarePen size={20} color="#FF6B35" />
         </TouchableOpacity>
       </View>
 
@@ -262,7 +262,7 @@ export default function MessagesScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#FF3B30" style={{ marginTop: 40 }} />
+        <ActivityIndicator color="#FF6B35" style={{ marginTop: 40 }} />
       ) : conversations.length === 0 ? (
         <View style={styles.emptyState}>
           <MessageCircle size={44} color="#3A3A4E" />
@@ -277,7 +277,7 @@ export default function MessagesScreen() {
           data={conversations}
           keyExtractor={(item) => item.key}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF3B30" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
@@ -288,7 +288,7 @@ export default function MessagesScreen() {
             >
               <View style={styles.avatar}>
                 {item.kind === "group" ? (
-                  <Users size={20} color="#FF3B30" />
+                  <Users size={20} color="#FF6B35" />
                 ) : item.avatar ? (
                   <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
                 ) : (
@@ -331,7 +331,7 @@ export default function MessagesScreen() {
             <TouchableOpacity onPress={() => setComposeOpen(false)}><X size={20} color="#8A8A9A" /></TouchableOpacity>
           </View>
           {friendsLoading ? (
-            <ActivityIndicator color="#FF3B30" style={{ marginVertical: 20 }} />
+            <ActivityIndicator color="#FF6B35" style={{ marginVertical: 20 }} />
           ) : friends.length === 0 ? (
             <View style={styles.notifEmpty}>
               <Send size={28} color="#3A3A4E" />
@@ -365,18 +365,18 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF", marginTop: 8 },
   emptySub: { fontSize: 13, color: "#8A8A9A", textAlign: "center" },
-  composeCta: { marginTop: 16, backgroundColor: "#FF3B30", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
+  composeCta: { marginTop: 16, backgroundColor: "#FF6B35", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
   composeCtaText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
 
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: "rgba(255,59,48,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   avatarImg: { width: 50, height: 50, borderRadius: 25 },
-  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF3B30" },
+  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF6B35" },
   rowName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
   rowPreview: { fontSize: 13, color: "#8A8A9A", marginTop: 2 },
   rowPreviewUnread: { color: "#E5E5EA", fontWeight: "600" },
   rowTime: { fontSize: 11, color: "#5A5A6E" },
-  unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: "#FF3B30", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
+  unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
   unreadBadgeText: { fontSize: 11, fontWeight: "800", color: "#FFFFFF" },
 
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },

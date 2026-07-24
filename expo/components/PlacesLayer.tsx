@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { StyleSheet, View, Text, TouchableOpacity, Modal, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
-import { MarkerView } from "@/lib/mapboxCompat";
+import { Marker } from "react-native-maps";
 import { X, Plus, MapPin } from "lucide-react-native";
 import Card from "@/components/Card";
 import Input from "@/components/Input";
@@ -70,17 +70,16 @@ export function PlacesMarkers({
         const Icon = PLACE_CATEGORY_ICONS[place.category];
         const color = PLACE_CATEGORY_COLORS[place.category];
         return (
-          <MarkerView
+          <Marker
             key={place.id}
-            coordinate={[place.lng, place.lat]}
-            anchor={{ x: 0.5, y: 0.5 }}
+            coordinate={{ latitude: place.lat, longitude: place.lng }}
+            onPress={() => onSelect(place)}
+            tracksViewChanges={false}
           >
-            <TouchableOpacity activeOpacity={0.8} onPress={() => onSelect(place)}>
-              <View style={[styles.markerBadge, { backgroundColor: color, borderColor: place.source === "user" ? Colors.primary : "#FFFFFF" }]}>
-                <Icon size={14} color="#0A0A14" strokeWidth={2.4} />
-              </View>
-            </TouchableOpacity>
-          </MarkerView>
+            <View style={[styles.markerBadge, { backgroundColor: color, borderColor: place.source === "user" ? Colors.primary : "#FFFFFF" }]}>
+              <Icon size={14} color="#0A0A14" strokeWidth={2.4} />
+            </View>
+          </Marker>
         );
       })}
     </>

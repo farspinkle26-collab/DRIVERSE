@@ -13,13 +13,10 @@ To enable real Google Maps search functionality in your towing app, you need to 
 Enable these APIs in your Google Cloud Console for comprehensive location search:
 
 1. **Places API** - For location search and autocomplete
-2. **Geocoding API** - For address conversion and fallback geocoding
-3. **Places API (New)** - Enhanced place search (if available)
-
-Note: map *rendering* (the actual map tiles shown in the app) is Mapbox-only —
-see `constants/mapbox.ts` and `@rnmapbox/maps` — and doesn't need any Google
-Maps API key. The keys below are only for the address search/autocomplete and
-turn-by-turn directions REST calls in `LocationPicker`/`EnhancedLocationPicker`.
+2. **Maps JavaScript API** - For map display
+3. **Geocoding API** - For address conversion and fallback geocoding
+4. **Directions API** - Required for driving route/navigation calculations (used by the "Route" button)
+5. **Places API (New)** - Enhanced place search (if available)
 
 To enable APIs:
 1. Go to "APIs & Services" > "Library"

@@ -46,7 +46,7 @@ interface SaveRouteModalProps {
 }
 
 const ACTIVITY_OPTIONS: { key: ActivityType; label: string; icon: React.FC<{ size: number; color: string }>; color: string }[] = [
-  { key: "drive", label: "Drive", icon: Car, color: "#FF3B30" },
+  { key: "drive", label: "Drive", icon: Car, color: "#FF6B35" },
   { key: "cruise", label: "Cruise", icon: Coffee, color: "#8B5CF6" },
   { key: "commute", label: "Commute", icon: Briefcase, color: "#3B82F6" },
   { key: "race", label: "Race", icon: Flame, color: "#FF3B6F" },
@@ -173,7 +173,7 @@ export default function SaveRouteModal({
               {/* Stats strip */}
               <View style={styles.statsStrip}>
                 <View style={styles.statItem}>
-                  <RouteIcon size={16} color="#FF3B30" />
+                  <RouteIcon size={16} color="#FF6B35" />
                   <Text style={styles.statValue}>{fmtMeters(distanceMeters)}</Text>
                   <Text style={styles.statLabel}>Distance</Text>
                 </View>
@@ -251,8 +251,8 @@ export default function SaveRouteModal({
                     onPress={() => setVisibility(opt.key)}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.visIcon, active && { backgroundColor: "rgba(255,59,48,0.15)" }]}>
-                      <opt.icon size={18} color={active ? "#FF3B30" : "#8A8A9A"} />
+                    <View style={[styles.visIcon, active && { backgroundColor: "rgba(255,107,53,0.15)" }]}>
+                      <opt.icon size={18} color={active ? "#FF6B35" : "#8A8A9A"} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.visLabel, active && { color: "#FFFFFF" }]}>{opt.label}</Text>
@@ -276,7 +276,7 @@ export default function SaveRouteModal({
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={["#FF3B30", "#FF3B6F"]}
+                colors={["#FF6B35", "#FF3B6F"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.saveBtnGradient}
@@ -421,8 +421,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   visRowActive: {
-    borderColor: "#FF3B3060",
-    backgroundColor: "rgba(255,59,48,0.06)",
+    borderColor: "#FF6B3560",
+    backgroundColor: "rgba(255,107,53,0.06)",
   },
   visIcon: {
     width: 38,
@@ -452,13 +452,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   radioActive: {
-    borderColor: "#FF3B30",
+    borderColor: "#FF6B35",
   },
   radioDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
   },
   errorText: {
     color: "#EF4444",

@@ -52,7 +52,7 @@ export default function LoginScreen() {
           {/* Brand */}
           <View style={styles.brandSection}>
             <LinearGradient
-              colors={["#FF3B30", "#FF3B6F"]}
+              colors={["#FF6B35", "#FF3B6F"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.brandBadge}
@@ -113,7 +113,7 @@ export default function LoginScreen() {
               disabled={loading || !email || !password}
             >
               <LinearGradient
-                colors={email && password ? ["#FF3B30", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
+                colors={email && password ? ["#FF6B35", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.loginBtnGradient}
@@ -327,6 +327,6 @@ const styles = StyleSheet.create({
   footerLink: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#FF3B30",
+    color: "#FF6B35",
   },
 });

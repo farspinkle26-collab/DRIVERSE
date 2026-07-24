@@ -247,7 +247,7 @@ export const PLACE_CATEGORY_COLORS: Record<PlaceCategory, string> = {
   landmark: "#3B82F6",
   fuel: "#F59E0B",
   ev_station: "#22C55E",
-  workshop: "#FF3B30",
+  workshop: "#FF6B35",
   any: "#3B82F6",
 };
 

@@ -4,17 +4,17 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Platform,
   Animated,
   ActivityIndicator,
   Dimensions,
   Image,
   TextInput,
   Keyboard,
-  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { MapView, Camera as MapCamera, MarkerView, ShapeSource, LineLayer, StyleImport, isMapboxAvailable } from "@/lib/mapboxCompat";
-import { lineStringFeature } from "@/lib/geo";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { usePlaces } from "@/hooks/usePlaces";
 import type { NormalizedPlace } from "@/lib/placesApi";
@@ -90,7 +90,8 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAPBOX_ACCESS_TOKEN, MAPBOX_STYLE_URL_STANDARD } from "@/constants/mapbox";
+import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
+import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -429,55 +430,30 @@ function PlayerPuck() {
 }
 
 // ─── SettledMarker ───────────────────────────────────────
-// @rnmapbox/maps' MarkerView renders real native views (not the bitmap-snapshot
-// approach react-native-maps used on Android), so it doesn't suffer the
-// half-drawn/cropped-icon issue tracksViewChanges used to work around. This
-// wrapper keeps the old call-site shape (coordinate as {latitude,longitude},
-// settleKey/ready still accepted but unused) so the marker JSX below didn't
-// need to change.
-type SettledMarkerProps = {
-  coordinate: { latitude: number; longitude: number };
-  anchor?: { x: number; y: number };
-  onPress?: () => void;
-  settleKey?: string;
+// Android draws custom marker views by snapshotting them into a bitmap.
+// Turning tracksViewChanges off in the same frame the content finishes
+// (image onLoadEnd, text layout, size change on select/deselect) can freeze
+// the snapshot mid-paint, which shows up as icons cropped to half their
+// size. This wrapper keeps tracking on until `ready` is true AND a short
+// grace period passes with no appearance change (`settleKey`), then freezes
+// the bitmap for performance. Any settleKey/ready change re-arms tracking.
+const MARKER_SETTLE_MS = 600;
+type SettledMarkerProps = React.ComponentProps<typeof Marker> & {
+  settleKey: string;
   ready?: boolean;
-  children: React.ReactNode;
 };
-function SettledMarker({ coordinate, anchor, onPress, children }: SettledMarkerProps) {
+function SettledMarker({ settleKey, ready = true, children, ...markerProps }: SettledMarkerProps) {
+  const [tracking, setTracking] = useState(true);
+  useEffect(() => {
+    setTracking(true);
+    if (!ready) return;
+    const t = setTimeout(() => setTracking(false), MARKER_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [settleKey, ready]);
   return (
-    <MarkerView coordinate={[coordinate.longitude, coordinate.latitude]} anchor={anchor}>
-      {onPress ? (
-        <TouchableOpacity activeOpacity={0.85} onPress={onPress}>
-          {children}
-        </TouchableOpacity>
-      ) : (
-        <View collapsable={false}>{children}</View>
-      )}
-    </MarkerView>
-  );
-}
-
-// react-native-maps' <Polyline> took a flat coordinates[] + stroke props; this
-// keeps that same call shape but renders via Mapbox's ShapeSource+LineLayer.
-let routePolylineIdSeq = 0;
-function RoutePolyline({
-  coordinates,
-  strokeWidth,
-  strokeColor,
-  lineCap = "round",
-  lineJoin = "round",
-}: {
-  coordinates: { latitude: number; longitude: number }[];
-  strokeWidth: number;
-  strokeColor: string;
-  lineCap?: "round" | "butt" | "square";
-  lineJoin?: "round" | "bevel" | "miter";
-}) {
-  const id = useRef(`route-polyline-${routePolylineIdSeq++}`).current;
-  return (
-    <ShapeSource id={id} shape={lineStringFeature(coordinates)}>
-      <LineLayer id={`${id}-line`} style={{ lineWidth: strokeWidth, lineColor: strokeColor, lineCap, lineJoin }} />
-    </ShapeSource>
+    <Marker {...markerProps} tracksViewChanges={tracking}>
+      {children}
+    </Marker>
   );
 }
 
@@ -503,59 +479,9 @@ function EyeIcon({ visible, color, size = 14 }: { visible: boolean; color: strin
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const cameraRef = useRef<MapCamera>(null);
+  const mapRef = useRef<MapView>(null);
   const router = useRouter();
   const { isDark } = useTheme();
-
-  // Mapbox's Camera.fitBounds takes raw [lng,lat] NE/SW corners (not react-native-maps'
-  // {latitude,longitude}[] + edgePadding shape), so every former fitToCoordinates() call
-  // in this screen now routes through this helper.
-  const fitCameraToCoordinates = useCallback(
-    (points: { latitude: number; longitude: number }[], padding: { top: number; right: number; bottom: number; left: number }, duration = 500) => {
-      if (!cameraRef.current || points.length === 0) return;
-      let minLat = points[0].latitude, maxLat = points[0].latitude;
-      let minLng = points[0].longitude, maxLng = points[0].longitude;
-      for (const p of points) {
-        minLat = Math.min(minLat, p.latitude);
-        maxLat = Math.max(maxLat, p.latitude);
-        minLng = Math.min(minLng, p.longitude);
-        maxLng = Math.max(maxLng, p.longitude);
-      }
-      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [padding.top, padding.right, padding.bottom, padding.left], duration);
-    },
-    []
-  );
-
-  // Mapbox's Camera.setCamera takes centerCoordinate as [lng,lat] + zoomLevel/pitch/heading —
-  // this mirrors the shape of every former mapRef.current.animateCamera() call in this screen.
-  //
-  // cameraBearingRef tracks the map's current compass bearing (only ever changed by an
-  // explicit setCameraTo({heading}) call, never implicitly). react-native-maps' `flat`
-  // marker used to rotate the user puck WITH the map, so its apparent on-screen angle was
-  // (rotation - mapBearing). MarkerView here is screen-anchored (doesn't rotate with map
-  // bearing), so the JSX below reproduces that same apparent angle by rotating the puck's
-  // inner view by (heading - cameraBearingRef.current) itself. `heading` state updates on
-  // every GPS fix (see the watcher below) even when the camera bearing isn't touched, so
-  // the puck keeps rotating to match the compass while the map stays north-up outside of
-  // the chase-cam recording view — exactly like before.
-  const cameraBearingRef = useRef(0);
-  const [, forcePuckRerender] = useState(0);
-  const setCameraTo = useCallback(
-    (opts: { center?: { latitude: number; longitude: number }; zoom?: number; pitch?: number; heading?: number }, duration = 500) => {
-      cameraRef.current?.setCamera({
-        centerCoordinate: opts.center ? [opts.center.longitude, opts.center.latitude] : undefined,
-        zoomLevel: opts.zoom,
-        pitch: opts.pitch,
-        heading: opts.heading,
-        animationDuration: duration,
-      });
-      if (opts.heading !== undefined) {
-        cameraBearingRef.current = opts.heading;
-        forcePuckRerender((n) => n + 1);
-      }
-    },
-    []
-  );
 
   // Map tile/style preference — intentionally separate from the app-wide theme so that
   // switching the map's Light/Dark style doesn't flip the rest of the app's UI theme.
@@ -820,7 +746,10 @@ export default function MapScreen() {
         });
         setRouteSteps(steps);
 
-        fitCameraToCoordinates(result.coordinates, { top: 80, right: 60, bottom: 250, left: 60 });
+        mapRef.current?.fitToCoordinates(result.coordinates, {
+          edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
+          animated: true,
+        });
       } else {
         setNavigating(false);
         Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
@@ -831,7 +760,7 @@ export default function MapScreen() {
     } finally {
       setLoadingRoute(false);
     }
-  }, [fitCameraToCoordinates]);
+  }, []);
 
   // --- GPS detection (runs once, uses refs for recording state to avoid restarts) ---
   // Keep userLocationRef in sync
@@ -871,7 +800,10 @@ export default function MapScreen() {
         setLocating(false);
 
         setTimeout(() => {
-          setCameraTo({ center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 }, 1200);
+          mapRef.current?.animateCamera(
+            { center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 },
+            { duration: 1200 }
+          );
         }, 300);
 
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
@@ -962,7 +894,10 @@ export default function MapScreen() {
                 (navHeadingRef.current + headingDelta(navHeadingRef.current, targetHeading) * 0.6 + 360) % 360;
               navHeadingRef.current = smoothedHeading;
               setHeading(smoothedHeading);
-              setCameraTo({ center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading }, 900);
+              mapRef.current?.animateCamera(
+                { center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading },
+                { duration: 900 }
+              );
 
               // --- Auto-stop when near destination ---
               const dest = destCoordsRef.current;
@@ -1221,16 +1156,22 @@ export default function MapScreen() {
 
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
-    if (!userLocation) return;
-    setCameraTo({ center: userLocation, zoom: 17, pitch: 50, heading }, 800);
-  }, [userLocation, heading, setCameraTo]);
+    if (!userLocation || !mapRef.current) return;
+    mapRef.current.animateCamera(
+      { center: userLocation, zoom: 17, pitch: 50, heading },
+      { duration: 800 }
+    );
+  }, [userLocation, heading]);
 
   const handleCafePress = useCallback((cafe: CafePOI) => {
     setSelectedDestination({ type: "cafe", data: cafe });
     setLocationChosen(false);
     setRouteInfo(null);
-    setCameraTo({ center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 }, 500);
-  }, [setCameraTo]);
+    mapRef.current?.animateCamera(
+      { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
+      { duration: 500 }
+    );
+  }, []);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -1294,9 +1235,9 @@ export default function MapScreen() {
   }, [user]);
 
   // --- Drop a destination pin wherever the driver taps the map, while drive mode is active ---
-  const handleMapPress = useCallback((feature: { geometry: { coordinates: number[] } }) => {
+  const handleMapPress = useCallback((event: any) => {
     if (!showDropPinHint) return;
-    const [longitude, latitude] = feature.geometry.coordinates;
+    const { latitude, longitude } = event.nativeEvent.coordinate;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setLocationChosen(true);
     setRouteInfo(null);
@@ -1310,21 +1251,20 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placesLayerOpen, places.category, userLocation]);
 
-  const handlePlacesRegionChange = useCallback((feature: { geometry: { coordinates: number[] } }) => {
+  const handlePlacesRegionChange = useCallback((region: { latitude: number; longitude: number }) => {
     if (!placesLayerOpen) return;
-    const [longitude, latitude] = feature.geometry.coordinates;
-    places.fetchForRegion(latitude, longitude, places.category);
+    places.fetchForRegion(region.latitude, region.longitude, places.category);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placesLayerOpen, places.category]);
 
   // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
-  const handleMapLongPress = useCallback((feature: { geometry: { coordinates: number[] } }) => {
+  const handleMapLongPress = useCallback((event: any) => {
     if (!placesLayerOpen) return;
     if (!user) {
       Alert.alert("Sign In Required", "Create an account to submit a place");
       return;
     }
-    const [longitude, latitude] = feature.geometry.coordinates;
+    const { latitude, longitude } = event.nativeEvent.coordinate;
     setSubmitPlaceCoord({ latitude, longitude });
     setShowSubmitPlaceModal(true);
   }, [placesLayerOpen, user]);
@@ -1404,10 +1344,13 @@ export default function MapScreen() {
     }
     // Drop into the third-person navigation view: tight zoom, tilted horizon,
     // and rotated so the direction of travel points up the screen.
-    if (userLocation) {
-      setCameraTo({ center: userLocation, zoom: 18, pitch: 60, heading }, 600);
+    if (userLocation && mapRef.current) {
+      mapRef.current.animateCamera(
+        { center: userLocation, zoom: 18, pitch: 60, heading },
+        { duration: 600 }
+      );
     }
-  }, [userLocation, heading, setCameraTo]);
+  }, [userLocation, heading]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -1494,7 +1437,9 @@ export default function MapScreen() {
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
   // --- Map region ---
-  const initialCenter = userLocation ?? { latitude: -6.2088, longitude: 106.8456 };
+  const initialRegion = userLocation
+    ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
+    : { latitude: -6.2088, longitude: 106.8456, latitudeDelta: 0.05, longitudeDelta: 0.05 };
 
   const RECORD_RED = "#FF2D55";
   const RECORD_GLOW = "#FF6482";
@@ -1642,7 +1587,10 @@ export default function MapScreen() {
       icon: <EventTypeIcon type={ev.event_type} size={15} color={evColor} />,
       onPress: () => {
         setSelectedEventId(ev.id);
-        setCameraTo({ center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 }, 600);
+        mapRef.current?.animateCamera(
+          { center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 },
+          { duration: 600 }
+        );
       },
     });
   }
@@ -1683,40 +1631,28 @@ export default function MapScreen() {
     <View style={styles.container}>
       {/* --- Map --- */}
       <MapView
+        ref={mapRef}
         style={styles.map}
-        styleURL={MAPBOX_STYLE_URL_STANDARD}
+        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+        initialRegion={initialRegion}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        compassEnabled={false}
-        scaleBarEnabled={false}
+        customMapStyle={
+          showDropPinHint
+            ? (mapStyleDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
+            : (mapStyleDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
+        }
+        followsUserLocation={false}
         onPress={handleMapPress}
         onLongPress={handleMapLongPress}
-        onRegionDidChange={handlePlacesRegionChange}
+        onRegionChangeComplete={handlePlacesRegionChange}
       >
-        <MapCamera
-          ref={cameraRef}
-          defaultSettings={{
-            centerCoordinate: [initialCenter.longitude, initialCenter.latitude],
-            zoomLevel: userLocation ? 16 : 12,
-          }}
-        />
-
-        {/* Reproduces the old Google-style-JSON behavior: base-map POI/transit labels
-            are hidden during normal browsing (so they don't clutter/duplicate this
-            screen's own filterable category markers), and shown while the user is
-            actively picking a location (drop pin / event location) so they can see
-            Mapbox's own place labels as a reference point. */}
-        <StyleImport
-          id="basemap"
-          existing
-          config={{
-            lightPreset: mapStyleDark ? "night" : "day",
-            showPointOfInterestLabels: showDropPinHint,
-            showTransitLabels: showDropPinHint,
-          }}
-        />
+        <MapboxTileLayer dark={mapStyleDark} />
 
         {placesLayerOpen && (
           <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
@@ -1793,7 +1729,7 @@ export default function MapScreen() {
         {recordedPath.length > 1 && (
           <>
             {/* Glow layer */}
-            <RoutePolyline
+            <Polyline
               coordinates={recordedPath}
               strokeWidth={8}
               strokeColor={`${RECORDED_PATH_COLOR}30`}
@@ -1801,7 +1737,7 @@ export default function MapScreen() {
               lineJoin="round"
             />
             {/* Outer glow */}
-            <RoutePolyline
+            <Polyline
               coordinates={recordedPath}
               strokeWidth={5}
               strokeColor={`${RECORDED_PATH_COLOR}50`}
@@ -1809,7 +1745,7 @@ export default function MapScreen() {
               lineJoin="round"
             />
             {/* Core line */}
-            <RoutePolyline
+            <Polyline
               coordinates={recordedPath}
               strokeWidth={3}
               strokeColor={RECORDED_PATH_COLOR}
@@ -1830,14 +1766,14 @@ export default function MapScreen() {
                 {/* Traversed — yellow glow + core */}
                 {traversed.length > 1 && (
                   <>
-                    <RoutePolyline
+                    <Polyline
                       coordinates={traversed}
                       strokeWidth={8}
                       strokeColor="rgba(250, 204, 21, 0.25)"
                       lineCap="round"
                       lineJoin="round"
                     />
-                    <RoutePolyline
+                    <Polyline
                       coordinates={traversed}
                       strokeWidth={4}
                       strokeColor="#FACC15"
@@ -1849,14 +1785,14 @@ export default function MapScreen() {
                 {/* Remaining — red glow + core */}
                 {remaining.length > 1 && (
                   <>
-                    <RoutePolyline
+                    <Polyline
                       coordinates={remaining}
                       strokeWidth={7}
                       strokeColor={`${ROUTE_GLOW}40`}
                       lineCap="round"
                       lineJoin="round"
                     />
-                    <RoutePolyline
+                    <Polyline
                       coordinates={remaining}
                       strokeWidth={4}
                       strokeColor={ROUTE_RED}
@@ -1871,14 +1807,14 @@ export default function MapScreen() {
           // No split yet — show full red route
           return (
             <>
-              <RoutePolyline
+              <Polyline
                 coordinates={routeInfo.coordinates}
                 strokeWidth={7}
                 strokeColor={`${ROUTE_GLOW}40`}
                 lineCap="round"
                 lineJoin="round"
               />
-              <RoutePolyline
+              <Polyline
                 coordinates={routeInfo.coordinates}
                 strokeWidth={4}
                 strokeColor={ROUTE_RED}
@@ -1891,14 +1827,14 @@ export default function MapScreen() {
 
         {/* Destination marker (when navigating) */}
         {selectedDestination && routeInfo && destCoords() && (
-          <MarkerView
-            coordinate={[destCoords()!.longitude, destCoords()!.latitude]}
+          <Marker
+            coordinate={destCoords()!}
             anchor={{ x: 0.5, y: 1 }}
           >
             <View style={styles.destPin}>
               <MapPin size={28} color={ROUTE_RED} fill={ROUTE_RED} />
             </View>
-          </MarkerView>
+          </Marker>
         )}
 
         {/* Custom location marker (tapped, no route yet) */}
@@ -1909,7 +1845,7 @@ export default function MapScreen() {
             settleKey={`chosen-${locationChosen}`}
           >
             <View style={styles.customPin} collapsable={false}>
-              <MapPin size={locationChosen ? 36 : 28} color="#FF3B30" fill="#FF3B30" />
+              <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
             </View>
           </SettledMarker>
         )}
@@ -2007,23 +1943,20 @@ export default function MapScreen() {
           );
         })}
 
-        {/* User marker — coded SVG puck (no bitmap asset). MarkerView is screen-anchored
-            (it doesn't rotate with the map's bearing the way react-native-maps' `flat`
-            markers did), so the puck's apparent angle is reproduced explicitly here as
-            (heading - current map bearing) — see the cameraBearingRef comment above. */}
+        {/* User marker — coded SVG puck (no bitmap asset) */}
         {userLocation && (
-          <MarkerView coordinate={[userLocation.longitude, userLocation.latitude]} anchor={{ x: 0.5, y: 0.5 }}>
+          <Marker
+            coordinate={userLocation}
+            anchor={{ x: 0.5, y: 0.5 }}
+            rotation={heading}
+            flat
+          >
             <View style={styles.carMarkerBox} collapsable={false}>
-              <Animated.View
-                style={[
-                  styles.carMarker,
-                  { transform: [{ translateY: carFloat }, { rotate: `${(heading - cameraBearingRef.current + 360) % 360}deg` }] },
-                ]}
-              >
+              <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
                 <PlayerPuck />
               </Animated.View>
             </View>
-          </MarkerView>
+          </Marker>
         )}
 
         {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
@@ -2041,20 +1974,6 @@ export default function MapScreen() {
         )}
       </MapView>
 
-      {/* Shown instead of a silent blank map when @rnmapbox/maps' native module
-          isn't linked into the running binary — e.g. Expo Go, or a dev client
-          built before the module was added (see lib/mapboxCompat.ts). */}
-      {!isMapboxAvailable && (
-        <View style={[styles.mapUnavailableBanner, { top: insets.top + 10 }]} pointerEvents="none">
-          <Text style={styles.mapUnavailableTitle}>Map preview unavailable</Text>
-          <Text style={styles.mapUnavailableSubtitle}>
-            Mapbox needs a custom dev build — it can&apos;t run in Expo Go. Run{" "}
-            <Text style={styles.mapUnavailableCode}>expo run:ios</Text> or{" "}
-            <Text style={styles.mapUnavailableCode}>expo run:android</Text> to see it here.
-          </Text>
-        </View>
-      )}
-
       {/* ===================================================== */}
       {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
       {/* ===================================================== */}
@@ -2070,7 +1989,7 @@ export default function MapScreen() {
           />
           {places.loading && (
             <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
-              <ActivityIndicator size="small" color="#FF3B30" />
+              <ActivityIndicator size="small" color="#FF6B35" />
               <Text style={styles.placesLoadingText}>Loading nearby places…</Text>
             </View>
           )}
@@ -2106,7 +2025,7 @@ export default function MapScreen() {
       {locating && (
         <View style={[styles.loadingOverlay, { paddingTop: insets.top + 20 }]} pointerEvents="none">
           <View style={styles.loadingCard}>
-            <ActivityIndicator size="small" color="#FF3B30" />
+            <ActivityIndicator size="small" color="#FF6B35" />
             <Text style={styles.loadingText}>Detecting your location...</Text>
           </View>
         </View>
@@ -2201,11 +2120,11 @@ export default function MapScreen() {
               activeOpacity={0.7}
               onPress={() => {
                 if (userLocation) {
-                  setCameraTo({ center: userLocation, heading: 0 }, 500);
+                  mapRef.current?.animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
                 }
               }}
             >
-              <Navigation size={16} color="#FF3B30" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
+              <Navigation size={16} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
             </TouchableOpacity>
           </View>
 
@@ -2534,7 +2453,7 @@ export default function MapScreen() {
               onPress={() => router.push("/routes" as any)}
               activeOpacity={0.7}
             >
-              <Share2 size={17} color="#FF3B30" />
+              <Share2 size={17} color="#FF6B35" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2585,7 +2504,10 @@ export default function MapScreen() {
                 activeOpacity={0.85}
                 onPress={() => {
                   setSelectedEventId(fe.id);
-                  setCameraTo({ center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 }, 600);
+                  mapRef.current?.animateCamera(
+                    { center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 },
+                    { duration: 600 }
+                  );
                 }}
               >
                 <View style={[styles.featuredThumb, { backgroundColor: `${feColor}1E`, borderColor: `${feColor}50` }]}>
@@ -2649,7 +2571,7 @@ export default function MapScreen() {
               onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
               activeOpacity={0.7}
             >
-              <SlidersHorizontal size={18} color={filtersOpen ? "#FF3B30" : "#FFFFFF"} strokeWidth={2.2} />
+              <SlidersHorizontal size={18} color={filtersOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={styles.actionBtnLabel}>Filters</Text>
           </View>
@@ -2810,9 +2732,9 @@ export default function MapScreen() {
             <TouchableOpacity
               onPress={() => {
                 if (events.length > 0) {
-                  fitCameraToCoordinates(
+                  mapRef.current?.fitToCoordinates(
                     events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
-                    { top: 140, right: 100, bottom: 320, left: 60 }
+                    { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
                   );
                 }
               }}
@@ -2858,7 +2780,7 @@ export default function MapScreen() {
       {/* Hint shown while drive/drop-pin mode is active, prompting the driver to tap the map */}
       {showDropPinHint && (
         <Animated.View style={[styles.dropPinHint, { top: insets.top + 90, opacity: fadeIn }]} pointerEvents="none">
-          <MapPin size={18} color="#FF3B30" fill="#FF3B30" />
+          <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
           <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
         </Animated.View>
       )}
@@ -3418,33 +3340,6 @@ const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFillObject,
   },
-  mapUnavailableBanner: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(22, 22, 40, 0.92)",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 59, 48, 0.4)",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    zIndex: 3,
-  },
-  mapUnavailableTitle: {
-    color: "#FF6B6B",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  mapUnavailableSubtitle: {
-    color: "#D7D9E4",
-    fontSize: 12.5,
-    lineHeight: 17,
-  },
-  mapUnavailableCode: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
-    color: "#FFD75E",
-  },
   // Nearby places layer (OSM + community)
   placesFilterBar: {
     position: "absolute",
@@ -3492,7 +3387,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(255, 59, 48, 0.2)",
+    borderColor: "rgba(255, 107, 53, 0.2)",
   },
   loadingText: {
     color: "#8A8A9A",
@@ -3673,7 +3568,7 @@ const styles = StyleSheet.create({
   // Custom location pin (orange, tapped on map)
   customPin: {
     alignItems: "center",
-    shadowColor: "#FF3B30",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 8,
@@ -3697,9 +3592,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.1)",
   },
   actionBtnActive: {
-    borderColor: "rgba(255, 59, 48, 0.5)",
-    backgroundColor: "rgba(255, 59, 48, 0.12)",
-    shadowColor: "#FF3B30",
+    borderColor: "rgba(255, 107, 53, 0.5)",
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.35,
     shadowRadius: 12,
@@ -3834,7 +3729,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -3861,7 +3756,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(14, 14, 24, 0.96)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255, 59, 48, 0.3)",
+    borderColor: "rgba(255, 107, 53, 0.3)",
     paddingHorizontal: 14,
     height: 48,
     shadowColor: "#000",
@@ -3977,8 +3872,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterCheckOn: {
-    backgroundColor: "#FF3B30",
-    borderColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
+    borderColor: "#FF6B35",
   },
   mapStyleToggle: {
     flexDirection: "row",
@@ -4133,12 +4028,12 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
-    shadowColor: "#FF3B30",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 14,
@@ -4233,14 +4128,14 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 13,
     borderWidth: 1.5,
-    borderColor: "#FF3B30",
+    borderColor: "#FF6B35",
   },
   drivingProfileAvatarFallback: {
     width: 26,
     height: 26,
     borderRadius: 13,
     borderWidth: 1.5,
-    borderColor: "#FF3B30",
+    borderColor: "#FF6B35",
     backgroundColor: "#2A2A45",
     justifyContent: "center",
     alignItems: "center",
@@ -4286,7 +4181,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 9,
-    backgroundColor: "rgba(255, 59, 48, 0.16)",
+    backgroundColor: "rgba(255, 107, 53, 0.16)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -4328,7 +4223,7 @@ const styles = StyleSheet.create({
   turnProgressFill: {
     height: 3,
     borderRadius: 2,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
   },
   turnBottomRow: {
     flexDirection: "row",
@@ -4807,7 +4702,7 @@ const styles = StyleSheet.create({
   },
   levelBarLabel: {
     fontSize: 12,
-    color: "#FF3B30",
+    color: "#FF6B35",
     fontWeight: "700",
   },
   levelBarXp: {
@@ -4823,7 +4718,7 @@ const styles = StyleSheet.create({
   },
   levelBarFill: {
     height: 6,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
     borderRadius: 3,
   },
   saveRouteRow: {
@@ -4839,7 +4734,7 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 48,
     borderRadius: 14,
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#FF6B35",
   },
   saveRouteBtnText: {
     fontSize: 15,
@@ -4852,9 +4747,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(255,59,48,0.12)",
+    backgroundColor: "rgba(255,107,53,0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255,59,48,0.3)",
+    borderColor: "rgba(255,107,53,0.3)",
   },
   levelUpText: {
     fontSize: 13,
@@ -5179,10 +5074,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 16, 26, 0.94)",
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: "rgba(255, 59, 48, 0.4)",
+    borderColor: "rgba(255, 107, 53, 0.4)",
     paddingHorizontal: 16,
     paddingVertical: 11,
-    shadowColor: "#FF3B30",
+    shadowColor: "#FF6B35",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 14,

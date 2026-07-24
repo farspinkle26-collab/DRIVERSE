@@ -53,7 +53,7 @@ function hexToRgba(hex: string, alpha: number): string {
   const r = parseInt(full.slice(0, 2), 16);
   const g = parseInt(full.slice(2, 4), 16);
   const b = parseInt(full.slice(4, 6), 16);
-  if ([r, g, b].some(Number.isNaN)) return `rgba(255,59,48,${alpha})`;
+  if ([r, g, b].some(Number.isNaN)) return `rgba(255,107,53,${alpha})`;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -339,7 +339,7 @@ export default function SelectCarScreen() {
     }
   }, [newName, newMake, newHp, addCar]);
 
-  const activeColor = filteredCars[activeIndex]?.color ?? "#FF3B30";
+  const activeColor = filteredCars[activeIndex]?.color ?? "#FF6B35";
 
   // ─── Loading ─────────────────────────────────────────────
   if (authLoading || (isAuthenticated && loadingCars && cars.length === 0)) {
@@ -347,7 +347,7 @@ export default function SelectCarScreen() {
       <View style={styles.container}>
         <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={styles.center}>
-          <ActivityIndicator color="#FF3B30" size="large" />
+          <ActivityIndicator color="#FF6B35" size="large" />
           <Text style={styles.loadingText}>Opening your garage…</Text>
         </View>
       </View>
@@ -360,7 +360,7 @@ export default function SelectCarScreen() {
       <View style={styles.container}>
         <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={[styles.center, { paddingHorizontal: 32 }]}>
-          <LinearGradient colors={["#FF3B30", "#FF3B6F"]} style={styles.guestIcon}>
+          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.guestIcon}>
             <Car size={40} color="#FFFFFF" />
           </LinearGradient>
           <Text style={styles.guestTitle}>Enter Your Garage</Text>
@@ -368,7 +368,7 @@ export default function SelectCarScreen() {
             Sign in to pick your ride and unlock XP, routes, and your car collection.
           </Text>
           <TouchableOpacity style={styles.guestPrimary} onPress={() => router.push("/login" as any)} activeOpacity={0.85}>
-            <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.guestPrimaryGrad}>
+            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.guestPrimaryGrad}>
               <LogIn size={18} color="#FFFFFF" />
               <Text style={styles.guestPrimaryText}>Sign In</Text>
             </LinearGradient>
@@ -389,7 +389,7 @@ export default function SelectCarScreen() {
         <View style={[styles.emptyWrap, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}>
           <View style={styles.center}>
             <View style={styles.emptyIcon}>
-              <Car size={48} color="#FF3B30" strokeWidth={1.5} />
+              <Car size={48} color="#FF6B35" strokeWidth={1.5} />
             </View>
             <Text style={styles.guestTitle}>Build Your Garage</Text>
             <Text style={styles.guestSub}>Add your first ride to hit the road in style.</Text>
@@ -422,7 +422,7 @@ export default function SelectCarScreen() {
                 />
               </View>
               <TouchableOpacity style={styles.cta} onPress={handleAddCar} disabled={addBusy || !newName.trim()} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
                   {addBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.ctaText}>Add to Garage</Text>}
                 </LinearGradient>
               </TouchableOpacity>
@@ -433,7 +433,7 @@ export default function SelectCarScreen() {
           ) : (
             <View style={styles.addForm}>
               <TouchableOpacity style={styles.cta} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF3B30", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
+                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
                   <Plus size={18} color="#FFFFFF" />
                   <Text style={styles.ctaText}>Add a Car</Text>
                 </LinearGradient>
@@ -473,7 +473,7 @@ export default function SelectCarScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerTopRow}>
           <View style={styles.brandRow}>
-            <Sparkles size={14} color="#FF3B30" />
+            <Sparkles size={14} color="#FF6B35" />
             <Text style={styles.brandLabel}>YOUR GARAGE</Text>
           </View>
           <TouchableOpacity
@@ -550,7 +550,7 @@ export default function SelectCarScreen() {
               onPress={() => handleCategoryChange(cat.key)}
               activeOpacity={0.75}
             >
-              <cat.icon size={14} color={active ? "#FF3B30" : "#8A8A9A"} />
+              <cat.icon size={14} color={active ? "#FF6B35" : "#8A8A9A"} />
               <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
                 {cat.label}
               </Text>
@@ -642,7 +642,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 24, paddingBottom: 8 },
   headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  brandLabel: { fontSize: 12, fontWeight: "800", color: "#FF3B30", letterSpacing: 2 },
+  brandLabel: { fontSize: 12, fontWeight: "800", color: "#FF6B35", letterSpacing: 2 },
   statsBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -777,11 +777,11 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
   },
   categoryChipActive: {
-    backgroundColor: "rgba(255,59,48,0.14)",
-    borderColor: "rgba(255,59,48,0.4)",
+    backgroundColor: "rgba(255,107,53,0.14)",
+    borderColor: "rgba(255,107,53,0.4)",
   },
   categoryChipText: { fontSize: 13, fontWeight: "600", color: "#8A8A9A" },
-  categoryChipTextActive: { color: "#FF3B30" },
+  categoryChipTextActive: { color: "#FF6B35" },
   // Garage-wide stats grid
   statsGrid: {
     flexDirection: "row",
@@ -845,12 +845,12 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 30,
-    backgroundColor: "rgba(255,59,48,0.1)",
+    backgroundColor: "rgba(255,107,53,0.1)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 22,
     borderWidth: 1,
-    borderColor: "rgba(255,59,48,0.2)",
+    borderColor: "rgba(255,107,53,0.2)",
   },
   addForm: { gap: 10 },
   addInput: {
