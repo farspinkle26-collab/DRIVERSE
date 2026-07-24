@@ -1634,6 +1634,7 @@ export default function MapScreen() {
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
+        mapType={Platform.OS === "web" ? undefined : "none"}
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}
