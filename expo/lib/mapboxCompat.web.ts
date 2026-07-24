@@ -17,6 +17,9 @@ export const LineLayer: React.FC<any> = Noop;
 export const UserLocation: React.FC<any> = Noop;
 export const Images: React.FC<any> = Noop;
 export const StyleImport: React.FC<any> = Noop;
+// @rnmapbox/maps has no web build at all, so the interactive map is never
+// available here — screens should fall back to the static Mapbox image.
+export const isMapboxAvailable = false;
 
 const Mapbox = {
   setAccessToken: (_token: string) => {},

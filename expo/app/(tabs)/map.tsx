@@ -10,9 +10,10 @@ import {
   Image,
   TextInput,
   Keyboard,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { MapView, Camera as MapCamera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
+import { MapView, Camera as MapCamera, MarkerView, ShapeSource, LineLayer, StyleImport, isMapboxAvailable } from "@/lib/mapboxCompat";
 import { lineStringFeature } from "@/lib/geo";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { usePlaces } from "@/hooks/usePlaces";
@@ -2040,6 +2041,20 @@ export default function MapScreen() {
         )}
       </MapView>
 
+      {/* Shown instead of a silent blank map when @rnmapbox/maps' native module
+          isn't linked into the running binary — e.g. Expo Go, or a dev client
+          built before the module was added (see lib/mapboxCompat.ts). */}
+      {!isMapboxAvailable && (
+        <View style={[styles.mapUnavailableBanner, { top: insets.top + 10 }]} pointerEvents="none">
+          <Text style={styles.mapUnavailableTitle}>Map preview unavailable</Text>
+          <Text style={styles.mapUnavailableSubtitle}>
+            Mapbox needs a custom dev build — it can&apos;t run in Expo Go. Run{" "}
+            <Text style={styles.mapUnavailableCode}>expo run:ios</Text> or{" "}
+            <Text style={styles.mapUnavailableCode}>expo run:android</Text> to see it here.
+          </Text>
+        </View>
+      )}
+
       {/* ===================================================== */}
       {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
       {/* ===================================================== */}
@@ -3402,6 +3417,33 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  mapUnavailableBanner: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(22, 22, 40, 0.92)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 59, 48, 0.4)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    zIndex: 3,
+  },
+  mapUnavailableTitle: {
+    color: "#FF6B6B",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  mapUnavailableSubtitle: {
+    color: "#D7D9E4",
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  mapUnavailableCode: {
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    color: "#FFD75E",
   },
   // Nearby places layer (OSM + community)
   placesFilterBar: {

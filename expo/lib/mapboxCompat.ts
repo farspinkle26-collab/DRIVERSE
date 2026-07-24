@@ -26,6 +26,7 @@ let LineLayerExport: any = Noop;
 let UserLocationExport: any = Noop;
 let ImagesExport: any = Noop;
 let StyleImportExport: any = Noop;
+let isMapboxAvailableExport = false;
 
 try {
   const RNMapbox = require("@rnmapbox/maps");
@@ -39,6 +40,7 @@ try {
   UserLocationExport = RNMapbox.UserLocation;
   ImagesExport = RNMapbox.Images;
   StyleImportExport = RNMapbox.StyleImport;
+  isMapboxAvailableExport = true;
 } catch (error) {
   console.warn(
     "[mapboxCompat] @rnmapbox/maps native module is unavailable. " +
@@ -65,6 +67,10 @@ export const LineLayer = LineLayerExport;
 export const UserLocation = UserLocationExport;
 export const Images = ImagesExport;
 export const StyleImport = StyleImportExport;
+// True only when the real @rnmapbox/maps native module loaded successfully —
+// false in Expo Go or a dev client built before the module was linked, where
+// MapView above is just an empty View standing in for the real map.
+export const isMapboxAvailable = isMapboxAvailableExport;
 
 // Type-only re-export so consumers can still write `useRef<Camera>(...)`
 // (merges with the value export above — TS keeps type space and value space separate).
