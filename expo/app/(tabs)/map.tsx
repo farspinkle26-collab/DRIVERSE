@@ -4,7 +4,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Platform,
   Animated,
   ActivityIndicator,
   Dimensions,
@@ -13,8 +12,8 @@ import {
   Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "@/components/MapboxTileLayer";
+import { MapView, Camera as MapCamera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
+import { lineStringFeature } from "@/lib/geo";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { usePlaces } from "@/hooks/usePlaces";
 import type { NormalizedPlace } from "@/lib/placesApi";
@@ -90,8 +89,7 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
-import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
+import { MAPBOX_ACCESS_TOKEN, MAPBOX_STYLE_URL_STANDARD } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -430,30 +428,55 @@ function PlayerPuck() {
 }
 
 // ─── SettledMarker ───────────────────────────────────────
-// Android draws custom marker views by snapshotting them into a bitmap.
-// Turning tracksViewChanges off in the same frame the content finishes
-// (image onLoadEnd, text layout, size change on select/deselect) can freeze
-// the snapshot mid-paint, which shows up as icons cropped to half their
-// size. This wrapper keeps tracking on until `ready` is true AND a short
-// grace period passes with no appearance change (`settleKey`), then freezes
-// the bitmap for performance. Any settleKey/ready change re-arms tracking.
-const MARKER_SETTLE_MS = 600;
-type SettledMarkerProps = React.ComponentProps<typeof Marker> & {
-  settleKey: string;
+// @rnmapbox/maps' MarkerView renders real native views (not the bitmap-snapshot
+// approach react-native-maps used on Android), so it doesn't suffer the
+// half-drawn/cropped-icon issue tracksViewChanges used to work around. This
+// wrapper keeps the old call-site shape (coordinate as {latitude,longitude},
+// settleKey/ready still accepted but unused) so the marker JSX below didn't
+// need to change.
+type SettledMarkerProps = {
+  coordinate: { latitude: number; longitude: number };
+  anchor?: { x: number; y: number };
+  onPress?: () => void;
+  settleKey?: string;
   ready?: boolean;
+  children: React.ReactNode;
 };
-function SettledMarker({ settleKey, ready = true, children, ...markerProps }: SettledMarkerProps) {
-  const [tracking, setTracking] = useState(true);
-  useEffect(() => {
-    setTracking(true);
-    if (!ready) return;
-    const t = setTimeout(() => setTracking(false), MARKER_SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [settleKey, ready]);
+function SettledMarker({ coordinate, anchor, onPress, children }: SettledMarkerProps) {
   return (
-    <Marker {...markerProps} tracksViewChanges={tracking}>
-      {children}
-    </Marker>
+    <MarkerView coordinate={[coordinate.longitude, coordinate.latitude]} anchor={anchor}>
+      {onPress ? (
+        <TouchableOpacity activeOpacity={0.85} onPress={onPress}>
+          {children}
+        </TouchableOpacity>
+      ) : (
+        <View collapsable={false}>{children}</View>
+      )}
+    </MarkerView>
+  );
+}
+
+// react-native-maps' <Polyline> took a flat coordinates[] + stroke props; this
+// keeps that same call shape but renders via Mapbox's ShapeSource+LineLayer.
+let routePolylineIdSeq = 0;
+function RoutePolyline({
+  coordinates,
+  strokeWidth,
+  strokeColor,
+  lineCap = "round",
+  lineJoin = "round",
+}: {
+  coordinates: { latitude: number; longitude: number }[];
+  strokeWidth: number;
+  strokeColor: string;
+  lineCap?: "round" | "butt" | "square";
+  lineJoin?: "round" | "bevel" | "miter";
+}) {
+  const id = useRef(`route-polyline-${routePolylineIdSeq++}`).current;
+  return (
+    <ShapeSource id={id} shape={lineStringFeature(coordinates)}>
+      <LineLayer id={`${id}-line`} style={{ lineWidth: strokeWidth, lineColor: strokeColor, lineCap, lineJoin }} />
+    </ShapeSource>
   );
 }
 
@@ -479,9 +502,59 @@ function EyeIcon({ visible, color, size = 14 }: { visible: boolean; color: strin
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<MapCamera>(null);
   const router = useRouter();
   const { isDark } = useTheme();
+
+  // Mapbox's Camera.fitBounds takes raw [lng,lat] NE/SW corners (not react-native-maps'
+  // {latitude,longitude}[] + edgePadding shape), so every former fitToCoordinates() call
+  // in this screen now routes through this helper.
+  const fitCameraToCoordinates = useCallback(
+    (points: { latitude: number; longitude: number }[], padding: { top: number; right: number; bottom: number; left: number }, duration = 500) => {
+      if (!cameraRef.current || points.length === 0) return;
+      let minLat = points[0].latitude, maxLat = points[0].latitude;
+      let minLng = points[0].longitude, maxLng = points[0].longitude;
+      for (const p of points) {
+        minLat = Math.min(minLat, p.latitude);
+        maxLat = Math.max(maxLat, p.latitude);
+        minLng = Math.min(minLng, p.longitude);
+        maxLng = Math.max(maxLng, p.longitude);
+      }
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], [padding.top, padding.right, padding.bottom, padding.left], duration);
+    },
+    []
+  );
+
+  // Mapbox's Camera.setCamera takes centerCoordinate as [lng,lat] + zoomLevel/pitch/heading —
+  // this mirrors the shape of every former mapRef.current.animateCamera() call in this screen.
+  //
+  // cameraBearingRef tracks the map's current compass bearing (only ever changed by an
+  // explicit setCameraTo({heading}) call, never implicitly). react-native-maps' `flat`
+  // marker used to rotate the user puck WITH the map, so its apparent on-screen angle was
+  // (rotation - mapBearing). MarkerView here is screen-anchored (doesn't rotate with map
+  // bearing), so the JSX below reproduces that same apparent angle by rotating the puck's
+  // inner view by (heading - cameraBearingRef.current) itself. `heading` state updates on
+  // every GPS fix (see the watcher below) even when the camera bearing isn't touched, so
+  // the puck keeps rotating to match the compass while the map stays north-up outside of
+  // the chase-cam recording view — exactly like before.
+  const cameraBearingRef = useRef(0);
+  const [, forcePuckRerender] = useState(0);
+  const setCameraTo = useCallback(
+    (opts: { center?: { latitude: number; longitude: number }; zoom?: number; pitch?: number; heading?: number }, duration = 500) => {
+      cameraRef.current?.setCamera({
+        centerCoordinate: opts.center ? [opts.center.longitude, opts.center.latitude] : undefined,
+        zoomLevel: opts.zoom,
+        pitch: opts.pitch,
+        heading: opts.heading,
+        animationDuration: duration,
+      });
+      if (opts.heading !== undefined) {
+        cameraBearingRef.current = opts.heading;
+        forcePuckRerender((n) => n + 1);
+      }
+    },
+    []
+  );
 
   // Map tile/style preference — intentionally separate from the app-wide theme so that
   // switching the map's Light/Dark style doesn't flip the rest of the app's UI theme.
@@ -746,10 +819,7 @@ export default function MapScreen() {
         });
         setRouteSteps(steps);
 
-        mapRef.current?.fitToCoordinates(result.coordinates, {
-          edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
-          animated: true,
-        });
+        fitCameraToCoordinates(result.coordinates, { top: 80, right: 60, bottom: 250, left: 60 });
       } else {
         setNavigating(false);
         Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
@@ -760,7 +830,7 @@ export default function MapScreen() {
     } finally {
       setLoadingRoute(false);
     }
-  }, []);
+  }, [fitCameraToCoordinates]);
 
   // --- GPS detection (runs once, uses refs for recording state to avoid restarts) ---
   // Keep userLocationRef in sync
@@ -800,10 +870,7 @@ export default function MapScreen() {
         setLocating(false);
 
         setTimeout(() => {
-          mapRef.current?.animateCamera(
-            { center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 },
-            { duration: 1200 }
-          );
+          setCameraTo({ center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 }, 1200);
         }, 300);
 
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
@@ -894,10 +961,7 @@ export default function MapScreen() {
                 (navHeadingRef.current + headingDelta(navHeadingRef.current, targetHeading) * 0.6 + 360) % 360;
               navHeadingRef.current = smoothedHeading;
               setHeading(smoothedHeading);
-              mapRef.current?.animateCamera(
-                { center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading },
-                { duration: 900 }
-              );
+              setCameraTo({ center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading }, 900);
 
               // --- Auto-stop when near destination ---
               const dest = destCoordsRef.current;
@@ -1156,22 +1220,16 @@ export default function MapScreen() {
 
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
-    if (!userLocation || !mapRef.current) return;
-    mapRef.current.animateCamera(
-      { center: userLocation, zoom: 17, pitch: 50, heading },
-      { duration: 800 }
-    );
-  }, [userLocation, heading]);
+    if (!userLocation) return;
+    setCameraTo({ center: userLocation, zoom: 17, pitch: 50, heading }, 800);
+  }, [userLocation, heading, setCameraTo]);
 
   const handleCafePress = useCallback((cafe: CafePOI) => {
     setSelectedDestination({ type: "cafe", data: cafe });
     setLocationChosen(false);
     setRouteInfo(null);
-    mapRef.current?.animateCamera(
-      { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
-      { duration: 500 }
-    );
-  }, []);
+    setCameraTo({ center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 }, 500);
+  }, [setCameraTo]);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -1235,9 +1293,9 @@ export default function MapScreen() {
   }, [user]);
 
   // --- Drop a destination pin wherever the driver taps the map, while drive mode is active ---
-  const handleMapPress = useCallback((event: any) => {
+  const handleMapPress = useCallback((feature: { geometry: { coordinates: number[] } }) => {
     if (!showDropPinHint) return;
-    const { latitude, longitude } = event.nativeEvent.coordinate;
+    const [longitude, latitude] = feature.geometry.coordinates;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setLocationChosen(true);
     setRouteInfo(null);
@@ -1251,20 +1309,21 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placesLayerOpen, places.category, userLocation]);
 
-  const handlePlacesRegionChange = useCallback((region: { latitude: number; longitude: number }) => {
+  const handlePlacesRegionChange = useCallback((feature: { geometry: { coordinates: number[] } }) => {
     if (!placesLayerOpen) return;
-    places.fetchForRegion(region.latitude, region.longitude, places.category);
+    const [longitude, latitude] = feature.geometry.coordinates;
+    places.fetchForRegion(latitude, longitude, places.category);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placesLayerOpen, places.category]);
 
   // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
-  const handleMapLongPress = useCallback((event: any) => {
+  const handleMapLongPress = useCallback((feature: { geometry: { coordinates: number[] } }) => {
     if (!placesLayerOpen) return;
     if (!user) {
       Alert.alert("Sign In Required", "Create an account to submit a place");
       return;
     }
-    const { latitude, longitude } = event.nativeEvent.coordinate;
+    const [longitude, latitude] = feature.geometry.coordinates;
     setSubmitPlaceCoord({ latitude, longitude });
     setShowSubmitPlaceModal(true);
   }, [placesLayerOpen, user]);
@@ -1344,13 +1403,10 @@ export default function MapScreen() {
     }
     // Drop into the third-person navigation view: tight zoom, tilted horizon,
     // and rotated so the direction of travel points up the screen.
-    if (userLocation && mapRef.current) {
-      mapRef.current.animateCamera(
-        { center: userLocation, zoom: 18, pitch: 60, heading },
-        { duration: 600 }
-      );
+    if (userLocation) {
+      setCameraTo({ center: userLocation, zoom: 18, pitch: 60, heading }, 600);
     }
-  }, [userLocation, heading]);
+  }, [userLocation, heading, setCameraTo]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -1437,9 +1493,7 @@ export default function MapScreen() {
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
   // --- Map region ---
-  const initialRegion = userLocation
-    ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : { latitude: -6.2088, longitude: 106.8456, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+  const initialCenter = userLocation ?? { latitude: -6.2088, longitude: 106.8456 };
 
   const RECORD_RED = "#FF2D55";
   const RECORD_GLOW = "#FF6482";
@@ -1587,10 +1641,7 @@ export default function MapScreen() {
       icon: <EventTypeIcon type={ev.event_type} size={15} color={evColor} />,
       onPress: () => {
         setSelectedEventId(ev.id);
-        mapRef.current?.animateCamera(
-          { center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 },
-          { duration: 600 }
-        );
+        setCameraTo({ center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 }, 600);
       },
     });
   }
@@ -1631,28 +1682,40 @@ export default function MapScreen() {
     <View style={styles.container}>
       {/* --- Map --- */}
       <MapView
-        ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
-        initialRegion={initialRegion}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
+        styleURL={MAPBOX_STYLE_URL_STANDARD}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={
-          showDropPinHint
-            ? (mapStyleDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
-            : (mapStyleDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
-        }
-        followsUserLocation={false}
+        compassEnabled={false}
+        scaleBarEnabled={false}
         onPress={handleMapPress}
         onLongPress={handleMapLongPress}
-        onRegionChangeComplete={handlePlacesRegionChange}
+        onRegionDidChange={handlePlacesRegionChange}
       >
-        <MapboxTileLayer dark={mapStyleDark} />
+        <MapCamera
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: [initialCenter.longitude, initialCenter.latitude],
+            zoomLevel: userLocation ? 16 : 12,
+          }}
+        />
+
+        {/* Reproduces the old Google-style-JSON behavior: base-map POI/transit labels
+            are hidden during normal browsing (so they don't clutter/duplicate this
+            screen's own filterable category markers), and shown while the user is
+            actively picking a location (drop pin / event location) so they can see
+            Mapbox's own place labels as a reference point. */}
+        <StyleImport
+          id="basemap"
+          existing
+          config={{
+            lightPreset: mapStyleDark ? "night" : "day",
+            showPointOfInterestLabels: showDropPinHint,
+            showTransitLabels: showDropPinHint,
+          }}
+        />
 
         {placesLayerOpen && (
           <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
@@ -1729,7 +1792,7 @@ export default function MapScreen() {
         {recordedPath.length > 1 && (
           <>
             {/* Glow layer */}
-            <Polyline
+            <RoutePolyline
               coordinates={recordedPath}
               strokeWidth={8}
               strokeColor={`${RECORDED_PATH_COLOR}30`}
@@ -1737,7 +1800,7 @@ export default function MapScreen() {
               lineJoin="round"
             />
             {/* Outer glow */}
-            <Polyline
+            <RoutePolyline
               coordinates={recordedPath}
               strokeWidth={5}
               strokeColor={`${RECORDED_PATH_COLOR}50`}
@@ -1745,7 +1808,7 @@ export default function MapScreen() {
               lineJoin="round"
             />
             {/* Core line */}
-            <Polyline
+            <RoutePolyline
               coordinates={recordedPath}
               strokeWidth={3}
               strokeColor={RECORDED_PATH_COLOR}
@@ -1766,14 +1829,14 @@ export default function MapScreen() {
                 {/* Traversed — yellow glow + core */}
                 {traversed.length > 1 && (
                   <>
-                    <Polyline
+                    <RoutePolyline
                       coordinates={traversed}
                       strokeWidth={8}
                       strokeColor="rgba(250, 204, 21, 0.25)"
                       lineCap="round"
                       lineJoin="round"
                     />
-                    <Polyline
+                    <RoutePolyline
                       coordinates={traversed}
                       strokeWidth={4}
                       strokeColor="#FACC15"
@@ -1785,14 +1848,14 @@ export default function MapScreen() {
                 {/* Remaining — red glow + core */}
                 {remaining.length > 1 && (
                   <>
-                    <Polyline
+                    <RoutePolyline
                       coordinates={remaining}
                       strokeWidth={7}
                       strokeColor={`${ROUTE_GLOW}40`}
                       lineCap="round"
                       lineJoin="round"
                     />
-                    <Polyline
+                    <RoutePolyline
                       coordinates={remaining}
                       strokeWidth={4}
                       strokeColor={ROUTE_RED}
@@ -1807,14 +1870,14 @@ export default function MapScreen() {
           // No split yet — show full red route
           return (
             <>
-              <Polyline
+              <RoutePolyline
                 coordinates={routeInfo.coordinates}
                 strokeWidth={7}
                 strokeColor={`${ROUTE_GLOW}40`}
                 lineCap="round"
                 lineJoin="round"
               />
-              <Polyline
+              <RoutePolyline
                 coordinates={routeInfo.coordinates}
                 strokeWidth={4}
                 strokeColor={ROUTE_RED}
@@ -1827,14 +1890,14 @@ export default function MapScreen() {
 
         {/* Destination marker (when navigating) */}
         {selectedDestination && routeInfo && destCoords() && (
-          <Marker
-            coordinate={destCoords()!}
+          <MarkerView
+            coordinate={[destCoords()!.longitude, destCoords()!.latitude]}
             anchor={{ x: 0.5, y: 1 }}
           >
             <View style={styles.destPin}>
               <MapPin size={28} color={ROUTE_RED} fill={ROUTE_RED} />
             </View>
-          </Marker>
+          </MarkerView>
         )}
 
         {/* Custom location marker (tapped, no route yet) */}
@@ -1943,20 +2006,23 @@ export default function MapScreen() {
           );
         })}
 
-        {/* User marker — coded SVG puck (no bitmap asset) */}
+        {/* User marker — coded SVG puck (no bitmap asset). MarkerView is screen-anchored
+            (it doesn't rotate with the map's bearing the way react-native-maps' `flat`
+            markers did), so the puck's apparent angle is reproduced explicitly here as
+            (heading - current map bearing) — see the cameraBearingRef comment above. */}
         {userLocation && (
-          <Marker
-            coordinate={userLocation}
-            anchor={{ x: 0.5, y: 0.5 }}
-            rotation={heading}
-            flat
-          >
+          <MarkerView coordinate={[userLocation.longitude, userLocation.latitude]} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={styles.carMarkerBox} collapsable={false}>
-              <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
+              <Animated.View
+                style={[
+                  styles.carMarker,
+                  { transform: [{ translateY: carFloat }, { rotate: `${(heading - cameraBearingRef.current + 360) % 360}deg` }] },
+                ]}
+              >
                 <PlayerPuck />
               </Animated.View>
             </View>
-          </Marker>
+          </MarkerView>
         )}
 
         {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
@@ -2120,7 +2186,7 @@ export default function MapScreen() {
               activeOpacity={0.7}
               onPress={() => {
                 if (userLocation) {
-                  mapRef.current?.animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
+                  setCameraTo({ center: userLocation, heading: 0 }, 500);
                 }
               }}
             >
@@ -2504,10 +2570,7 @@ export default function MapScreen() {
                 activeOpacity={0.85}
                 onPress={() => {
                   setSelectedEventId(fe.id);
-                  mapRef.current?.animateCamera(
-                    { center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 },
-                    { duration: 600 }
-                  );
+                  setCameraTo({ center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 }, 600);
                 }}
               >
                 <View style={[styles.featuredThumb, { backgroundColor: `${feColor}1E`, borderColor: `${feColor}50` }]}>
@@ -2732,9 +2795,9 @@ export default function MapScreen() {
             <TouchableOpacity
               onPress={() => {
                 if (events.length > 0) {
-                  mapRef.current?.fitToCoordinates(
+                  fitCameraToCoordinates(
                     events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
-                    { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
+                    { top: 140, right: 100, bottom: 320, left: 60 }
                   );
                 }
               }}

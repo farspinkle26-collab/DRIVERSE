@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Platform, Image } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "@/components/MapboxTileLayer";
+import { MapView, Camera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
-import { decodePolyline, regionForPath } from "@/lib/polyline";
+import { decodePolyline, boundsForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { MAPBOX_STYLE_URL_STANDARD, getMapboxStaticImageUrl } from "@/constants/mapbox";
+import { lineStringFeature } from "@/lib/geo";
 import RenameModal from "@/components/RenameModal";
 
 interface TripDetail {
@@ -44,7 +44,6 @@ export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,9 +90,7 @@ export default function TripDetailScreen() {
   );
 
   // Points to frame the camera around: the recorded path if we have one,
-  // otherwise the origin/destination pair — even a two-point fallback
-  // deserves a proper fit instead of trusting initialRegion alone, since
-  // it can render at a stale zoom before the native view has laid out.
+  // otherwise the origin/destination pair.
   const fitPoints = useMemo(() => {
     if (coords.length > 1) return coords;
     const pts: { latitude: number; longitude: number }[] = [];
@@ -102,21 +99,8 @@ export default function TripDetailScreen() {
     return pts;
   }, [coords, trip]);
 
-  const fitToPoints = useCallback(() => {
-    if (fitPoints.length > 1) {
-      mapRef.current?.fitToCoordinates(fitPoints, {
-        edgePadding: { top: 60, right: 40, bottom: 60, left: 40 },
-        animated: true,
-      });
-    }
-  }, [fitPoints]);
-
-  useEffect(() => {
-    const t = setTimeout(fitToPoints, 400);
-    return () => clearTimeout(t);
-  }, [fitToPoints]);
-
-  const region = regionForPath(fitPoints.length > 0 ? fitPoints : coords);
+  const bounds = useMemo(() => boundsForPath(fitPoints.length > 0 ? fitPoints : coords), [fitPoints, coords]);
+  const singlePoint = fitPoints.length === 1 ? fitPoints[0] : null;
 
   return (
     <View style={styles.container}>
@@ -147,43 +131,62 @@ export default function TripDetailScreen() {
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
           <View style={styles.mapWrap}>
-            <MapView
-              ref={mapRef}
-              style={StyleSheet.absoluteFill}
-              provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
-              initialRegion={region}
-              customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
-              onMapReady={fitToPoints}
-            >
-              <MapboxTileLayer dark={isDark} />
+            {Platform.OS === "web" ? (
+              (singlePoint ?? coords[0]) ? (
+                <Image
+                  source={{ uri: getMapboxStaticImageUrl((singlePoint ?? coords[0])!.latitude, (singlePoint ?? coords[0])!.longitude, { dark: isDark, width: 600, height: 300, zoom: 12 }) }}
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                />
+              ) : null
+            ) : (
+              <MapView style={StyleSheet.absoluteFill} styleURL={MAPBOX_STYLE_URL_STANDARD} scaleBarEnabled={false}>
+                <Camera
+                  bounds={bounds ? { ...bounds, paddingTop: 60, paddingBottom: 60, paddingLeft: 40, paddingRight: 40 } : undefined}
+                  centerCoordinate={!bounds && singlePoint ? [singlePoint.longitude, singlePoint.latitude] : undefined}
+                  zoomLevel={!bounds && singlePoint ? 14 : undefined}
+                  animationDuration={0}
+                />
+                {/* Hide base-map POI/transit labels so they don't clutter this route preview
+                    (matches the original Google-style-JSON HIDE_POI_LABELS behavior). */}
+                <StyleImport
+                  id="basemap"
+                  existing
+                  config={{ lightPreset: isDark ? "night" : "day", showPointOfInterestLabels: false, showTransitLabels: false }}
+                />
 
-              {coords.length > 1 && (
-                <>
-                  <Polyline coordinates={coords} strokeWidth={8} strokeColor="rgba(255,59,48,0.25)" lineCap="round" />
-                  <Polyline coordinates={coords} strokeWidth={4} strokeColor="#FF3B30" lineCap="round" />
-                </>
-              )}
-              {coords.length > 0 && (
-                <Marker coordinate={coords[0]} anchor={{ x: 0.5, y: 0.5 }}>
-                  <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
-                </Marker>
-              )}
-              {coords.length > 1 && (
-                <Marker coordinate={coords[coords.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-                  <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
-                </Marker>
-              )}
-              {coords.length === 0 && trip.origin_lat && trip.origin_lng && (
-                <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
-                  <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
-                </Marker>
-              )}
-              {coords.length === 0 && trip.destination_lat && trip.destination_lng && (
-                <Marker coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }} anchor={{ x: 0.5, y: 1 }}>
-                  <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
-                </Marker>
-              )}
-            </MapView>
+                {coords.length > 1 && (
+                  <>
+                    <ShapeSource id="tripRouteGlow" shape={lineStringFeature(coords)}>
+                      <LineLayer id="tripRouteGlowLine" style={{ lineWidth: 8, lineColor: "rgba(255,59,48,0.25)", lineCap: "round", lineJoin: "round" }} />
+                    </ShapeSource>
+                    <ShapeSource id="tripRoute" shape={lineStringFeature(coords)}>
+                      <LineLayer id="tripRouteLine" style={{ lineWidth: 4, lineColor: "#FF3B30", lineCap: "round", lineJoin: "round" }} />
+                    </ShapeSource>
+                  </>
+                )}
+                {coords.length > 0 && (
+                  <MarkerView coordinate={[coords[0].longitude, coords[0].latitude]} anchor={{ x: 0.5, y: 0.5 }}>
+                    <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
+                  </MarkerView>
+                )}
+                {coords.length > 1 && (
+                  <MarkerView coordinate={[coords[coords.length - 1].longitude, coords[coords.length - 1].latitude]} anchor={{ x: 0.5, y: 1 }}>
+                    <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
+                  </MarkerView>
+                )}
+                {coords.length === 0 && trip.origin_lat && trip.origin_lng && (
+                  <MarkerView coordinate={[trip.origin_lng, trip.origin_lat]} anchor={{ x: 0.5, y: 0.5 }}>
+                    <View style={[styles.endpoint, { backgroundColor: "#00D4AA" }]} />
+                  </MarkerView>
+                )}
+                {coords.length === 0 && trip.destination_lat && trip.destination_lng && (
+                  <MarkerView coordinate={[trip.destination_lng, trip.destination_lat]} anchor={{ x: 0.5, y: 1 }}>
+                    <Flag size={26} color="#FF3B6F" fill="#FF3B6F30" />
+                  </MarkerView>
+                )}
+              </MapView>
+            )}
           </View>
 
           <View style={styles.body}>

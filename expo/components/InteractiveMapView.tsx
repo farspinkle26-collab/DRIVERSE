@@ -1,13 +1,25 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { StyleSheet, View, Text, Platform } from "react-native";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Region } from "react-native-maps";
+import { StyleSheet, View, Text, Platform, Image } from "react-native";
+import { MapView, Camera, MarkerView, ShapeSource, LineLayer, UserLocation } from "@/lib/mapboxCompat";
 import * as Location from "expo-location";
 import { Location as LocationType } from "@/types";
 import Card from "./Card";
 import MapboxSearch from "./MapboxSearch";
-import MapboxTileLayer from "./MapboxTileLayer";
 import { useTheme } from "@/hooks/useThemeStore";
 import { getDirections, reverseGeocode } from "@/lib/mapboxApi";
+import { MAPBOX_STYLE_URL_LIGHT, getMapboxStaticImageUrl } from "@/constants/mapbox";
+import { lineStringFeature } from "@/lib/geo";
+import { MapPin } from "lucide-react-native";
+
+const DEFAULT_ZOOM = 15;
+
+function PinMarker({ color }: { color: string }) {
+  return <MapPin size={32} color={color} fill={`${color}30`} />;
+}
+
+function UserLocationPuck() {
+  return <UserLocation visible androidRenderMode="normal" showsUserHeadingIndicator />;
+}
 
 interface InteractiveMapViewProps {
   pickup: LocationType | null;
@@ -40,7 +52,7 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
   showSearch = false,
 }) => {
   const { theme } = useTheme();
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<Camera>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationType | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<{latitude: number, longitude: number}[]>([]);
   const [distance, setDistance] = useState<number>(0);
@@ -89,14 +101,24 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
   }, []);
 
   const fitToCoordinates = useCallback(() => {
-    if (mapRef.current && pickup && dropoff) {
-      const coordinates = [pickup, dropoff];
-      if (driverLocation) coordinates.push(driverLocation);
-      
-      mapRef.current.fitToCoordinates(coordinates, {
-        edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-        animated: true,
-      });
+    if (cameraRef.current && pickup && dropoff) {
+      const points = [pickup, dropoff];
+      if (driverLocation) points.push(driverLocation);
+
+      let minLat = points[0].latitude, maxLat = points[0].latitude;
+      let minLng = points[0].longitude, maxLng = points[0].longitude;
+      for (const p of points) {
+        minLat = Math.min(minLat, p.latitude);
+        maxLat = Math.max(maxLat, p.latitude);
+        minLng = Math.min(minLng, p.longitude);
+        maxLng = Math.max(maxLng, p.longitude);
+      }
+      cameraRef.current.fitBounds(
+        [maxLng, maxLat],
+        [minLng, minLat],
+        [50, 50, 50, 50],
+        500
+      );
     }
   }, [pickup, dropoff, driverLocation]);
 
@@ -104,31 +126,25 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
     if (pickup && dropoff) {
       calculateRoute(pickup, dropoff);
       fitToCoordinates();
-    } else if (pickup && mapRef.current) {
-      mapRef.current.animateCamera({
-        center: {
-          latitude: pickup.latitude,
-          longitude: pickup.longitude,
-        },
-        zoom: 15,
-      }, { duration: 500 });
-    } else if (dropoff && mapRef.current) {
-      mapRef.current.animateCamera({
-        center: {
-          latitude: dropoff.latitude,
-          longitude: dropoff.longitude,
-        },
-        zoom: 15,
-      }, { duration: 500 });
-    } else if (currentLocation && mapRef.current && showCenterPin) {
+    } else if (pickup && cameraRef.current) {
+      cameraRef.current.setCamera({
+        centerCoordinate: [pickup.longitude, pickup.latitude],
+        zoomLevel: DEFAULT_ZOOM,
+        animationDuration: 500,
+      });
+    } else if (dropoff && cameraRef.current) {
+      cameraRef.current.setCamera({
+        centerCoordinate: [dropoff.longitude, dropoff.latitude],
+        zoomLevel: DEFAULT_ZOOM,
+        animationDuration: 500,
+      });
+    } else if (currentLocation && cameraRef.current && showCenterPin) {
       // Auto-center on user's GPS when no locations set yet
-      mapRef.current.animateCamera({
-        center: {
-          latitude: currentLocation.latitude,
-          longitude: currentLocation.longitude,
-        },
-        zoom: 15,
-      }, { duration: 500 });
+      cameraRef.current.setCamera({
+        centerCoordinate: [currentLocation.longitude, currentLocation.latitude],
+        zoomLevel: DEFAULT_ZOOM,
+        animationDuration: 500,
+      });
     }
   }, [pickup, dropoff, currentLocation, showCenterPin, calculateRoute, fitToCoordinates]);
 
@@ -219,8 +235,9 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
   };
 
   // Handle center pin drag-to-place
-  const handleRegionChangeComplete = useCallback(async (newRegion: Region) => {
+  const handleRegionChangeComplete = useCallback(async (feature: { geometry: { coordinates: number[] } }) => {
     if (!showCenterPin || !onCenterChange) return;
+    const [longitude, latitude] = feature.geometry.coordinates;
 
     // Debounce reverse geocoding
     if (reverseGeocodeTimeout.current) {
@@ -228,118 +245,102 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
     }
 
     reverseGeocodeTimeout.current = setTimeout(async () => {
-      const address = await reverseGeocodeCoordinate(newRegion.latitude, newRegion.longitude);
+      const address = await reverseGeocodeCoordinate(latitude, longitude);
       setCenterAddress(address);
       onCenterChange({
-        latitude: newRegion.latitude,
-        longitude: newRegion.longitude,
+        latitude,
+        longitude,
         address,
       });
     }, 300);
   }, [showCenterPin, onCenterChange]);
 
-  const handleMapPress = async (event: any) => {
-    const { coordinate } = event.nativeEvent;
-    
+  const handleMapPress = async (feature: { geometry: { coordinates: number[] } }) => {
+    const [longitude, latitude] = feature.geometry.coordinates;
+
     if (interactive && onLocationChange) {
       setIsPlacingMarker(true);
-      
-      const address = await reverseGeocodeCoordinate(coordinate.latitude, coordinate.longitude);
+
+      const address = await reverseGeocodeCoordinate(latitude, longitude);
       const newLocation: LocationType = {
-        latitude: coordinate.latitude,
-        longitude: coordinate.longitude,
+        latitude,
+        longitude,
         address,
       };
-      
+
       if (currentStep === 'pickup') {
         onLocationChange(newLocation, dropoff);
       } else {
         onLocationChange(pickup, newLocation);
       }
-      
+
       setIsPlacingMarker(false);
-      
+
       if (onMapPress) {
-        onMapPress(coordinate);
+        onMapPress({ latitude, longitude });
       }
     } else if (onMapPress) {
-      onMapPress(event.nativeEvent.coordinate);
+      onMapPress({ latitude, longitude });
     }
   };
 
-  const getInitialRegion = () => {
-    if (pickup) {
-      return {
-        latitude: pickup.latitude,
-        longitude: pickup.longitude,
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
-      };
-    }
-    
-    if (currentLocation) {
-      return {
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
-        latitudeDelta: 0.005,
-        longitudeDelta: 0.005,
-      };
-    }
+  const initialCenter = pickup ?? currentLocation ?? region;
 
-    return region;
-  };
+  if (Platform.OS === 'web') {
+    return (
+      <View style={[styles.container, style]}>
+        <Image
+          source={{ uri: getMapboxStaticImageUrl(initialCenter.latitude, initialCenter.longitude, { zoom: 15, width: 600, height: 600 }) }}
+          style={styles.map}
+          resizeMode="cover"
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, style]}>
       <MapView
-        ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
-        initialRegion={getInitialRegion()}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-        showsCompass={true}
+        styleURL={MAPBOX_STYLE_URL_LIGHT}
+        compassEnabled
         zoomEnabled={true}
         scrollEnabled={true}
         onPress={interactive && !showCenterPin ? handleMapPress : undefined}
-        onRegionChangeComplete={showCenterPin ? handleRegionChangeComplete : undefined}
+        onRegionDidChange={showCenterPin ? handleRegionChangeComplete : undefined}
       >
-        <MapboxTileLayer />
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: [initialCenter.longitude, initialCenter.latitude],
+            zoomLevel: DEFAULT_ZOOM,
+          }}
+        />
+
+        <UserLocationPuck />
 
         {pickup && (
-          <Marker
-            coordinate={{ latitude: pickup.latitude, longitude: pickup.longitude }}
-            title="Penjemputan"
-            description={pickup.address}
-            pinColor="#FF3B30"
-          />
+          <MarkerView coordinate={[pickup.longitude, pickup.latitude]} anchor={{ x: 0.5, y: 1 }}>
+            <PinMarker color="#FF3B30" />
+          </MarkerView>
         )}
-        
+
         {dropoff && (
-          <Marker
-            coordinate={{ latitude: dropoff.latitude, longitude: dropoff.longitude }}
-            title="Tujuan"
-            description={dropoff.address}
-            pinColor="#22C55E"
-          />
+          <MarkerView coordinate={[dropoff.longitude, dropoff.latitude]} anchor={{ x: 0.5, y: 1 }}>
+            <PinMarker color="#22C55E" />
+          </MarkerView>
         )}
-        
+
         {driverLocation && (
-          <Marker
-            coordinate={{ latitude: driverLocation.latitude, longitude: driverLocation.longitude }}
-            title="Driver"
-            description="Lokasi Driver"
-            pinColor="#3B82F6"
-          />
+          <MarkerView coordinate={[driverLocation.longitude, driverLocation.latitude]} anchor={{ x: 0.5, y: 1 }}>
+            <PinMarker color="#3B82F6" />
+          </MarkerView>
         )}
-        
+
         {routeCoordinates.length > 0 && (
-          <Polyline
-            coordinates={routeCoordinates}
-            strokeColor="#FF3B30"
-            strokeWidth={5}
-            geodesic={true}
-          />
+          <ShapeSource id="interactiveRoute" shape={lineStringFeature(routeCoordinates)}>
+            <LineLayer id="interactiveRouteLine" style={{ lineColor: "#FF3B30", lineWidth: 5, lineCap: "round", lineJoin: "round" }} />
+          </ShapeSource>
         )}
       </MapView>
 
@@ -350,21 +351,14 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
             onLocationSelect={(location) => {
               if (currentStep === 'pickup') {
                 onLocationChange?.(location, dropoff);
-                if (mapRef.current) {
-                  mapRef.current.animateCamera({
-                    center: { latitude: location.latitude, longitude: location.longitude },
-                    zoom: 16,
-                  }, { duration: 500 });
-                }
               } else {
                 onLocationChange?.(pickup, location);
-                if (mapRef.current) {
-                  mapRef.current.animateCamera({
-                    center: { latitude: location.latitude, longitude: location.longitude },
-                    zoom: 16,
-                  }, { duration: 500 });
-                }
               }
+              cameraRef.current?.setCamera({
+                centerCoordinate: [location.longitude, location.latitude],
+                zoomLevel: 16,
+                animationDuration: 500,
+              });
             }}
             placeholder="Cari lokasi..."
             currentLocation={currentLocation}
