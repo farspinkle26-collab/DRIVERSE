@@ -19,6 +19,7 @@ import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
+import { useAppFonts } from "@/hooks/useAppFonts";
 
 const queryClient = new QueryClient();
 
@@ -59,6 +60,7 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
+  const { ready: fontsReady } = useAppFonts();
 
   useEffect(() => {
     SplashScreen.hideAsync();
@@ -68,7 +70,10 @@ export default function RootLayout() {
     setIsLoading(false);
   };
 
-  if (isLoading) {
+  // Hold on the loading screen until the brand faces are registered, so no
+  // screen paints in system type and then reflows once Rajdhani/Inter/
+  // JetBrains Mono land.
+  if (isLoading || !fontsReady) {
     return <LoadingScreen onFinish={handleLoadingFinish} />;
   }
 
