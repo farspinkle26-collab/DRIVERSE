@@ -87,6 +87,22 @@ export function simplifyPath(points: LatLng[], maxPoints = 400): LatLng[] {
   return out;
 }
 
+/** Min/max lat/lng bounds for a path, in the [lng, lat] tuple shape Mapbox's Camera.bounds expects. */
+export function boundsForPath(points: LatLng[]): { ne: [number, number]; sw: [number, number] } | null {
+  if (points.length === 0) return null;
+  let minLat = points[0].latitude;
+  let maxLat = points[0].latitude;
+  let minLng = points[0].longitude;
+  let maxLng = points[0].longitude;
+  for (const p of points) {
+    minLat = Math.min(minLat, p.latitude);
+    maxLat = Math.max(maxLat, p.latitude);
+    minLng = Math.min(minLng, p.longitude);
+    maxLng = Math.max(maxLng, p.longitude);
+  }
+  return { ne: [maxLng, maxLat], sw: [minLng, minLat] };
+}
+
 /** Bounding region {latitude, longitude, latitudeDelta, longitudeDelta} for a path. */
 export function regionForPath(points: LatLng[], pad = 1.4) {
   if (points.length === 0) {

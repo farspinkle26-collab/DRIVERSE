@@ -56,8 +56,7 @@ import {
   MoreVertical,
   Globe2,
 } from "lucide-react-native";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "./MapboxTileLayer";
+import { MapView, Camera, MarkerView, ShapeSource, LineLayer, StyleImport } from "@/lib/mapboxCompat";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -67,13 +66,13 @@ import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import { supabase } from "@/lib/supabase";
 import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
-import { decodePolyline, regionForPath } from "@/lib/polyline";
+import { decodePolyline, boundsForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { MAPBOX_STYLE_URL_STANDARD, getMapboxStaticImageUrl } from "@/constants/mapbox";
+import { lineStringFeature } from "@/lib/geo";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const { isDark } = useTheme();
-  const mapRef = useRef<MapView>(null);
   const coords = trip.route_polyline ? decodePolyline(trip.route_polyline) : [];
   const hasPath = coords.length > 1;
   const hasPoints = hasPath || (trip.origin_lat && trip.origin_lng);
@@ -90,53 +89,64 @@ function TripMiniMap({ trip }: { trip: TripItem }) {
           : []),
       ];
 
-  const region = regionForPath(fitPoints, hasPath ? 1.4 : 1.8);
+  const bounds = boundsForPath(fitPoints);
+  const singlePoint = fitPoints.length === 1 ? fitPoints[0] : null;
 
-  // initialRegion alone can render at a stale/default zoom in liteMode on
-  // Android before the view has laid out, so fit explicitly once ready.
-  const fitToPoints = () => {
-    if (fitPoints.length > 1) {
-      mapRef.current?.fitToCoordinates(fitPoints, {
-        edgePadding: { top: 24, right: 24, bottom: 24, left: 24 },
-        animated: false,
-      });
-    }
-  };
+  if (Platform.OS === "web") {
+    const previewPoint = singlePoint ?? fitPoints[0];
+    return (
+      <View style={styles.tripMapWrap} pointerEvents="none">
+        {previewPoint && (
+          <Image
+            source={{ uri: getMapboxStaticImageUrl(previewPoint.latitude, previewPoint.longitude, { dark: isDark, width: 400, height: 200, zoom: 12 }) }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.tripMapWrap} pointerEvents="none">
       <MapView
-        ref={mapRef}
         style={StyleSheet.absoluteFill}
-        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
-        initialRegion={region}
-        onMapReady={fitToPoints}
-        onLayout={fitToPoints}
-        customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
+        styleURL={MAPBOX_STYLE_URL_STANDARD}
         scrollEnabled={false}
         zoomEnabled={false}
         pitchEnabled={false}
         rotateEnabled={false}
-        liteMode={Platform.OS === "android"}
+        scaleBarEnabled={false}
       >
-        <MapboxTileLayer dark={isDark} />
+        <StyleImport
+          id="basemap"
+          existing
+          config={{ lightPreset: isDark ? "night" : "day", showPointOfInterestLabels: false, showTransitLabels: false }}
+        />
+        <Camera
+          bounds={bounds ? { ...bounds, paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 } : undefined}
+          centerCoordinate={!bounds && singlePoint ? [singlePoint.longitude, singlePoint.latitude] : undefined}
+          zoomLevel={!bounds && singlePoint ? 13 : undefined}
+          animationDuration={0}
+        />
 
         {hasPath && (
           <>
-            <Polyline coordinates={coords} strokeWidth={7} strokeColor="rgba(255,59,48,0.25)" lineCap="round" />
-            <Polyline coordinates={coords} strokeWidth={3.5} strokeColor="#FF3B30" lineCap="round" />
+            <ShapeSource id={`tripMiniGlow-${trip.id}`} shape={lineStringFeature(coords)}>
+              <LineLayer id={`tripMiniGlowLine-${trip.id}`} style={{ lineWidth: 7, lineColor: "rgba(255,59,48,0.25)", lineCap: "round", lineJoin: "round" }} />
+            </ShapeSource>
+            <ShapeSource id={`tripMiniLine-${trip.id}`} shape={lineStringFeature(coords)}>
+              <LineLayer id={`tripMiniLineLine-${trip.id}`} style={{ lineWidth: 3.5, lineColor: "#FF3B30", lineCap: "round", lineJoin: "round" }} />
+            </ShapeSource>
           </>
         )}
-        <Marker coordinate={{ latitude: trip.origin_lat, longitude: trip.origin_lng }} anchor={{ x: 0.5, y: 0.5 }}>
+        <MarkerView coordinate={[trip.origin_lng, trip.origin_lat]} anchor={{ x: 0.5, y: 0.5 }}>
           <View style={[styles.tripMapDot, { backgroundColor: "#00D4AA" }]} />
-        </Marker>
+        </MarkerView>
         {trip.destination_lat && trip.destination_lng ? (
-          <Marker
-            coordinate={{ latitude: trip.destination_lat, longitude: trip.destination_lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
+          <MarkerView coordinate={[trip.destination_lng, trip.destination_lat]} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={[styles.tripMapDot, { backgroundColor: "#FF3B6F" }]} />
-          </Marker>
+          </MarkerView>
         ) : null}
       </MapView>
     </View>

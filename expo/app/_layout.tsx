@@ -19,6 +19,7 @@ import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
+import "@/lib/mapboxInit";
 
 const queryClient = new QueryClient();
 
