@@ -98,7 +98,7 @@
       [
         "@rnmapbox/maps",
         {
-          "RNMapboxMapsDownloadToken": "pk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yd3pncGZyMGFtdzM1b25ycWV4czNtZCJ9.RPoVghBq7PNmSj1WvvHmVA"
+          "RNMapboxMapsDownloadToken": "sk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yeXBjZWZyMGJ4dDJ6cXozcHl1ZGl2ZSJ9.wLb3-U5kgib3iL9vQ1u9Lg"
         }
       ]
     ],
