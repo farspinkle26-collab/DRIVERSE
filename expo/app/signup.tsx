@@ -56,8 +56,9 @@ const CAR_MAKES = [
 export default function SignUpScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signup, loading, error } = useAuth();
+  const { signup, signInWithGoogle, signInWithApple, loading, error } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
+  const [socialLoading, setSocialLoading] = useState<"google" | "apple" | null>(null);
 
   const [step, setStep] = useState<Step>("account");
   const stepIndex = STEPS.indexOf(step);
@@ -129,6 +130,26 @@ export default function SignUpScreen() {
       // The starter car is auto-created by the DB trigger, but we can also
       // upsert with the user's chosen car via Supabase directly
       router.back();
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setSocialLoading("google");
+    try {
+      const success = await signInWithGoogle();
+      if (success) router.back();
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleAppleSignUp = async () => {
+    setSocialLoading("apple");
+    try {
+      const success = await signInWithApple();
+      if (success) router.back();
+    } finally {
+      setSocialLoading(null);
     }
   };
 
@@ -271,6 +292,58 @@ export default function SignUpScreen() {
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                   />
+                </View>
+
+                {/* Divider */}
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or sign up with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                {/* Social Sign Up */}
+                <View style={styles.socialGroup}>
+                  <TouchableOpacity
+                    style={styles.googleBtn}
+                    activeOpacity={0.7}
+                    onPress={handleGoogleSignUp}
+                    disabled={socialLoading !== null || loading}
+                  >
+                    <View style={styles.googleContent}>
+                      {socialLoading === "google" ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <>
+                          <View style={styles.googleIcon}>
+                            <Text style={styles.googleIconText}>G</Text>
+                          </View>
+                          <Text style={styles.googleText}>Continue with Google</Text>
+                        </>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {Platform.OS === "ios" && (
+                    <TouchableOpacity
+                      style={styles.googleBtn}
+                      activeOpacity={0.7}
+                      onPress={handleAppleSignUp}
+                      disabled={socialLoading !== null || loading}
+                    >
+                      <View style={styles.googleContent}>
+                        {socialLoading === "apple" ? (
+                          <ActivityIndicator color="#FFFFFF" size="small" />
+                        ) : (
+                          <>
+                            <View style={styles.googleIcon}>
+                              <Text style={styles.googleIconText}></Text>
+                            </View>
+                            <Text style={styles.googleText}>Continue with Apple</Text>
+                          </>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             )}
@@ -634,5 +707,59 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#FF6B35",
+  },
+  // Divider
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 22,
+    marginBottom: 18,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+  },
+  dividerText: {
+    fontSize: 12,
+    color: "#5A5A6E",
+    fontWeight: "600",
+  },
+  // Social
+  socialGroup: {
+    gap: 12,
+  },
+  googleBtn: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderRadius: 14,
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  googleContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  googleIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  googleIconText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#000000",
+  },
+  googleText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#FFFFFF",
   },
 });

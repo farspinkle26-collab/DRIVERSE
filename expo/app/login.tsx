@@ -21,17 +21,38 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { login, loading, error } = useAuth();
+  const { login, signInWithGoogle, signInWithApple, loading, error } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<"google" | "apple" | null>(null);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return;
     const success = await login(email.trim(), password);
     if (success) {
       router.back();
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setSocialLoading("google");
+    try {
+      const success = await signInWithGoogle();
+      if (success) router.back();
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    setSocialLoading("apple");
+    try {
+      const success = await signInWithApple();
+      if (success) router.back();
+    } finally {
+      setSocialLoading(null);
     }
   };
 
@@ -137,15 +158,50 @@ export default function LoginScreen() {
             <View style={styles.dividerLine} />
           </View>
 
-          {/* Google Sign In */}
-          <TouchableOpacity style={styles.googleBtn} activeOpacity={0.7}>
-            <View style={styles.googleContent}>
-              <View style={styles.googleIcon}>
-                <Text style={styles.googleIconText}>G</Text>
+          {/* Social Sign In */}
+          <View style={styles.socialGroup}>
+            <TouchableOpacity
+              style={styles.googleBtn}
+              activeOpacity={0.7}
+              onPress={handleGoogleLogin}
+              disabled={socialLoading !== null || loading}
+            >
+              <View style={styles.googleContent}>
+                {socialLoading === "google" ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <View style={styles.googleIcon}>
+                      <Text style={styles.googleIconText}>G</Text>
+                    </View>
+                    <Text style={styles.googleText}>Continue with Google</Text>
+                  </>
+                )}
               </View>
-              <Text style={styles.googleText}>Continue with Google</Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+
+            {Platform.OS === "ios" && (
+              <TouchableOpacity
+                style={styles.googleBtn}
+                activeOpacity={0.7}
+                onPress={handleAppleLogin}
+                disabled={socialLoading !== null || loading}
+              >
+                <View style={styles.googleContent}>
+                  {socialLoading === "apple" ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <>
+                      <View style={styles.googleIcon}>
+                        <Text style={styles.googleIconText}></Text>
+                      </View>
+                      <Text style={styles.googleText}>Continue with Apple</Text>
+                    </>
+                  )}
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Sign Up link */}
           <View style={styles.footer}>
@@ -281,7 +337,10 @@ const styles = StyleSheet.create({
     color: "#5A5A6E",
     fontWeight: "600",
   },
-  // Google
+  // Social
+  socialGroup: {
+    gap: 12,
+  },
   googleBtn: {
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     borderRadius: 14,
