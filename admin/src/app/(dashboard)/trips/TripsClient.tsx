@@ -95,7 +95,7 @@ export function TripsClient({ trips, available }: { trips: TripRow[]; available:
         subtitle={`Clustered by destination name · ${range}`}
         note="Best-effort clustering on the free-text destination name. Precise start/end hot-spot clustering would need a follow-up geospatial query (grid/DBSCAN over origin_lat/lng, destination_lat/lng)."
       >
-        <DataTable columns={cols} rows={dests} pageSize={10} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No named destinations in range." />
+        <DataTable columns={cols} rows={dests} pageSize={25} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No named destinations in range." csvFilename="top-destinations" />
       </ChartCard>
     </div>
   );

@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { SectionHeader, StatCard, ChartCard, Banner, EmptyState } from "@/components/ui";
+import { SectionHeader, StatCard, ChartCard, Banner, EmptyState, Badge } from "@/components/ui";
 import { RangeToggle } from "@/components/RangeToggle";
 import { RefreshButton } from "@/components/RefreshButton";
 import { DataTable, Column } from "@/components/DataTable";
@@ -169,14 +169,14 @@ export function QuestsClient({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <ChartCard title="Most-completed quests" subtitle={`By completion count · ${range}`}>
-          <DataTable columns={tplCols} rows={mostCompleted} pageSize={8} initialSort={{ key: "completed", dir: "desc" }} emptyMessage="No quests in range." />
+          <DataTable columns={tplCols} rows={mostCompleted} pageSize={25} initialSort={{ key: "completed", dir: "desc" }} emptyMessage="No quests in range." csvFilename="most-completed-quests" />
         </ChartCard>
         <ChartCard
           title="Least-completed quests"
           subtitle="Lowest completion rate (≥3 assigned)"
           note="Low rates can flag quests that are too hard or badly targeted."
         >
-          <DataTable columns={tplCols} rows={leastCompleted} pageSize={8} initialSort={{ key: "rate", dir: "asc" }} emptyMessage="Not enough quest history yet." />
+          <DataTable columns={tplCols} rows={leastCompleted} pageSize={25} initialSort={{ key: "rate", dir: "asc" }} emptyMessage="Not enough quest history yet." csvFilename="least-completed-quests" />
         </ChartCard>
       </div>
     </div>
@@ -185,10 +185,5 @@ export function QuestsClient({
 
 function DiffPill({ d }: { d: string }) {
   if (!d) return <span className="text-ink-muted">—</span>;
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="h-2 w-2 rounded-full" style={{ background: DIFF_COLOR[d] ?? SERIES[0] }} />
-      {d}
-    </span>
-  );
+  return <Badge label={d} color={DIFF_COLOR[d] ?? SERIES[0]} dot />;
 }

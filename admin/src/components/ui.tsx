@@ -124,6 +124,30 @@ export function EmptyState({ message = "Not enough data yet." }: { message?: str
   );
 }
 
+// ── Category badge/pill ───────────────────────────────────────────────
+// Muted, color-by-category pill for status/category table cells (pillar,
+// platform, role, verification, …). `color` should be a series/status hex
+// token so the same category reads identically in badges and charts.
+export function Badge({
+  label,
+  color,
+  dot = false,
+}: {
+  label: string;
+  color: string;
+  dot?: boolean;
+}) {
+  return (
+    <span
+      className="inline-flex w-fit items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap"
+      style={{ borderColor: `${color}40`, background: `${color}17`, color }}
+    >
+      {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />}
+      {label}
+    </span>
+  );
+}
+
 // ── Info / warning banner ────────────────────────────────────────────
 export function Banner({
   tone = "info",

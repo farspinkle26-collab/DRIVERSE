@@ -97,7 +97,7 @@ export function GarageClient({
       </ChartCard>
 
       <ChartCard title="Most common models" subtitle="Make + model (free text, normalised)">
-        <DataTable columns={modelCols} rows={models} pageSize={12} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No models recorded yet." />
+        <DataTable columns={modelCols} rows={models} pageSize={25} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No models recorded yet." csvFilename="garage-models" />
       </ChartCard>
     </div>
   );

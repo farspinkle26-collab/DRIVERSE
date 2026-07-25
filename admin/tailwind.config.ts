@@ -38,7 +38,8 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        sans: ["var(--font-sans)", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
     },
   },

@@ -15,11 +15,14 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { SectionHeader, StatCard, ChartCard, Card, EmptyState, Banner } from "@/components/ui";
+import { SectionHeader, StatCard, ChartCard, Card, EmptyState, Banner, Badge } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
+import { DateCell } from "@/components/DateCell";
+import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
 import { SERIES, AXIS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
 import { fmtInt, fmtDate } from "@/lib/format";
+import { resolveDateRange, type DateRangeValue } from "@/lib/dates";
 import {
   PILLARS,
   PILLAR_LABELS,
@@ -80,6 +83,13 @@ const PILLAR_COLOR: Record<Pillar, string> = {
   fake_scripted_pov: SERIES[4],
   ai_supercars: SERIES[1],
   tips_tricks: SERIES[3],
+};
+
+// Same colors as the chart series above so a pillar reads identically in the
+// post grid's badges and in the pillar bar charts.
+const PLATFORM_COLOR: Record<string, string> = {
+  instagram: SERIES[5],
+  tiktok: SERIES[6],
 };
 
 type TabKey = "overview" | "analytics" | "insights";
@@ -154,6 +164,7 @@ function OverviewTab({ posts }: Props) {
   const [days, setDays] = useState<PeriodDays>(14);
   const [pillarFilter, setPillarFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [gridRange, setGridRange] = useState<DateRangeValue>({ preset: "all" });
   const now = useMemo(() => new Date(), []);
 
   const stats = useMemo(() => {
@@ -165,10 +176,15 @@ function OverviewTab({ posts }: Props) {
   const series = useMemo(() => buildDaySeries(posts, days, now), [posts, days, now]);
 
   const gridRows = useMemo(() => {
+    const { start, end } = resolveDateRange(gridRange, now);
     return posts
       .filter((p) => pillarFilter === "all" || p.frontmatter.pillar === pillarFilter)
-      .filter((p) => platformFilter === "all" || p.frontmatter.platform === platformFilter);
-  }, [posts, pillarFilter, platformFilter]);
+      .filter((p) => platformFilter === "all" || p.frontmatter.platform === platformFilter)
+      .filter((p) => {
+        const d = new Date(`${p.frontmatter.date}T00:00:00Z`);
+        return d >= start && d <= end;
+      });
+  }, [posts, pillarFilter, platformFilter, gridRange, now]);
 
   const columns = usePostColumns();
 
@@ -227,7 +243,7 @@ function OverviewTab({ posts }: Props) {
 
       <ChartCard
         title="All posts"
-        subtitle="Every metric as a sortable column. Filter by pillar / platform."
+        subtitle="Every metric as a sortable column. Filter by pillar / platform / date, search by feature or format."
         right={
           <div className="flex gap-2">
             <Select value={pillarFilter} onChange={setPillarFilter} options={[["all", "All pillars"], ...PILLARS.map((p) => [p, PILLAR_LABELS[p]] as [string, string])]} />
@@ -235,7 +251,20 @@ function OverviewTab({ posts }: Props) {
           </div>
         }
       >
-        <DataTable columns={columns} rows={gridRows} pageSize={12} initialSort={{ key: "date", dir: "desc" }} emptyMessage="No matching posts." />
+        <div className="mb-3">
+          <DateRangePicker value={gridRange} onChange={setGridRange} />
+        </div>
+        <DataTable
+          columns={columns}
+          rows={gridRows}
+          pageSize={25}
+          initialSort={{ key: "date", dir: "desc" }}
+          emptyMessage="No posts match these filters — try widening the date range."
+          searchValue={(p) => `${p.frontmatter.feature_shown} ${p.frontmatter.format} ${p.frontmatter.post_id}`}
+          searchPlaceholder="Search feature / format / post ID…"
+          getRowHref={(p) => `/content/posts/${p.slug}`}
+          csvFilename="content-posts"
+        />
       </ChartCard>
     </div>
   );
@@ -427,15 +456,29 @@ function usePostColumns(): Column<Post>[] {
       {
         key: "date",
         header: "Date",
-        sortValue: (p) => p.frontmatter.date,
-        render: (p) => (
-          <Link href={`/content/posts/${p.slug}`} className="text-series-1 hover:underline">
-            {p.frontmatter.date}
-          </Link>
-        ),
+        sortValue: (p) => `${p.frontmatter.date}T${p.frontmatter.time || "00:00"}`,
+        csvValue: (p) => p.frontmatter.date,
+        render: (p) => <DateCell value={`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`} showWeekday />,
       },
-      { key: "pillar", header: "Pillar", sortValue: (p) => p.frontmatter.pillar ?? "", render: (p) => (p.frontmatter.pillar ? PILLAR_LABELS[p.frontmatter.pillar] : "—") },
-      { key: "platform", header: "Platform", sortValue: (p) => p.frontmatter.platform, render: (p) => platformLabel(p.frontmatter.platform) },
+      {
+        key: "pillar",
+        header: "Pillar",
+        sortValue: (p) => p.frontmatter.pillar ?? "",
+        csvValue: (p) => (p.frontmatter.pillar ? PILLAR_LABELS[p.frontmatter.pillar] : ""),
+        render: (p) =>
+          p.frontmatter.pillar ? (
+            <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
+          ) : (
+            <span className="text-ink-muted">—</span>
+          ),
+      },
+      {
+        key: "platform",
+        header: "Platform",
+        sortValue: (p) => p.frontmatter.platform,
+        csvValue: (p) => platformLabel(p.frontmatter.platform),
+        render: (p) => <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />,
+      },
       { key: "format", header: "Format", sortValue: (p) => p.frontmatter.format, render: (p) => p.frontmatter.format || "—" },
       { key: "feature", header: "Feature", sortValue: (p) => p.frontmatter.feature_shown, render: (p) => p.frontmatter.feature_shown },
       { key: "views", header: "Views", align: "right", sortValue: (p) => p.frontmatter.views, render: (p) => fmtInt(p.frontmatter.views) },
