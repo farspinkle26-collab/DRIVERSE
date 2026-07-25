@@ -18,6 +18,8 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -26,14 +28,13 @@ import {
   StyleProp,
   StyleSheet,
   Text,
+  TextInput,
   View,
   ViewStyle,
 } from "react-native";
 import { Marker } from "react-native-maps";
-import { Plus, X } from "lucide-react-native";
-import Input from "@/components/Input";
-import Dropdown from "@/components/Dropdown";
-import ImagePickerField from "@/components/ImagePicker";
+import { Camera, Plus, X } from "lucide-react-native";
+import * as ImagePickerExpo from "expo-image-picker";
 import {
   CutCornerButton,
   CutCornerSurface,
@@ -49,6 +50,7 @@ import {
   cut,
   fontFamily,
   onRacingRed,
+  radius,
   spacing,
   textStyle,
 } from "@/constants/theme";
@@ -314,11 +316,6 @@ export function PlaceDetailSheet({
  * Submit a place
  * ------------------------------------------------------------------ */
 
-const CATEGORY_OPTIONS = PLACE_CATEGORIES.map((cat) => ({
-  label: PLACE_CATEGORY_LABELS[cat],
-  value: cat,
-}));
-
 export function SubmitPlaceFab({ onPress, style }: { onPress: () => void; style?: object }) {
   const [pressed, setPressed] = useState(false);
   return (
@@ -342,6 +339,161 @@ export function SubmitPlaceFab({ onPress, style }: { onPress: () => void; style?
         <Plus size={spacing.spacingXl} color={onRacingRed} strokeWidth={MAP_GLYPH_STROKE} />
       </CutCornerSurface>
     </Pressable>
+  );
+}
+
+/**
+ * Category picker for the submit form — the same chip visual language as
+ * `PlacesFilterBar` above (CutCornerSurface, cut.sm, active=racingRed),
+ * just laid out inline in a form rather than as a scrolling map filter.
+ */
+function CategoryPicker({
+  value,
+  onChange,
+}: {
+  value: PlaceCategory;
+  onChange: (category: PlaceCategory) => void;
+}) {
+  return (
+    <View style={styles.categoryRow}>
+      {PLACE_CATEGORIES.map((cat) => {
+        const Glyph = PLACE_CATEGORY_ICONS[cat];
+        const isActive = value === cat;
+        return (
+          <Pressable
+            key={cat}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            accessibilityLabel={`Category: ${PLACE_CATEGORY_LABELS[cat]}`}
+            onPress={() => onChange(cat)}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <CutCornerSurface
+              fill={isActive ? colors.racingRed : colors.carbonSurface}
+              borderColor={isActive ? colors.racingRed : colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.sm}
+              corners="topRight"
+              contentStyle={styles.filterChip}
+            >
+              <Glyph
+                size={spacing.spacingMd}
+                color={isActive ? onRacingRed : colors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { color: isActive ? onRacingRed : colors.textSecondary },
+                ]}
+              >
+                {PLACE_CATEGORY_LABELS[cat].toUpperCase()}
+              </Text>
+            </CutCornerSurface>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Minimal inline photo picker, reskinned to the token system. The shared
+ * `components/ImagePicker.tsx` still carries the legacy orange palette and
+ * is used elsewhere, so rather than touch it this duplicates its (small)
+ * pick/capture logic directly against `expo-image-picker`.
+ */
+function PhotoField({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (uri: string | null) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const requestPermissions = async () => {
+    if (Platform.OS === "web") return true;
+    const { status: cameraStatus } =
+      await ImagePickerExpo.requestCameraPermissionsAsync();
+    const { status: mediaStatus } =
+      await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+    if (cameraStatus !== "granted" || mediaStatus !== "granted") {
+      Alert.alert(
+        "Permissions required",
+        "Camera and photo library access is needed to add a photo."
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const pickFrom = async (source: "camera" | "library") => {
+    try {
+      setLoading(true);
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) return;
+      const result =
+        source === "camera"
+          ? await ImagePickerExpo.launchCameraAsync({
+              mediaTypes: ImagePickerExpo.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [4, 3],
+              quality: 0.8,
+            })
+          : await ImagePickerExpo.launchImageLibraryAsync({
+              mediaTypes: ImagePickerExpo.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [4, 3],
+              quality: 0.8,
+            });
+      if (!result.canceled && result.assets[0]) {
+        onChange(result.assets[0].uri);
+      }
+    } catch {
+      Alert.alert("Couldn't get that photo", "Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const choose = () => {
+    Alert.alert("Add a photo", undefined, [
+      { text: "Camera", onPress: () => pickFrom("camera") },
+      { text: "Photo Library", onPress: () => pickFrom("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.fieldLabel}>PHOTO (OPTIONAL)</Text>
+      {value ? (
+        <View style={styles.photoPreviewWrap}>
+          <Image source={{ uri: value }} style={styles.photoPreview} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Remove photo"
+            onPress={() => onChange(null)}
+            style={styles.photoRemoveBtn}
+          >
+            <X size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a photo"
+          onPress={choose}
+          disabled={loading}
+          style={styles.photoPickerBox}
+        >
+          <Camera size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+          <Text style={styles.photoPickerText}>
+            {loading ? "Loading…" : "Add photo"}
+          </Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -467,27 +619,35 @@ export function SubmitPlaceModal({
             </View>
           ) : (
             <ScrollView keyboardShouldPersistTaps="handled">
-              <Input
-                label="Name"
-                placeholder="e.g. Warkop Kang Ujang"
-                value={name}
-                onChangeText={setName}
-              />
-              <Dropdown
-                label="Category"
-                placeholder="Select category"
-                options={CATEGORY_OPTIONS}
-                value={category}
-                onChange={(v) => setCategory(v as PlaceCategory)}
-              />
-              <Input
-                label="Notes (optional)"
-                placeholder="What's good here?"
-                value={notes}
-                onChangeText={setNotes}
-                multiline
-              />
-              <ImagePickerField label="Photo (optional)" value={photoUri} onChange={setPhotoUri} />
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>NAME</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g. Warkop Kang Ujang"
+                  placeholderTextColor={colors.textSecondary}
+                  value={name}
+                  onChangeText={setName}
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>CATEGORY</Text>
+                <CategoryPicker value={category} onChange={setCategory} />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>NOTES (OPTIONAL)</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textInputMultiline]}
+                  placeholder="What's good here?"
+                  placeholderTextColor={colors.textSecondary}
+                  value={notes}
+                  onChangeText={setNotes}
+                  multiline
+                />
+              </View>
+
+              <PhotoField value={photoUri} onChange={setPhotoUri} />
               {error ? <Text style={styles.errorText}>{error}</Text> : null}
               {submitting ? (
                 <View style={styles.submittingRow}>
@@ -690,5 +850,67 @@ const styles = StyleSheet.create({
   successText: {
     ...textStyle("displayMd"),
     color: colors.textPrimary,
+  },
+  /* Form fields (name / category / notes / photo) */
+  fieldGroup: {
+    gap: spacing.spacingXs,
+    marginBottom: spacing.spacingMd,
+  },
+  fieldLabel: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
+  },
+  textInput: {
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    color: colors.textPrimary,
+    ...textStyle("body"),
+  },
+  textInputMultiline: {
+    minHeight: spacing.spacingXxxl + spacing.spacingXl,
+    textAlignVertical: "top",
+  },
+  categoryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.spacingSm,
+  },
+  photoPickerBox: {
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    minHeight: spacing.spacingXxxl + spacing.spacingXl,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.spacingXs,
+  },
+  photoPickerText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  photoPreviewWrap: {
+    position: "relative",
+    borderRadius: radius.sharp,
+    overflow: "hidden",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+  },
+  photoPreview: {
+    width: "100%",
+    height: spacing.spacingXxxl * 2,
+  },
+  photoRemoveBtn: {
+    position: "absolute",
+    top: spacing.spacingSm,
+    right: spacing.spacingSm,
+    backgroundColor: alpha(colors.voidBlack, 0.7),
+    borderRadius: radius.sharp,
+    padding: spacing.spacingXs,
   },
 });
