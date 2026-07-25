@@ -8,13 +8,11 @@ import {
   Dimensions,
   ActivityIndicator,
   TextInput,
-  Platform,
   Image,
   Alert,
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import {
   Car,
@@ -40,6 +38,19 @@ import { useActiveCar, GarageCar, CarCategory } from "@/hooks/useActiveCarStore"
 import { useXP } from "@/hooks/useXPStore";
 import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { supabase } from "@/lib/supabase";
+import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
+import { CHROME_ICON_STROKE } from "@/components/MapGlyphs";
+import {
+  alpha,
+  borderWidth,
+  colors,
+  cut,
+  fontFamily,
+  onRacingRed,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.76);
@@ -47,14 +58,18 @@ const SPACING = 16;
 const SNAP = CARD_WIDTH + SPACING;
 const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 
-function hexToRgba(hex: string, alpha: number): string {
+// A car's paint colour is user-chosen content (like a place name or a
+// license plate), not app chrome — it's the one place in this screen that
+// legitimately sits outside the six-value palette. Everything else below
+// (backgrounds, buttons, labels) is tokens.
+function hexToRgba(hex: string, opacity: number): string {
   const h = hex.replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
   const r = parseInt(full.slice(0, 2), 16);
   const g = parseInt(full.slice(2, 4), 16);
   const b = parseInt(full.slice(4, 6), 16);
-  if ([r, g, b].some(Number.isNaN)) return `rgba(255,107,53,${alpha})`;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  if ([r, g, b].some(Number.isNaN)) return alpha(colors.racingRed, opacity);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 // ─── One car hero card ─────────────────────────────────────
@@ -95,16 +110,19 @@ function CarCard({
         { transform: [{ scale }, { translateY }], opacity },
       ]}
     >
-      <LinearGradient
-        colors={[hexToRgba(car.color, 0.28), "#12121C", "#0C0C14"]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.cardGradient}
+      <CutCornerSurface
+        fill={colors.carbonSurface}
+        borderColor={car.is_primary ? colors.racingRed : colors.hairline}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.lg}
+        corners="topRight"
+        style={styles.cardSurface}
+        contentStyle={styles.cardGradient}
       >
         {/* Primary ribbon */}
         {car.is_primary && (
-          <View style={[styles.ribbon, { backgroundColor: hexToRgba(car.color, 0.9) }]}>
-            <Crown size={12} color="#0A0A0F" />
+          <View style={styles.ribbon}>
+            <Crown size={12} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.ribbonText}>PRIMARY</Text>
           </View>
         )}
@@ -115,7 +133,7 @@ function CarCard({
           onPress={() => onMenu(car)}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <MoreHorizontal size={16} color="#FFFFFF" />
+          <MoreHorizontal size={16} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
         </TouchableOpacity>
 
         {/* Car visual */}
@@ -124,7 +142,7 @@ function CarCard({
           {car.photo_url ? (
             <Image source={{ uri: car.photo_url }} style={styles.carPhoto} resizeMode="cover" />
           ) : (
-            <Car size={132} color={car.color} strokeWidth={1.4} />
+            <Car size={132} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
           )}
         </View>
 
@@ -143,19 +161,19 @@ function CarCard({
         {/* Spec bar */}
         <View style={styles.specBar}>
           <View style={styles.spec}>
-            <Gauge size={16} color={car.color} />
+            <Gauge size={16} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.specValue}>{car.hp}</Text>
             <Text style={styles.specLabel}>HP</Text>
           </View>
           <View style={styles.specDivider} />
           <View style={styles.spec}>
-            <Rocket size={16} color={car.color} />
+            <Rocket size={16} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.specValue}>{car.accel_0_100 || "—"}</Text>
             <Text style={styles.specLabel}>0-100 km/h</Text>
           </View>
           <View style={styles.specDivider} />
           <View style={styles.spec}>
-            <Grid2x2 size={16} color={car.color} />
+            <Grid2x2 size={16} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.specValue}>{car.drivetrain || "—"}</Text>
             <Text style={styles.specLabel}>Drivetrain</Text>
           </View>
@@ -165,19 +183,19 @@ function CarCard({
         {driveStats && driveStats.tripCount > 0 && (
           <View style={styles.driveDataBar}>
             <View style={styles.spec}>
-              <RouteIcon size={14} color={car.color} />
+              <RouteIcon size={14} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
               <Text style={styles.driveDataValue}>{formatDistance(driveStats.totalDistanceKm)}</Text>
               <Text style={styles.specLabel}>km driven</Text>
             </View>
             <View style={styles.specDivider} />
             <View style={styles.spec}>
-              <Hexagon size={14} color={car.color} />
+              <Hexagon size={14} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
               <Text style={styles.driveDataValue}>{driveStats.totalXp.toLocaleString("en-US")}</Text>
               <Text style={styles.specLabel}>XP gained</Text>
             </View>
             <View style={styles.specDivider} />
             <View style={styles.spec}>
-              <Gauge size={14} color={car.color} />
+              <Gauge size={14} color={car.color} strokeWidth={CHROME_ICON_STROKE} />
               <Text style={styles.driveDataValue}>{driveStats.avgSpeedKmh.toFixed(0)}</Text>
               <Text style={styles.specLabel}>km/h avg</Text>
             </View>
@@ -189,7 +207,7 @@ function CarCard({
             <Text style={styles.plateText}>{car.license_plate}</Text>
           </View>
         ) : null}
-      </LinearGradient>
+      </CutCornerSurface>
     </Animated.View>
   );
 }
@@ -339,15 +357,14 @@ export default function SelectCarScreen() {
     }
   }, [newName, newMake, newHp, addCar]);
 
-  const activeColor = filteredCars[activeIndex]?.color ?? "#FF6B35";
+  const activeColor = filteredCars[activeIndex]?.color ?? colors.racingRed;
 
   // ─── Loading ─────────────────────────────────────────────
   if (authLoading || (isAuthenticated && loadingCars && cars.length === 0)) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={styles.center}>
-          <ActivityIndicator color="#FF6B35" size="large" />
+          <ActivityIndicator color={colors.racingRed} size="large" />
           <Text style={styles.loadingText}>Opening your garage…</Text>
         </View>
       </View>
@@ -358,21 +375,28 @@ export default function SelectCarScreen() {
   if (!isAuthenticated) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <View style={[styles.center, { paddingHorizontal: 32 }]}>
-          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.guestIcon}>
-            <Car size={40} color="#FFFFFF" />
-          </LinearGradient>
-          <Text style={styles.guestTitle}>Enter Your Garage</Text>
+        <View style={[styles.center, { paddingHorizontal: spacing.spacingXxl }]}>
+          <CutCornerSurface
+            fill={colors.racingRed}
+            borderColor={colors.racingRed}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.lg}
+            corners="topRight"
+            style={styles.guestIcon}
+            contentStyle={styles.guestIconContent}
+          >
+            <Car size={40} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />
+          </CutCornerSurface>
+          <Text style={styles.guestTitle}>ENTER YOUR GARAGE</Text>
           <Text style={styles.guestSub}>
             Sign in to pick your ride and unlock XP, routes, and your car collection.
           </Text>
-          <TouchableOpacity style={styles.guestPrimary} onPress={() => router.push("/login" as any)} activeOpacity={0.85}>
-            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.guestPrimaryGrad}>
-              <LogIn size={18} color="#FFFFFF" />
-              <Text style={styles.guestPrimaryText}>Sign In</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+          <CutCornerButton
+            title="Sign In"
+            onPress={() => router.push("/login" as any)}
+            icon={<LogIn size={18} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+            style={styles.guestPrimary}
+          />
           <TouchableOpacity style={styles.guestSecondary} onPress={enterApp} activeOpacity={0.7}>
             <Text style={styles.guestSecondaryText}>Continue as Guest</Text>
           </TouchableOpacity>
@@ -385,13 +409,12 @@ export default function SelectCarScreen() {
   if (cars.length === 0) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={[styles.emptyWrap, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}>
           <View style={styles.center}>
             <View style={styles.emptyIcon}>
-              <Car size={48} color="#FF6B35" strokeWidth={1.5} />
+              <Car size={48} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
             </View>
-            <Text style={styles.guestTitle}>Build Your Garage</Text>
+            <Text style={styles.guestTitle}>BUILD YOUR GARAGE</Text>
             <Text style={styles.guestSub}>Add your first ride to hit the road in style.</Text>
           </View>
 
@@ -400,44 +423,44 @@ export default function SelectCarScreen() {
               <TextInput
                 style={styles.addInput}
                 placeholder="Car name (e.g. Night Fury)"
-                placeholderTextColor="#5A5A6E"
+                placeholderTextColor={colors.textSecondary}
                 value={newName}
                 onChangeText={setNewName}
               />
-              <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flexDirection: "row", gap: spacing.spacingSm + 2 }}>
                 <TextInput
                   style={[styles.addInput, { flex: 1 }]}
                   placeholder="Make (e.g. BMW)"
-                  placeholderTextColor="#5A5A6E"
+                  placeholderTextColor={colors.textSecondary}
                   value={newMake}
                   onChangeText={setNewMake}
                 />
                 <TextInput
                   style={[styles.addInput, { width: 100 }]}
                   placeholder="HP"
-                  placeholderTextColor="#5A5A6E"
+                  placeholderTextColor={colors.textSecondary}
                   value={newHp}
                   onChangeText={setNewHp}
                   keyboardType="number-pad"
                 />
               </View>
-              <TouchableOpacity style={styles.cta} onPress={handleAddCar} disabled={addBusy || !newName.trim()} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
-                  {addBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.ctaText}>Add to Garage</Text>}
-                </LinearGradient>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="Add to Garage"
+                onPress={handleAddCar}
+                disabled={addBusy || !newName.trim()}
+                icon={addBusy ? <ActivityIndicator color={onRacingRed} /> : undefined}
+              />
               <TouchableOpacity onPress={() => setShowAdd(false)} style={styles.skipBtn}>
                 <Text style={styles.skipText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.addForm}>
-              <TouchableOpacity style={styles.cta} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
-                  <Plus size={18} color="#FFFFFF" />
-                  <Text style={styles.ctaText}>Add a Car</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="Add a Car"
+                onPress={() => setShowAdd(true)}
+                icon={<Plus size={18} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+              />
               <TouchableOpacity onPress={enterApp} style={styles.skipBtn}>
                 <Text style={styles.skipText}>Skip for now</Text>
               </TouchableOpacity>
@@ -451,7 +474,6 @@ export default function SelectCarScreen() {
   // ─── Garage carousel ─────────────────────────────────────
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
       {/* Color-tinted ambient glow behind the focused car */}
       <Animated.View
         pointerEvents="none"
@@ -473,7 +495,7 @@ export default function SelectCarScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerTopRow}>
           <View style={styles.brandRow}>
-            <Sparkles size={14} color="#FF6B35" />
+            <Sparkles size={14} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.brandLabel}>YOUR GARAGE</Text>
           </View>
           <TouchableOpacity
@@ -481,12 +503,12 @@ export default function SelectCarScreen() {
             onPress={() => router.push("/(tabs)/profile" as any)}
             activeOpacity={0.75}
           >
-            <TrendingUp size={14} color="#FFFFFF" />
+            <TrendingUp size={14} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
             <Text style={styles.statsBtnText}>Garage Stats</Text>
-            <ChevronRight size={14} color="#8A8A9A" />
+            <ChevronRight size={14} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.title}>Choose your ride</Text>
+        <Text style={styles.title}>CHOOSE YOUR RIDE</Text>
         <Text style={styles.subtitle}>
           {user?.name ? `Welcome back, ${user.name.split(" ")[0]}. ` : ""}
           Swipe to pick the car you're driving today.
@@ -550,7 +572,7 @@ export default function SelectCarScreen() {
               onPress={() => handleCategoryChange(cat.key)}
               activeOpacity={0.75}
             >
-              <cat.icon size={14} color={active ? "#FF6B35" : "#8A8A9A"} />
+              <cat.icon size={14} color={active ? colors.racingRed : colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
               <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
                 {cat.label}
               </Text>
@@ -562,22 +584,22 @@ export default function SelectCarScreen() {
       {/* Garage-wide stats */}
       <View style={styles.statsGrid}>
         <View style={styles.statTile}>
-          <Car size={16} color="#8A8A9A" />
+          <Car size={16} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           <Text style={styles.statValue}>{cars.length}</Text>
           <Text style={styles.statLabel}>Cars Owned</Text>
         </View>
         <View style={styles.statTile}>
-          <RouteIcon size={16} color="#8A8A9A" />
+          <RouteIcon size={16} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           <Text style={styles.statValue}>{driveStats.totalDrives}</Text>
           <Text style={styles.statLabel}>Total Drives</Text>
         </View>
         <View style={styles.statTile}>
-          <MapPin size={16} color="#8A8A9A" />
+          <MapPin size={16} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           <Text style={styles.statValue}>{formatDistance(driveStats.totalDistanceKm)} km</Text>
           <Text style={styles.statLabel}>Total Distance</Text>
         </View>
         <View style={styles.statTile}>
-          <Hexagon size={16} color="#8A8A9A" />
+          <Hexagon size={16} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           <Text style={styles.statValue}>{totalXp.toLocaleString("en-US")}</Text>
           <Text style={styles.statLabel}>Garage XP</Text>
         </View>
@@ -586,37 +608,20 @@ export default function SelectCarScreen() {
 
       {/* Footer actions */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
-        <TouchableOpacity
-          style={styles.cta}
+        <CutCornerButton
+          title={filteredCars[activeIndex] ? `Drive the ${filteredCars[activeIndex].name}` : "Select a car"}
+          size="lg"
           onPress={handleEnter}
           disabled={entering || !filteredCars[activeIndex]}
-          activeOpacity={0.85}
-        >
-          <LinearGradient
-            colors={[activeColor, "#FF3B6F"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.ctaGrad}
-          >
-            {entering ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Text style={styles.ctaText}>
-                  {filteredCars[activeIndex] ? `Drive the ${filteredCars[activeIndex].name}` : "Select a car"}
-                </Text>
-                <ChevronRight size={20} color="#FFFFFF" />
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+          icon={entering ? <ActivityIndicator color={onRacingRed} /> : undefined}
+        />
 
         <TouchableOpacity
           style={styles.addGhost}
           onPress={() => router.push("/(tabs)/profile" as any)}
           activeOpacity={0.7}
         >
-          <Plus size={16} color="#8A8A9A" />
+          <Plus size={16} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
           <Text style={styles.addGhostText}>Manage garage</Text>
         </TouchableOpacity>
       </View>
@@ -625,9 +630,9 @@ export default function SelectCarScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  loadingText: { color: "#8A8A9A", fontSize: 14, marginTop: 16, fontWeight: "600" },
+  loadingText: { ...textStyle("body"), color: colors.textSecondary, marginTop: spacing.spacingLg },
   ambientGlow: {
     position: "absolute",
     top: "18%",
@@ -638,58 +643,56 @@ const styles = StyleSheet.create({
   },
   // Header
   scrollArea: { flex: 1 },
-  scrollContent: { paddingBottom: 12 },
-  header: { paddingHorizontal: 24, paddingBottom: 8 },
+  scrollContent: { paddingBottom: spacing.spacingMd },
+  header: { paddingHorizontal: spacing.spacingXl, paddingBottom: spacing.spacingSm },
   headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  brandLabel: { fontSize: 12, fontWeight: "800", color: "#FF6B35", letterSpacing: 2 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingSm - 2, marginBottom: spacing.spacingSm },
+  brandLabel: { ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold, fontSize: 12 }), color: colors.racingRed, letterSpacing: 2 },
   statsBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    marginBottom: 8,
+    gap: spacing.spacingSm - 2,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm - 1,
+    borderRadius: radius.sharp,
+    marginBottom: spacing.spacingSm,
   },
-  statsBtnText: { fontSize: 12, fontWeight: "700", color: "#FFFFFF" },
-  title: { fontSize: 30, fontWeight: "900", color: "#FFFFFF", letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: "#8A8A9A", marginTop: 6, lineHeight: 20 },
+  statsBtnText: { ...textStyle("caption", { fontFamily: fontFamily.bodySemiBold, fontSize: 12 }), color: colors.textPrimary },
+  title: { ...textStyle("displayXl", { fontSize: 30, lineHeight: 34 }), color: colors.textPrimary },
+  subtitle: { ...textStyle("body", { fontSize: 14 }), color: colors.textSecondary, marginTop: spacing.spacingSm - 2 },
   // Carousel
-  carouselWrap: { justifyContent: "center", paddingVertical: 12 },
-  emptyFilterText: { color: "#8A8A9A", fontSize: 14, paddingVertical: 40 },
+  carouselWrap: { justifyContent: "center", paddingVertical: spacing.spacingMd },
+  emptyFilterText: { ...textStyle("body", { fontSize: 14 }), color: colors.textSecondary, paddingVertical: spacing.spacingXxxl - spacing.spacingXs },
   card: {
     height: Math.min(CARD_WIDTH * 1.28, 440),
-    borderRadius: 28,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
   },
-  cardGradient: { flex: 1, padding: 22, alignItems: "center" },
+  cardSurface: { flex: 1 },
+  cardGradient: { flex: 1, padding: spacing.spacingXl - 2, alignItems: "center" },
   ribbon: {
     position: "absolute",
-    top: 16,
-    left: 16,
+    top: spacing.spacingLg,
+    left: spacing.spacingLg,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    paddingHorizontal: spacing.spacingSm + 2,
+    paddingVertical: spacing.spacingXs + 1,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.racingRed,
     zIndex: 2,
   },
-  ribbonText: { fontSize: 10, fontWeight: "900", color: "#0A0A0F", letterSpacing: 0.5 },
+  ribbonText: { ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold, fontSize: 10, lineHeight: 12 }), color: onRacingRed, letterSpacing: 0.5 },
   menuBtn: {
     position: "absolute",
-    top: 16,
-    right: 16,
+    top: spacing.spacingLg,
+    right: spacing.spacingLg,
     width: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    borderRadius: radius.sharp,
+    backgroundColor: alpha(colors.voidBlack, 0.5),
     alignItems: "center",
     justifyContent: "center",
     zIndex: 2,
@@ -699,8 +702,8 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 8,
-    marginBottom: 6,
+    marginTop: spacing.spacingSm,
+    marginBottom: spacing.spacingSm - 2,
   },
   carGlow: {
     position: "absolute",
@@ -708,161 +711,138 @@ const styles = StyleSheet.create({
     height: 190,
     borderRadius: 95,
   },
-  carPhoto: { width: "92%", height: 170, borderRadius: 18 },
-  carName: { fontSize: 24, fontWeight: "900", color: "#FFFFFF", marginTop: 4, textAlign: "center" },
-  carMakeRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  carMake: { fontSize: 14, color: "#B0B0BE", fontWeight: "600" },
-  dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: "#5A5A6E" },
+  carPhoto: { width: "92%", height: 170, borderRadius: radius.sharp },
+  carName: { ...textStyle("displayXl", { fontSize: 24, lineHeight: 28 }), color: colors.textPrimary, marginTop: spacing.spacingXs, textAlign: "center" },
+  carMakeRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingSm, marginTop: spacing.spacingXs },
+  carMake: { ...textStyle("caption", { fontFamily: fontFamily.bodySemiBold, fontSize: 14 }), color: colors.textSecondary },
+  dot: { width: 3, height: 3, borderRadius: radius.circle, backgroundColor: colors.textSecondary },
   specBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.3)",
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    marginTop: 20,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    paddingVertical: spacing.spacingMd + 2,
+    paddingHorizontal: spacing.spacingSm,
+    marginTop: spacing.spacingXl,
     width: "100%",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   spec: { flex: 1, alignItems: "center", gap: 3 },
-  specDivider: { width: 1, height: 34, backgroundColor: "rgba(255,255,255,0.08)" },
-  specValue: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
-  specLabel: { fontSize: 10, color: "#8A8A9A", textTransform: "uppercase", letterSpacing: 0.5 },
-  colorDot: { width: 15, height: 15, borderRadius: 8, borderWidth: 2, borderColor: "rgba(255,255,255,0.25)" },
+  specDivider: { width: borderWidth.hairline, height: 34, backgroundColor: colors.hairline },
+  specValue: { ...textStyle("dataLg", { fontSize: 17, lineHeight: 20 }), color: colors.textPrimary },
+  specLabel: { ...textStyle("caption", { fontSize: 10, lineHeight: 12 }), color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
   driveDataBar: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: spacing.spacingSm + 2,
     width: "100%",
-    paddingVertical: 8,
+    paddingVertical: spacing.spacingSm,
   },
-  driveDataValue: { fontSize: 14, fontWeight: "800", color: "#FFFFFF" },
+  driveDataValue: { ...textStyle("dataSm", { fontSize: 14 }), color: colors.textPrimary },
   plate: {
-    marginTop: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    marginTop: spacing.spacingMd + 2,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingMd + 2,
+    paddingVertical: spacing.spacingSm - 2,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   plateText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#CACAD5",
-    letterSpacing: 2,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    ...textStyle("dataSm", { fontSize: 13, letterSpacing: 2 }),
+    color: colors.textSecondary,
   },
   // Dots
-  dots: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 18, marginBottom: 4 },
-  dot2: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.18)" },
+  dots: { flexDirection: "row", justifyContent: "center", gap: spacing.spacingSm - 2, marginTop: spacing.spacingLg + 2, marginBottom: spacing.spacingXs },
+  dot2: { width: 8, height: 8, borderRadius: radius.circle, backgroundColor: colors.hairline },
   // Category filter chips
   categoryRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 24,
-    marginTop: 20,
+    gap: spacing.spacingSm,
+    paddingHorizontal: spacing.spacingXl,
+    marginTop: spacing.spacingXl,
   },
   categoryChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    gap: spacing.spacingSm - 2,
+    paddingHorizontal: spacing.spacingMd + 2,
+    paddingVertical: spacing.spacingSm,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   categoryChipActive: {
-    backgroundColor: "rgba(255,107,53,0.14)",
-    borderColor: "rgba(255,107,53,0.4)",
+    backgroundColor: alpha(colors.racingRed, 0.14),
+    borderColor: alpha(colors.racingRed, 0.4),
   },
-  categoryChipText: { fontSize: 13, fontWeight: "600", color: "#8A8A9A" },
-  categoryChipTextActive: { color: "#FF6B35" },
+  categoryChipText: { ...textStyle("caption", { fontFamily: fontFamily.bodySemiBold, fontSize: 13 }), color: colors.textSecondary },
+  categoryChipTextActive: { color: colors.racingRed },
   // Garage-wide stats grid
   statsGrid: {
     flexDirection: "row",
-    paddingHorizontal: 8,
-    marginTop: 20,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    marginHorizontal: 24,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    paddingVertical: 16,
+    paddingHorizontal: spacing.spacingSm,
+    marginTop: spacing.spacingXl,
+    backgroundColor: colors.carbonSurface,
+    marginHorizontal: spacing.spacingXl,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingVertical: spacing.spacingLg,
   },
   statTile: { flex: 1, alignItems: "center", gap: 4 },
-  statValue: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  statLabel: { fontSize: 10, color: "#8A8A9A", textAlign: "center" },
+  statValue: { ...textStyle("dataSm", { fontFamily: fontFamily.dataBold, fontSize: 16 }), color: colors.textPrimary },
+  statLabel: { ...textStyle("caption", { fontSize: 10, lineHeight: 12 }), color: colors.textSecondary, textAlign: "center" },
   // Footer
-  footer: { paddingHorizontal: 24, paddingTop: 12 },
-  cta: { borderRadius: 18, overflow: "hidden" },
-  ctaGrad: {
-    height: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  ctaText: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
+  footer: { paddingHorizontal: spacing.spacingXl, paddingTop: spacing.spacingMd },
   addGhost: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    marginTop: 14,
-    paddingVertical: 8,
+    gap: spacing.spacingSm - 2,
+    marginTop: spacing.spacingMd + 2,
+    paddingVertical: spacing.spacingSm,
   },
-  addGhostText: { fontSize: 14, fontWeight: "600", color: "#8A8A9A" },
+  addGhostText: { ...textStyle("caption", { fontFamily: fontFamily.bodySemiBold, fontSize: 14 }), color: colors.textSecondary },
   // Guest
   guestIcon: {
     width: 84,
     height: 84,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 24,
+    marginBottom: spacing.spacingXl,
   },
-  guestTitle: { fontSize: 26, fontWeight: "900", color: "#FFFFFF", textAlign: "center" },
-  guestSub: { fontSize: 15, color: "#8A8A9A", textAlign: "center", lineHeight: 22, marginTop: 10 },
-  guestPrimary: { width: "100%", borderRadius: 16, overflow: "hidden", marginTop: 28 },
-  guestPrimaryGrad: {
-    height: 54,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  guestPrimaryText: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  guestSecondary: { marginTop: 14, paddingVertical: 10 },
-  guestSecondaryText: { fontSize: 15, fontWeight: "600", color: "#8A8A9A" },
+  guestIconContent: { flex: 1, alignItems: "center", justifyContent: "center" },
+  guestTitle: { ...textStyle("displayXl", { fontSize: 26, lineHeight: 30 }), color: colors.textPrimary, textAlign: "center" },
+  guestSub: { ...textStyle("body", { fontSize: 15 }), color: colors.textSecondary, textAlign: "center", marginTop: spacing.spacingSm + 2 },
+  guestPrimary: { width: "100%", marginTop: spacing.spacingXl + 4 },
+  guestSecondary: { marginTop: spacing.spacingMd + 2, paddingVertical: spacing.spacingSm + 2 },
+  guestSecondaryText: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold, fontSize: 15 }), color: colors.textSecondary },
   // Empty garage
-  emptyWrap: { flex: 1, paddingHorizontal: 24 },
+  emptyWrap: { flex: 1, paddingHorizontal: spacing.spacingXl },
   emptyIcon: {
     width: 96,
     height: 96,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,107,53,0.1)",
+    borderRadius: radius.sharp,
+    backgroundColor: alpha(colors.racingRed, 0.1),
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: "rgba(255,107,53,0.2)",
+    marginBottom: spacing.spacingXl - 2,
+    borderWidth: borderWidth.hairline,
+    borderColor: alpha(colors.racingRed, 0.2),
   },
-  addForm: { gap: 10 },
+  addForm: { gap: spacing.spacingSm + 2 },
   addInput: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
     height: 50,
-    fontSize: 15,
-    color: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    color: colors.textPrimary,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    ...textStyle("body", { fontSize: 15 }),
   },
-  skipBtn: { alignItems: "center", paddingVertical: 10, marginTop: 2 },
-  skipText: { fontSize: 14, fontWeight: "600", color: "#8A8A9A" },
+  skipBtn: { alignItems: "center", paddingVertical: spacing.spacingSm + 2, marginTop: 2 },
+  skipText: { ...textStyle("caption", { fontFamily: fontFamily.bodySemiBold, fontSize: 14 }), color: colors.textSecondary },
 });
