@@ -3,19 +3,21 @@ import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   Image,
   ScrollView,
   ActivityIndicator,
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { ArrowLeft, Crown, MessageCircle, Ban } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useEvents } from "@/hooks/useEventsStore";
 import { supabase } from "@/lib/supabase";
+import { CutCornerButton } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import { alpha, borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
 
 interface Attendee {
   user_id: string;
@@ -109,8 +111,7 @@ export default function EventManageScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: insets.top + 140 }} />
+        <ActivityIndicator color={colors.racingRed} style={{ marginTop: insets.top + 140 }} />
       </View>
     );
   }
@@ -119,7 +120,6 @@ export default function EventManageScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={[styles.emptyState, { paddingTop: insets.top + 140 }]}>
           <Text style={styles.emptyTitle}>Only the host can manage this event</Text>
         </View>
@@ -130,17 +130,16 @@ export default function EventManageScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
-          <ArrowLeft size={22} color="#FFFFFF" />
-        </TouchableOpacity>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.spacingSm }]}>
+        <Pressable style={styles.iconBtn} onPress={() => router.back()} hitSlop={spacing.spacingSm}>
+          <ArrowLeft size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
         <Text style={styles.topTitle} numberOfLines={1}>Manage: {title}</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: spacing.spacingLg, paddingBottom: insets.bottom + spacing.spacingXxl }} showsVerticalScrollIndicator={false}>
         {status === "cancelled" && (
           <View style={styles.cancelledBanner}>
             <Text style={styles.cancelledText}>This event is cancelled.</Text>
@@ -150,41 +149,40 @@ export default function EventManageScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Joined ({attendees.length})</Text>
           {attendees.map((a) => (
-            <TouchableOpacity
+            <Pressable
               key={a.user_id}
               style={styles.memberRow}
-              activeOpacity={0.7}
               onPress={() => router.push(`/user/${a.user_id}` as any)}
             >
               <View style={styles.avatar}>
                 {a.avatar ? <Image source={{ uri: a.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{a.name[0]?.toUpperCase()}</Text>}
               </View>
               <Text style={[styles.rowName, { flex: 1 }]}>{a.name}{a.user_id === user?.id ? " (You)" : ""}</Text>
-              {a.role === "host" && <Crown size={16} color="#FFD700" />}
-            </TouchableOpacity>
+              {a.role === "host" && <Crown size={16} color={colors.racingRed} strokeWidth={ICON_STROKE} />}
+            </Pressable>
           ))}
         </View>
 
         {conversationId && (
-          <TouchableOpacity
-            style={styles.chatBtn}
+          <CutCornerButton
+            title="Open event chat"
+            variant="ghost"
+            corners="topRight"
+            icon={<MessageCircle size={16} color={colors.textPrimary} strokeWidth={ICON_STROKE} />}
             onPress={() => router.push(`/messages/group/${conversationId}` as any)}
-            activeOpacity={0.85}
-          >
-            <MessageCircle size={16} color="#FFFFFF" />
-            <Text style={styles.chatBtnText}>Open event chat</Text>
-          </TouchableOpacity>
+            style={styles.actionBtn}
+          />
         )}
 
         {status !== "cancelled" && (
-          <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} disabled={cancelling} activeOpacity={0.8}>
-            {cancelling ? <ActivityIndicator color="#EF4444" /> : (
-              <>
-                <Ban size={16} color="#EF4444" />
-                <Text style={styles.cancelBtnText}>Cancel Event</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <CutCornerButton
+            title="Cancel Event"
+            variant="outline"
+            corners="topRight"
+            disabled={cancelling}
+            icon={cancelling ? undefined : <Ban size={16} color={colors.racingRed} strokeWidth={ICON_STROKE} />}
+            onPress={handleCancel}
+          />
         )}
       </ScrollView>
     </View>
@@ -192,29 +190,63 @@ export default function EventManageScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  topTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF", flex: 1, textAlign: "center", marginHorizontal: 8 },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.spacingLg,
+    paddingBottom: spacing.spacingSm,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topTitle: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+    flex: 1,
+    textAlign: "center",
+    marginHorizontal: spacing.spacingSm,
+  },
 
-  emptyState: { flex: 1, alignItems: "center", gap: 8, paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF", textAlign: "center" },
+  emptyState: { flex: 1, alignItems: "center", gap: spacing.spacingSm, paddingHorizontal: spacing.spacingXl },
+  emptyTitle: { ...textStyle("displayMd"), color: colors.textPrimary, textAlign: "center" },
 
-  cancelledBanner: { backgroundColor: "rgba(239,68,68,0.1)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", padding: 12, marginBottom: 16 },
-  cancelledText: { color: "#EF4444", fontSize: 13, fontWeight: "600" },
+  cancelledBanner: {
+    backgroundColor: alpha(colors.racingRed, 0.1),
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: alpha(colors.racingRed, 0.3),
+    padding: spacing.spacingMd,
+    marginBottom: spacing.spacingLg,
+  },
+  cancelledText: { ...textStyle("caption"), color: colors.racingRed },
 
-  section: { marginBottom: 22 },
-  sectionLabel: { fontSize: 12, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.6, marginBottom: 10, textTransform: "uppercase" },
+  section: { marginBottom: spacing.spacingXl },
+  sectionLabel: { ...textStyle("caption"), color: colors.textSecondary, letterSpacing: 1, marginBottom: spacing.spacingSm },
 
-  memberRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  avatarImg: { width: 40, height: 40, borderRadius: 20 },
-  avatarText: { fontSize: 15, fontWeight: "800", color: "#FF6B35" },
-  rowName: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingSm, paddingVertical: spacing.spacingSm },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.circle,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  avatarImg: { width: 40, height: 40, borderRadius: radius.circle },
+  avatarText: { ...textStyle("displayMd", { fontSize: 15, lineHeight: 18 }), color: colors.textPrimary },
+  rowName: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }), color: colors.textPrimary },
 
-  chatBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderRadius: 14, paddingVertical: 14, marginBottom: 12 },
-  chatBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
-
-  cancelBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
-  cancelBtnText: { color: "#EF4444", fontWeight: "700", fontSize: 14 },
+  actionBtn: { marginBottom: spacing.spacingMd },
 });

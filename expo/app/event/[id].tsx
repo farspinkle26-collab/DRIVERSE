@@ -3,18 +3,20 @@ import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Clock, Users, Check, Settings, MessageCircle } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useEvents } from "@/hooks/useEventsStore";
-import { eventTypeColor, eventTypeLabel, EventTypeIcon } from "@/components/EventMeta";
+import { eventTypeLabel, EventTypeIcon } from "@/components/EventMeta";
 import { supabase } from "@/lib/supabase";
+import { CutCornerButton } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import { borderWidth, colors, radius, spacing, textStyle } from "@/constants/theme";
 
 interface EventDetail {
   id: string;
@@ -87,8 +89,7 @@ export default function EventDetailScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: insets.top + 140 }} />
+        <ActivityIndicator color={colors.racingRed} style={{ marginTop: insets.top + 140 }} />
       </View>
     );
   }
@@ -97,40 +98,38 @@ export default function EventDetailScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={[styles.emptyState, { paddingTop: insets.top + 140 }]}>
           <Text style={styles.emptyTitle}>Event not found</Text>
+          <Text style={styles.emptyBody}>It may have been cancelled. Go back and pick another one from the list.</Text>
         </View>
       </View>
     );
   }
 
-  const color = eventTypeColor(event.event_type);
   const full = event.max_participants > 0 && participantCount >= event.max_participants;
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
-          <ArrowLeft size={22} color="#FFFFFF" />
-        </TouchableOpacity>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.spacingSm }]}>
+        <Pressable style={styles.iconBtn} onPress={() => router.back()} hitSlop={spacing.spacingSm}>
+          <ArrowLeft size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
         <Text style={styles.topTitle} numberOfLines={1}>{event.title}</Text>
         {isHost ? (
-          <TouchableOpacity onPress={() => router.push(`/event/${event.id}/manage` as any)} style={styles.iconBtn} hitSlop={8}>
-            <Settings size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          <Pressable style={styles.iconBtn} onPress={() => router.push(`/event/${event.id}/manage` as any)} hitSlop={spacing.spacingSm}>
+            <Settings size={18} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+          </Pressable>
         ) : (
           <View style={{ width: 40 }} />
         )}
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: spacing.spacingLg, paddingBottom: insets.bottom + spacing.spacingXxl }} showsVerticalScrollIndicator={false}>
         <View style={styles.headerCard}>
-          <View style={[styles.typeIcon, { backgroundColor: `${color}18`, borderColor: `${color}50` }]}>
-            <EventTypeIcon type={event.event_type} size={22} color={color} />
+          <View style={[styles.typeIcon, event.status === "live" && { borderColor: colors.racingRed }]}>
+            <EventTypeIcon type={event.event_type} size={22} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.eventTitle}>{event.title}</Text>
@@ -139,7 +138,7 @@ export default function EventDetailScreen() {
         </View>
 
         <View style={styles.detailRow}>
-          <Clock size={15} color="#8A8A9A" />
+          <Clock size={15} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
           <Text style={styles.detailText}>
             {new Date(event.starts_at).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
             {event.ends_at ? ` – ${new Date(event.ends_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
@@ -147,12 +146,12 @@ export default function EventDetailScreen() {
         </View>
         {!!event.location_name && (
           <View style={styles.detailRow}>
-            <MapPin size={15} color="#8A8A9A" />
+            <MapPin size={15} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
             <Text style={styles.detailText}>{event.location_name}</Text>
           </View>
         )}
         <View style={styles.detailRow}>
-          <Users size={15} color="#8A8A9A" />
+          <Users size={15} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
           <Text style={styles.detailText}>
             {participantCount}{event.max_participants > 0 ? `/${event.max_participants}` : ""} joined
           </Text>
@@ -168,65 +167,82 @@ export default function EventDetailScreen() {
         {error && <Text style={styles.errorText}>{error}</Text>}
 
         {conversationId && isJoined && (
-          <TouchableOpacity
-            style={styles.chatBtn}
+          <CutCornerButton
+            title="Open event chat"
+            variant="ghost"
+            corners="topRight"
+            icon={<MessageCircle size={16} color={colors.textPrimary} strokeWidth={ICON_STROKE} />}
             onPress={() => router.push(`/messages/group/${conversationId}` as any)}
-            activeOpacity={0.85}
-          >
-            <MessageCircle size={16} color="#FFFFFF" />
-            <Text style={styles.chatBtnText}>Open event chat</Text>
-          </TouchableOpacity>
+            style={styles.actionBtn}
+          />
         )}
 
-        <TouchableOpacity
-          style={[styles.joinBtn, isJoined ? styles.joinBtnActive : { backgroundColor: color }, full && !isJoined && { opacity: 0.5 }]}
-          onPress={handleToggle}
+        <CutCornerButton
+          title={isJoined ? "Going — tap to leave" : full ? "Event full" : "Join event"}
+          variant={isJoined ? "ghost" : "primary"}
+          corners="topRight"
           disabled={busy || (full && !isJoined)}
-          activeOpacity={0.85}
-        >
-          {busy ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : isJoined ? (
-            <>
-              <Check size={16} color="#FFFFFF" />
-              <Text style={styles.joinBtnText}>Going — tap to leave</Text>
-            </>
-          ) : (
-            <Text style={styles.joinBtnText}>{full ? "Event full" : "Join event"}</Text>
-          )}
-        </TouchableOpacity>
+          onPress={handleToggle}
+          icon={busy ? undefined : isJoined ? <Check size={16} color={colors.textPrimary} strokeWidth={ICON_STROKE} /> : undefined}
+        />
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  topTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF", flex: 1, textAlign: "center", marginHorizontal: 8 },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.spacingLg,
+    paddingBottom: spacing.spacingSm,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topTitle: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+    flex: 1,
+    textAlign: "center",
+    marginHorizontal: spacing.spacingSm,
+  },
 
-  emptyState: { flex: 1, alignItems: "center", gap: 8, paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
+  emptyState: { flex: 1, alignItems: "center", gap: spacing.spacingSm, paddingHorizontal: spacing.spacingXl },
+  emptyTitle: { ...textStyle("displayMd"), color: colors.textPrimary, textAlign: "center" },
+  emptyBody: { ...textStyle("body"), color: colors.textSecondary, textAlign: "center" },
 
-  headerCard: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 18 },
-  typeIcon: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  eventTitle: { fontSize: 19, fontWeight: "800", color: "#FFFFFF" },
-  rowSub: { fontSize: 12.5, color: "#8A8A9A", marginTop: 2 },
+  headerCard: { flexDirection: "row", alignItems: "center", gap: spacing.spacingMd, marginBottom: spacing.spacingXl },
+  typeIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.sharp,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+  },
+  eventTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
+  rowSub: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
 
-  detailRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
-  detailText: { fontSize: 14, color: "#D0D0DC" },
+  detailRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingSm, marginBottom: spacing.spacingMd },
+  detailText: { ...textStyle("body"), color: colors.textPrimary },
 
-  section: { marginTop: 8, marginBottom: 18 },
-  sectionLabel: { fontSize: 12, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.6, marginBottom: 8, textTransform: "uppercase" },
-  blurb: { color: "#B8B8C8", fontSize: 14, lineHeight: 20 },
+  section: { marginTop: spacing.spacingSm, marginBottom: spacing.spacingXl },
+  sectionLabel: { ...textStyle("caption"), color: colors.textSecondary, letterSpacing: 1, marginBottom: spacing.spacingSm },
+  blurb: { ...textStyle("body"), color: colors.textSecondary },
 
-  errorText: { color: "#EF4444", fontSize: 13, fontWeight: "600", marginBottom: 12 },
+  errorText: { ...textStyle("caption"), color: colors.racingRed, marginBottom: spacing.spacingMd },
 
-  chatBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderRadius: 14, paddingVertical: 14, marginBottom: 12 },
-  chatBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
-
-  joinBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, paddingVertical: 15 },
-  joinBtnActive: { backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
-  joinBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
+  actionBtn: { marginBottom: spacing.spacingMd },
 });

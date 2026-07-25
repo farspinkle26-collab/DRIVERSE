@@ -2,11 +2,17 @@ import React from "react";
 import { CarFront, Route as RouteIcon, Gauge, Flag } from "lucide-react-native";
 import { EventType } from "@/hooks/useEventsStore";
 
-export const EVENT_TYPES: { key: EventType; label: string; color: string }[] = [
-  { key: "meetup", label: "Meetup", color: "#8B5CF6" },
-  { key: "convoy", label: "Convoy", color: "#22C55E" },
-  { key: "cruise", label: "Cruise", color: "#3B82F6" },
-  { key: "race", label: "Track Day", color: "#EF4444" },
+/**
+ * Event type is shape, not hue — same rule the map screen established for
+ * place categories (MAP_SCREEN_REFERENCE §2). `EventTypeIcon` takes its
+ * colour from the caller (`textSecondary` normally, `racingRed` for live),
+ * not from the type.
+ */
+export const EVENT_TYPES: { key: EventType; label: string }[] = [
+  { key: "meetup", label: "Meetup" },
+  { key: "convoy", label: "Convoy" },
+  { key: "cruise", label: "Cruise" },
+  { key: "race", label: "Track Day" },
 ];
 
 export const START_OPTIONS: { key: string; label: string; getDate: () => Date }[] = [
@@ -43,19 +49,27 @@ export const CAPACITY_OPTIONS: { label: string; value: number }[] = [
   { label: "50", value: 50 },
 ];
 
-export function eventTypeColor(type: EventType): string {
-  return EVENT_TYPES.find((t) => t.key === type)?.color ?? "#8B5CF6";
-}
-
 export function eventTypeLabel(type: EventType): string {
   return EVENT_TYPES.find((t) => t.key === type)?.label ?? "Meetup";
 }
 
-export function EventTypeIcon({ type, size, color }: { type: EventType; size: number; color: string }) {
+/** Defaults to `MAP_GLYPH_STROKE` (2) for markers on the map surface; pass
+ *  1.5 (`CHROME_ICON_STROKE`) when the icon sits in chrome next to hairlines. */
+export function EventTypeIcon({
+  type,
+  size,
+  color,
+  strokeWidth = 2,
+}: {
+  type: EventType;
+  size: number;
+  color: string;
+  strokeWidth?: number;
+}) {
   switch (type) {
-    case "convoy": return <CarFront size={size} color={color} strokeWidth={2} />;
-    case "cruise": return <RouteIcon size={size} color={color} strokeWidth={2} />;
-    case "race": return <Gauge size={size} color={color} strokeWidth={2} />;
-    default: return <Flag size={size} color={color} strokeWidth={2} />;
+    case "convoy": return <CarFront size={size} color={color} strokeWidth={strokeWidth} />;
+    case "cruise": return <RouteIcon size={size} color={color} strokeWidth={strokeWidth} />;
+    case "race": return <Gauge size={size} color={color} strokeWidth={strokeWidth} />;
+    default: return <Flag size={size} color={color} strokeWidth={strokeWidth} />;
   }
 }

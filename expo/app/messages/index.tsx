@@ -3,22 +3,23 @@ import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   TextInput,
   Image,
   FlatList,
   RefreshControl,
   ActivityIndicator,
   Modal,
-  Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, Stack } from "expo-router";
 import { ArrowLeft, Search, SquarePen, MessageCircle, X, Send, Users } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useGroupChat } from "@/hooks/useGroupChatStore";
 import { supabase } from "@/lib/supabase";
+import { CutCornerBadge, CutCornerButton } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
 
 interface DirectMessageRow {
   id: string;
@@ -223,10 +224,9 @@ export default function MessagesScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={[styles.emptyState, { paddingTop: insets.top + 140 }]}>
-          <MessageCircle size={44} color="#3A3A4E" />
-          <Text style={styles.emptyTitle}>Sign in to see your messages</Text>
+          <MessageCircle size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+          <Text style={styles.emptyTitle}>SIGN IN TO SEE YOUR MESSAGES</Text>
         </View>
       </View>
     );
@@ -235,60 +235,65 @@ export default function MessagesScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
-          <ArrowLeft size={22} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.topTitle}>Messages</Text>
-        <TouchableOpacity onPress={openCompose} style={styles.iconBtn} hitSlop={8}>
-          <SquarePen size={20} color="#FF6B35" />
-        </TouchableOpacity>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.spacingSm }]}>
+        <Pressable style={styles.iconBtn} onPress={() => router.back()} hitSlop={spacing.spacingSm}>
+          <ArrowLeft size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
+        <Text style={styles.topTitle}>MESSAGES</Text>
+        <Pressable style={styles.iconBtn} onPress={openCompose} hitSlop={spacing.spacingSm}>
+          <SquarePen size={18} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
       </View>
 
       <View style={styles.searchWrap}>
-        <Search size={16} color="#5A5A6E" style={{ marginRight: 8 }} />
+        <Search size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={{ marginRight: spacing.spacingSm }} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search messages"
-          placeholderTextColor="#5A5A6E"
+          placeholderTextColor={colors.textSecondary}
           value={query}
           onChangeText={setQuery}
         />
         {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery("")}><X size={16} color="#5A5A6E" /></TouchableOpacity>
+          <Pressable onPress={() => setQuery("")} hitSlop={spacing.spacingSm}>
+            <X size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+          </Pressable>
         )}
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.racingRed} style={styles.loader} />
       ) : conversations.length === 0 ? (
         <View style={styles.emptyState}>
-          <MessageCircle size={44} color="#3A3A4E" />
-          <Text style={styles.emptyTitle}>No messages yet</Text>
-          <Text style={styles.emptySub}>Start a conversation with a friend</Text>
-          <TouchableOpacity style={styles.composeCta} onPress={openCompose} activeOpacity={0.85}>
-            <Text style={styles.composeCtaText}>New Message</Text>
-          </TouchableOpacity>
+          <MessageCircle size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+          <Text style={styles.emptyTitle}>NO MESSAGES YET</Text>
+          <Text style={styles.emptySub}>Tap New Message to start a conversation with a friend.</Text>
+          <CutCornerButton
+            title="New Message"
+            size="sm"
+            corners="topRight"
+            onPress={openCompose}
+            style={styles.composeCta}
+          />
         </View>
       ) : (
         <FlatList
           data={conversations}
           keyExtractor={(item) => item.key}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.spacingXl }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.racingRed} />}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
           renderItem={({ item }) => (
-            <TouchableOpacity
+            <Pressable
               style={styles.row}
-              activeOpacity={0.7}
               onPress={() => router.push(
                 (item.kind === "group" ? `/messages/group/${item.targetId}` : `/messages/${item.targetId}`) as any
               )}
             >
               <View style={styles.avatar}>
                 {item.kind === "group" ? (
-                  <Users size={20} color="#FF6B35" />
+                  <Users size={20} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 ) : item.avatar ? (
                   <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
                 ) : (
@@ -308,15 +313,18 @@ export default function MessagesScreen() {
                       : "No messages yet"}
                 </Text>
               </View>
-              <View style={{ alignItems: "flex-end", gap: 6 }}>
+              <View style={styles.rowMeta}>
                 <Text style={styles.rowTime}>{timeAgo(item.lastAt)}</Text>
                 {item.unread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeText}>{item.unread > 9 ? "9+" : item.unread}</Text>
-                  </View>
+                  <CutCornerBadge
+                    label={item.unread > 9 ? "9+" : String(item.unread)}
+                    numeric
+                    solid
+                    corners="topRight"
+                  />
                 )}
               </View>
-            </TouchableOpacity>
+            </Pressable>
           )}
         />
       )}
@@ -324,27 +332,28 @@ export default function MessagesScreen() {
       {/* ═══ COMPOSE MODAL: pick a friend to message ═══ */}
       <Modal visible={composeOpen} transparent animationType="slide" onRequestClose={() => setComposeOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setComposeOpen(false)} />
-        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
-          <View style={styles.modalHandle} />
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + spacing.spacingXl }]}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>New Message</Text>
-            <TouchableOpacity onPress={() => setComposeOpen(false)}><X size={20} color="#8A8A9A" /></TouchableOpacity>
+            <Text style={styles.modalTitle}>NEW MESSAGE</Text>
+            <Pressable onPress={() => setComposeOpen(false)} hitSlop={spacing.spacingSm}>
+              <X size={20} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+            </Pressable>
           </View>
           {friendsLoading ? (
-            <ActivityIndicator color="#FF6B35" style={{ marginVertical: 20 }} />
+            <ActivityIndicator color={colors.racingRed} style={styles.loaderSm} />
           ) : friends.length === 0 ? (
             <View style={styles.notifEmpty}>
-              <Send size={28} color="#3A3A4E" />
-              <Text style={styles.emptySub}>Add friends to start messaging them</Text>
+              <Send size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+              <Text style={styles.emptySub}>Add friends first — then they'll show up here to message.</Text>
             </View>
           ) : (
             friends.map((f) => (
-              <TouchableOpacity key={f.id} style={styles.friendRow} onPress={() => startConversation(f.id)} activeOpacity={0.7}>
+              <Pressable key={f.id} style={styles.friendRow} onPress={() => startConversation(f.id)}>
                 <View style={styles.avatar}>
                   {f.avatar ? <Image source={{ uri: f.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{f.name[0]?.toUpperCase()}</Text>}
                 </View>
                 <Text style={styles.rowName}>{f.name}</Text>
-              </TouchableOpacity>
+              </Pressable>
             ))
           )}
         </View>
@@ -354,36 +363,81 @@ export default function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 10 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  topTitle: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.spacingLg,
+    paddingBottom: spacing.spacingSm,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
 
-  searchWrap: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 8, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12, height: 42 },
-  searchInput: { flex: 1, color: "#FFFFFF", fontSize: 14 },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: spacing.spacingLg,
+    marginBottom: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    height: 42,
+  },
+  searchInput: { flex: 1, color: colors.textPrimary, ...textStyle("body") },
 
-  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 32 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF", marginTop: 8 },
-  emptySub: { fontSize: 13, color: "#8A8A9A", textAlign: "center" },
-  composeCta: { marginTop: 16, backgroundColor: "#FF6B35", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24 },
-  composeCtaText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.spacingSm, paddingHorizontal: spacing.spacingXl },
+  emptyTitle: { ...textStyle("displayMd"), color: colors.textPrimary, textAlign: "center", marginTop: spacing.spacingSm },
+  emptySub: { ...textStyle("body"), color: colors.textSecondary, textAlign: "center" },
+  composeCta: { marginTop: spacing.spacingMd },
+  loader: { marginTop: spacing.spacingXxl },
+  loaderSm: { marginVertical: spacing.spacingXl },
 
-  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  avatarImg: { width: 50, height: 50, borderRadius: 25 },
-  avatarText: { fontSize: 18, fontWeight: "800", color: "#FF6B35" },
-  rowName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
-  rowPreview: { fontSize: 13, color: "#8A8A9A", marginTop: 2 },
-  rowPreviewUnread: { color: "#E5E5EA", fontWeight: "600" },
-  rowTime: { fontSize: 11, color: "#5A5A6E" },
-  unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
-  unreadBadgeText: { fontSize: 11, fontWeight: "800", color: "#FFFFFF" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.spacingMd, paddingHorizontal: spacing.spacingLg, paddingVertical: spacing.spacingMd },
+  separator: { height: borderWidth.hairline, backgroundColor: colors.hairline, marginLeft: spacing.spacingLg + 50 + spacing.spacingMd },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: radius.circle,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  avatarImg: { width: 50, height: 50, borderRadius: radius.circle },
+  avatarText: { ...textStyle("displayMd", { fontSize: 18, lineHeight: 22 }), color: colors.textPrimary },
+  rowName: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }), color: colors.textPrimary },
+  rowPreview: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
+  rowPreviewUnread: { color: colors.textPrimary, fontFamily: fontFamily.bodyMedium },
+  rowMeta: { alignItems: "flex-end", gap: spacing.spacingXs },
+  rowTime: { ...textStyle("caption"), color: colors.textSecondary },
 
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
-  modalSheet: { backgroundColor: "#14141F", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, maxHeight: "70%" },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", alignSelf: "center", marginBottom: 14 },
-  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  modalTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  notifEmpty: { alignItems: "center", gap: 8, paddingVertical: 24 },
-  friendRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
+  modalSheet: {
+    backgroundColor: colors.carbonSurface,
+    borderTopWidth: borderWidth.hairline,
+    borderLeftWidth: borderWidth.hairline,
+    borderRightWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingXl,
+    paddingTop: spacing.spacingLg,
+    maxHeight: "70%",
+  },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.spacingMd },
+  modalTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
+  notifEmpty: { alignItems: "center", gap: spacing.spacingSm, paddingVertical: spacing.spacingXl },
+  friendRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingMd, paddingVertical: spacing.spacingSm },
 });

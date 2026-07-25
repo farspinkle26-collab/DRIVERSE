@@ -3,7 +3,7 @@ import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   TextInput,
   FlatList,
   KeyboardAvoidingView,
@@ -11,11 +11,12 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
-import { ArrowLeft, Send, Users } from "lucide-react-native";
+import { ArrowLeft, MessageCircle, Send, Users } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { supabase } from "@/lib/supabase";
+import { ICON_STROKE } from "@/components/TripCard";
+import { borderWidth, colors, radius, spacing, textStyle } from "@/constants/theme";
 
 interface GroupMessageRow {
   id: string;
@@ -134,16 +135,15 @@ export default function GroupChatScreen() {
       keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
     >
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
-          <ArrowLeft size={22} color="#FFFFFF" />
-        </TouchableOpacity>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.spacingSm }]}>
+        <Pressable style={styles.iconBtn} onPress={() => router.back()} hitSlop={spacing.spacingSm}>
+          <ArrowLeft size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
         <View style={styles.identity}>
           <Text style={styles.topTitle} numberOfLines={1}>{title}</Text>
           <View style={styles.memberRow}>
-            <Users size={11} color="#8A8A9A" />
+            <Users size={11} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
             <Text style={styles.memberCount}>{memberCount} member{memberCount === 1 ? "" : "s"}</Text>
           </View>
         </View>
@@ -151,17 +151,19 @@ export default function GroupChatScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#FF6B35" style={{ marginTop: 40 }} />
+        <ActivityIndicator color={colors.racingRed} style={styles.loader} />
       ) : (
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 8, flexGrow: 1, justifyContent: messages.length === 0 ? "center" : "flex-start" }}
+          contentContainerStyle={{ padding: spacing.spacingLg, paddingBottom: spacing.spacingSm, flexGrow: 1, justifyContent: messages.length === 0 ? "center" : "flex-start" }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Say hello to the group 👋</Text>
+              <MessageCircle size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+              <Text style={styles.emptyTitle}>NO MESSAGES YET</Text>
+              <Text style={styles.emptyBody}>Send the first message to the group.</Text>
             </View>
           }
           renderItem={({ item }) => {
@@ -171,7 +173,7 @@ export default function GroupChatScreen() {
                 <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
                   {!mine && <Text style={styles.senderName}>{senderNames[item.sender_id] ?? "Driver"}</Text>}
                   <Text style={styles.bubbleText}>{item.content}</Text>
-                  <Text style={[styles.bubbleTime, mine && { color: "rgba(255,255,255,0.7)" }]}>
+                  <Text style={styles.bubbleTime}>
                     {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </Text>
                 </View>
@@ -181,51 +183,114 @@ export default function GroupChatScreen() {
         />
       )}
 
-      <View style={[styles.inputRow, { paddingBottom: insets.bottom + 10 }]}>
+      <View style={[styles.inputRow, { paddingBottom: insets.bottom + spacing.spacingSm }]}>
         <TextInput
           style={styles.input}
           placeholder="Message the group..."
-          placeholderTextColor="#5A5A6E"
+          placeholderTextColor={colors.textSecondary}
           value={input}
           onChangeText={setInput}
           multiline
           maxLength={1000}
         />
-        <TouchableOpacity
-          style={[styles.sendBtn, !input.trim() && { opacity: 0.4 }]}
+        <Pressable
+          style={[styles.sendBtn, !input.trim() && styles.disabled]}
           onPress={handleSend}
           disabled={!input.trim() || sending}
         >
-          {sending ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Send size={18} color="#FFFFFF" />}
-        </TouchableOpacity>
+          {sending ? <ActivityIndicator size="small" color={colors.voidBlack} /> : <Send size={18} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
+        </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
-  topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    paddingHorizontal: spacing.spacingLg,
+    paddingBottom: spacing.spacingSm,
+    borderBottomWidth: borderWidth.hairline,
+    borderBottomColor: colors.hairline,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   identity: { flex: 1 },
-  topTitle: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  memberRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  memberCount: { fontSize: 11, color: "#8A8A9A" },
+  topTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
+  memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs, marginTop: spacing.spacingXs },
+  memberCount: { ...textStyle("caption"), color: colors.textSecondary },
 
-  emptyState: { alignItems: "center", justifyContent: "center" },
-  emptyTitle: { color: "#8A8A9A", fontSize: 14 },
+  loader: { marginTop: spacing.spacingXxl },
 
-  bubbleRow: { marginBottom: 10, flexDirection: "row" },
+  emptyState: { alignItems: "center", gap: spacing.spacingSm },
+  emptyTitle: { ...textStyle("displayMd"), color: colors.textPrimary, textAlign: "center" },
+  emptyBody: { ...textStyle("body"), color: colors.textSecondary, textAlign: "center" },
+
+  bubbleRow: { marginBottom: spacing.spacingSm, flexDirection: "row" },
   bubbleRowMine: { justifyContent: "flex-end" },
   bubbleRowTheirs: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "78%", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
-  bubbleMine: { backgroundColor: "#FF6B35", borderBottomRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: "rgba(255,255,255,0.08)", borderBottomLeftRadius: 4 },
-  senderName: { color: "#FF6B35", fontSize: 11, fontWeight: "700", marginBottom: 2 },
-  bubbleText: { color: "#FFFFFF", fontSize: 15, lineHeight: 20 },
-  bubbleTime: { color: "rgba(255,255,255,0.4)", fontSize: 10, marginTop: 4, alignSelf: "flex-end" },
+  bubble: {
+    maxWidth: "78%",
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+  },
+  bubbleMine: { borderColor: colors.racingRed },
+  bubbleTheirs: { borderColor: colors.hairline },
+  senderName: {
+    ...textStyle("displayMd", { fontSize: 12, lineHeight: 15 }),
+    color: colors.textSecondary,
+    marginBottom: spacing.spacingXs,
+  },
+  bubbleText: { ...textStyle("body"), color: colors.textPrimary },
+  bubbleTime: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    marginTop: spacing.spacingXs,
+    alignSelf: "flex-end",
+  },
 
-  inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, paddingHorizontal: 16, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
-  input: { flex: 1, maxHeight: 100, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 16, paddingVertical: 10, color: "#FFFFFF", fontSize: 15 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: spacing.spacingSm,
+    paddingHorizontal: spacing.spacingLg,
+    paddingTop: spacing.spacingSm,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+  },
+  input: {
+    flex: 1,
+    maxHeight: 100,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    color: colors.textPrimary,
+    ...textStyle("body"),
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.racingRed,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  disabled: { opacity: 0.4 },
 });
