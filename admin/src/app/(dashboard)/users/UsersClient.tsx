@@ -14,11 +14,12 @@ import {
   Legend,
   Cell,
 } from "recharts";
-import { SectionHeader, StatCard, ChartCard, Banner } from "@/components/ui";
+import { SectionHeader, StatCard, ChartCard, Banner, Badge } from "@/components/ui";
 import { RangeToggle } from "@/components/RangeToggle";
 import { RefreshButton } from "@/components/RefreshButton";
 import { DataTable, Column } from "@/components/DataTable";
-import { SERIES, AXIS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
+import { DateCell } from "@/components/DateCell";
+import { SERIES, STATUS, AXIS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
 import { RangeKey } from "@/lib/dates";
 import { fmtInt, fmtDate } from "@/lib/format";
 import {
@@ -61,8 +62,8 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
     { key: "name", header: "Name / handle", render: (r) => r.name || <span className="text-ink-muted">—</span>, sortValue: (r) => (r.name || "").toLowerCase() },
     { key: "role", header: "Role", render: (r) => <RolePill role={r.role} />, sortValue: (r) => r.role || "" },
     { key: "verif", header: "Verification", render: (r) => <VerifPill status={r.verification_status} />, sortValue: (r) => r.verification_status || "" },
-    { key: "joined", header: "Joined", align: "right", render: (r) => fmtDate(r.created_at), sortValue: (r) => new Date(r.created_at ?? 0).getTime() },
-    { key: "id", header: "ID", render: (r) => <span className="text-ink-muted">{r.id.slice(0, 8)}</span> },
+    { key: "joined", header: "Joined", sortValue: (r) => new Date(r.created_at ?? 0).getTime(), csvValue: (r) => fmtDate(r.created_at), render: (r) => <DateCell value={r.created_at} /> },
+    { key: "id", header: "ID", className: "font-mono text-ink-muted", render: (r) => r.id.slice(0, 8) },
   ];
 
   return (
@@ -144,8 +145,16 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
         </ChartCard>
       </div>
 
-      <ChartCard title="Recently joined users" subtitle="Sortable · paginated">
-        <DataTable columns={columns} rows={recent} pageSize={12} initialSort={{ key: "joined", dir: "desc" }} />
+      <ChartCard title="Recently joined users" subtitle="Sortable · paginated · searchable">
+        <DataTable
+          columns={columns}
+          rows={recent}
+          pageSize={25}
+          initialSort={{ key: "joined", dir: "desc" }}
+          searchValue={(r) => `${r.name ?? ""} ${r.id}`}
+          searchPlaceholder="Search name or ID…"
+          csvFilename="users"
+        />
       </ChartCard>
     </div>
   );
@@ -153,18 +162,16 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
 
 function RolePill({ role }: { role: string | null }) {
   if (!role) return <span className="text-ink-muted">—</span>;
-  const color = ROLE_COLOR[role] ?? SERIES[0];
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-      {role}
-    </span>
-  );
+  return <Badge label={role} color={ROLE_COLOR[role] ?? SERIES[0]} dot />;
 }
+
+const VERIF_COLOR: Record<string, string> = {
+  verified: STATUS.good,
+  rejected: STATUS.critical,
+  pending: STATUS.warning,
+};
 
 function VerifPill({ status }: { status: string | null }) {
   const s = status || "unknown";
-  const color =
-    s === "verified" ? "text-status-good" : s === "rejected" ? "text-status-critical" : "text-ink-secondary";
-  return <span className={color}>{s}</span>;
+  return <Badge label={s} color={VERIF_COLOR[s] ?? AXIS} />;
 }

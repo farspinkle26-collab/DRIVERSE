@@ -123,7 +123,7 @@ export function EventsClient({
       </div>
 
       <ChartCard title="Most active event organizers" subtitle="By events created (all time)">
-        <DataTable columns={orgCols} rows={organizers} pageSize={10} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No events yet." />
+        <DataTable columns={orgCols} rows={organizers} pageSize={25} initialSort={{ key: "count", dir: "desc" }} emptyMessage="No events yet." csvFilename="event-organizers" />
       </ChartCard>
     </div>
   );
