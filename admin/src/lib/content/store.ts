@@ -11,12 +11,16 @@ import {
 import {
   PILLARS,
   PLATFORMS,
+  POST_STATUSES,
+  WEEKDAY_NAMES,
   type AccountData,
   type Pillar,
   type Platform,
   type Post,
   type PostBody,
+  type PostFormInput,
   type PostFrontmatter,
+  type PostStatus,
 } from "./types";
 
 // ── Derived metrics ────────────────────────────────────────────────────────
@@ -58,6 +62,11 @@ function coercePlatform(v: Scalar | undefined): Platform {
 function coercePillar(v: Scalar | undefined): Pillar | null {
   return PILLARS.includes(v as Pillar) ? (v as Pillar) : null;
 }
+// Legacy files written before `status` existed have real metrics, so they
+// default to "published" rather than silently vanishing from every chart.
+function coerceStatus(v: Scalar | undefined): PostStatus {
+  return POST_STATUSES.includes(v as PostStatus) ? (v as PostStatus) : "published";
+}
 
 function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
   const counters = {
@@ -71,6 +80,7 @@ function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
   };
   const derived = computeDerived(counters);
   const fm: PostFrontmatter = {
+    status: coerceStatus(raw.status),
     platform: coercePlatform(raw.platform),
     post_id: str(raw.post_id),
     permalink: str(raw.permalink),
@@ -102,6 +112,7 @@ function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
 
 // Canonical frontmatter key order for writes — keeps files diff-friendly.
 const FM_ORDER: string[] = [
+  "status",
   "platform",
   "post_id",
   "permalink",
@@ -127,6 +138,25 @@ const FM_ORDER: string[] = [
   "hold_rate",
 ];
 
+// Metrics don't exist yet for a Scheduled post — omit them from the file
+// entirely rather than writing a wall of zeros.
+const METRIC_KEYS = new Set([
+  "duration_seconds",
+  "views",
+  "reach",
+  "likes",
+  "comments_total",
+  "comments_seeded",
+  "comments_organic_pickup",
+  "saves",
+  "shares",
+  "avg_watch_time",
+  "new_follows",
+  "save_rate",
+  "engagement_rate",
+  "hold_rate",
+]);
+
 function frontmatterToEntries(
   fm: PostFrontmatter,
 ): [string, Scalar | undefined][] {
@@ -134,6 +164,7 @@ function frontmatterToEntries(
   const merged: PostFrontmatter = { ...fm, ...derived };
   const entries: [string, Scalar | undefined][] = [];
   for (const key of FM_ORDER) {
+    if (merged.status === "scheduled" && METRIC_KEYS.has(key)) continue;
     entries.push([key, merged[key] as Scalar | undefined]);
   }
   // Append optional/extension keys not in the canonical order.
@@ -248,6 +279,103 @@ export async function writePost(post: Post): Promise<void> {
   await fs.mkdir(postsDir(), { recursive: true });
   const file = path.join(postsDir(), `${post.slug}.md`);
   await fs.writeFile(file, serializePost(post), "utf8");
+}
+
+function weekdayFromDate(date: string): string {
+  const d = new Date(date + "T12:00:00Z");
+  if (Number.isNaN(d.getTime())) return "";
+  return WEEKDAY_NAMES[d.getUTCDay()];
+}
+
+function slugBase(input: PostFormInput): string {
+  const pillarPart = (input.pillar ?? "post").replace(/_/g, "-");
+  return `${input.date || "undated"}-${pillarPart}-${input.platform}`;
+}
+
+/** A slug that doesn't collide with `taken`, appending -2, -3, … as needed. */
+export function uniqueSlug(input: PostFormInput, taken: Set<string>): string {
+  const base = slugBase(input);
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
+/**
+ * Build a Post from the Add/Edit form. When `existing` is given (Edit),
+ * identity (slug/post_id) and non-form body sections are preserved and
+ * metrics only change if the new status is "published". When creating a
+ * Scheduled post, metric counters are simply left at 0 and never written
+ * (see METRIC_KEYS above).
+ */
+export function buildPostFromForm(
+  input: PostFormInput,
+  existing: Post | null,
+  newSlug: string,
+): Post {
+  const n = (v: number | undefined) => (Number.isFinite(v) ? (v as number) : 0);
+  const counters =
+    input.status === "published"
+      ? {
+          views: n(input.views),
+          likes: n(input.likes),
+          comments_total: n(input.comments_total),
+          saves: n(input.saves),
+          shares: n(input.shares),
+          avg_watch_time: n(input.avg_watch_time),
+          duration_seconds: n(input.duration_seconds),
+        }
+      : {
+          views: 0,
+          likes: 0,
+          comments_total: 0,
+          saves: 0,
+          shares: 0,
+          avg_watch_time: 0,
+          duration_seconds: 0,
+        };
+  const derived = computeDerived(counters);
+  const slug = existing?.slug ?? newSlug;
+  const fm: PostFrontmatter = {
+    status: input.status,
+    platform: input.platform,
+    post_id: existing?.frontmatter.post_id || slug,
+    permalink: input.permalink || "",
+    date: input.date,
+    time: input.time,
+    weekday: weekdayFromDate(input.date),
+    pillar: input.pillar,
+    format: input.format,
+    feature_shown: input.feature_shown || "none",
+    ...counters,
+    reach: input.status === "published" ? n(input.reach) : 0,
+    comments_seeded: input.status === "published" ? n(input.comments_seeded) : 0,
+    comments_organic_pickup:
+      input.status === "published" ? n(input.comments_organic_pickup) : 0,
+    new_follows: input.status === "published" ? n(input.new_follows) : 0,
+    ...derived,
+  };
+  if (existing?.frontmatter.is_repost) fm.is_repost = existing.frontmatter.is_repost;
+  if (existing?.frontmatter.source) fm.source = existing.frontmatter.source;
+  if (existing?.frontmatter.pillar_fit_flag) {
+    fm.pillar_fit_flag = existing.frontmatter.pillar_fit_flag;
+  }
+  if (existing?.frontmatter.enriched_at) fm.enriched_at = existing.frontmatter.enriched_at;
+
+  const body: PostBody = {
+    ...(existing?.body ?? {
+      script: "",
+      transcript: "",
+      onScreenText: "",
+      caption: "",
+      takeaway: "",
+      retention: "",
+      extra: "",
+    }),
+  };
+  body.caption = input.caption ?? body.caption;
+
+  return { slug, frontmatter: fm, body };
 }
 
 // ── account.json ───────────────────────────────────────────────────────────

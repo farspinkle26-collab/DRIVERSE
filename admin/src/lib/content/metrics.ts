@@ -36,9 +36,25 @@ export function sum(xs: number[]): number {
 }
 
 // ── Analysis population ──────────────────────────────────────────────────────
-/** Posts eligible for learning aggregates: reposts are always excluded. */
+/** Posts eligible for learning aggregates: reposts and anything not yet
+ *  Published (no real metrics) are always excluded. */
 export function analysisPosts(posts: Post[]): Post[] {
-  return posts.filter((p) => !p.frontmatter.is_repost);
+  return posts.filter((p) => !p.frontmatter.is_repost && p.frontmatter.status === "published");
+}
+
+export function publishedPosts(posts: Post[]): Post[] {
+  return posts.filter((p) => p.frontmatter.status === "published");
+}
+
+/** Scheduled (upcoming) posts, soonest first. */
+export function scheduledPosts(posts: Post[]): Post[] {
+  return posts
+    .filter((p) => p.frontmatter.status === "scheduled")
+    .sort((a, b) =>
+      `${a.frontmatter.date}T${a.frontmatter.time || "00:00"}`.localeCompare(
+        `${b.frontmatter.date}T${b.frontmatter.time || "00:00"}`,
+      ),
+    );
 }
 
 /** Ranking population: analysis posts that also clear the min-views floor. */

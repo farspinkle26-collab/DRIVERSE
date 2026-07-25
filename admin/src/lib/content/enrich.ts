@@ -19,6 +19,7 @@ const SETTLE_DAYS = 2;
 
 /** A post's metrics have "settled" enough to write a Takeaway. */
 export function isSettled(post: Post, now = new Date()): boolean {
+  if (post.frontmatter.status !== "published") return false;
   if (!(post.frontmatter.views > 0)) return false;
   const d = new Date(post.frontmatter.date + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return false;

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { readPost } from "@/lib/content/store";
-import { PILLAR_LABELS } from "@/lib/content/types";
+import { PILLAR_LABELS, POST_STATUS_LABELS } from "@/lib/content/types";
 import { renderMarkdown } from "@/lib/content/markdown";
 import { fmtInt, fmtDate } from "@/lib/format";
-import { Card, SectionHeader } from "@/components/ui";
+import { fmtAbsoluteWIB } from "@/lib/dates";
+import { Card, SectionHeader, Badge } from "@/components/ui";
+import { STATUS, AXIS } from "@/components/chartTheme";
+import { EditPostButton } from "@/components/EditPostButton";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,7 @@ export default async function PostDetailPage({ params }: { params: { id: string 
   const fm = post.frontmatter;
 
   const rows: [string, string][] = [
+    ["Status", POST_STATUS_LABELS[fm.status]],
     ["Platform", fm.platform],
     ["Post ID", fm.post_id],
     ["Date / time", `${fmtDate(fm.date)} ${fm.time} (${fm.weekday})`],
@@ -56,11 +60,24 @@ export default async function PostDetailPage({ params }: { params: { id: string 
         title={`${fm.pillar ? PILLAR_LABELS[fm.pillar] : "Post"} · ${fm.post_id}`}
         description={fm.permalink || undefined}
         right={
-          <Link href="/content" className="rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:text-ink-primary">
-            ← Back
-          </Link>
+          <div className="flex items-center gap-2">
+            <EditPostButton post={post} />
+            <Link href="/content" className="rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:text-ink-primary">
+              ← Back
+            </Link>
+          </div>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge label={POST_STATUS_LABELS[fm.status]} color={fm.status === "published" ? STATUS.good : AXIS} />
+        <span
+          className="text-lg font-semibold tabular tracking-tight"
+          title={fmtAbsoluteWIB(`${fm.date}T${fm.time || "00:00"}:00Z`)}
+        >
+          {fmtDate(fm.date)} · {fm.time} · {fm.weekday}
+        </span>
+      </div>
 
       {fm.permalink && (
         <a href={fm.permalink} target="_blank" rel="noopener noreferrer" className="text-sm text-series-1 hover:underline">

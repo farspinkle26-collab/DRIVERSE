@@ -270,6 +270,7 @@ export function applyIngest(
   const base: PostFrontmatter =
     existing?.frontmatter ??
     ({
+      status: "published",
       platform: metrics.platform,
       post_id: metrics.post_id,
       permalink: "",
@@ -295,7 +296,7 @@ export function applyIngest(
       hold_rate: 0,
     } as PostFrontmatter);
 
-  const fm: PostFrontmatter = { ...base };
+  const fm: PostFrontmatter = { ...base, status: "published" };
   const set = <K extends keyof IngestedMetrics>(k: K, target: keyof PostFrontmatter) => {
     const v = metrics[k];
     if (v !== undefined && v !== null) (fm as Record<string, unknown>)[target] = v;
