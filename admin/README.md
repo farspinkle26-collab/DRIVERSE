@@ -86,6 +86,36 @@ states for sparse data, and a manual refresh.
 
 ---
 
+## Content dashboard (`/content`)
+
+A second route in this same app (same auth gate, same deploy) for **organic
+marketing** (Instagram + TikTok short-form). Unlike the Supabase sections above,
+its data source is a **git-committed Markdown store** at the repo root
+(`../content/`), not the database — see `content/README.md` for the full schema,
+the manual-ingestion limitation, the enrichment/learning pipeline, and how to
+schedule runs.
+
+- **Tabs:** Overview (stat cards, views/saves time series, sortable post grid),
+  Analytics (save rate by pillar, seeded-vs-organic pickup, 30-day funnel,
+  weekday×daypart heatmap, demographics), Insights & Strategy (Takeaway feed,
+  rendered `what-works.md`, a regenerated "Next 2 Weeks" strategy card).
+- **Also:** per-post detail pages, a **Scriptor** (`/content/scriptor`), and a
+  manual **ingest** form (`/content/ingest`).
+- **Pipeline:** `POST /api/content/run` (enrich settled posts + regenerate the
+  fenced section of `what-works.md`). Trigger it with `npm run content:run`
+  (needs `BASE_URL` + `ADMIN_PASSWORD`).
+- **Model calls** are optional: set `ANTHROPIC_API_KEY` to enable
+  classification, Takeaways, the strategy narrative, the Scriptor, and vision
+  reads; without it the pipeline falls back to deterministic, numbers-grounded
+  output. See `.env.example`.
+
+> Because the store lives one level above this app, `next.config.mjs` sets
+> `outputFileTracingRoot`/`outputFileTracingIncludes` so the `content/` files are
+> bundled into the serverless functions on Vercel. If you deploy with a
+> different root, set `CONTENT_DIR` to an absolute path.
+
+---
+
 ## Known data gaps (flagged in-app)
 
 These need a schema/app change before the corresponding metric is exact — each
