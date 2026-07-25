@@ -4,7 +4,7 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
+  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -14,6 +14,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X, Globe, Lock, Users, Flag } from "lucide-react-native";
 import { useParty } from "@/hooks/usePartyStore";
+import { CutCornerButton } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
 
 interface CreateConvoyModalProps {
   visible: boolean;
@@ -73,17 +76,17 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.backdrop}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetWrap}>
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.spacingLg }]}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
                 <View style={styles.headerIcon}>
-                  <Flag size={18} color="#3B82F6" />
+                  <Flag size={18} color={colors.racingRed} strokeWidth={ICON_STROKE} />
                 </View>
-                <Text style={styles.headerTitle}>Start a Convoy</Text>
+                <Text style={styles.headerTitle}>START A CONVOY</Text>
               </View>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose} activeOpacity={0.7}>
-                <X size={18} color="#8A8A9A" />
-              </TouchableOpacity>
+              <Pressable style={styles.closeBtn} onPress={handleClose}>
+                <X size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+              </Pressable>
             </View>
 
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -91,7 +94,7 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
               <TextInput
                 style={styles.input}
                 placeholder="Midnight Runners"
-                placeholderTextColor="#4A4A5E"
+                placeholderTextColor={colors.textSecondary}
                 value={name}
                 onChangeText={setName}
                 maxLength={30}
@@ -101,7 +104,7 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
               <TextInput
                 style={[styles.input, styles.inputMultiline]}
                 placeholder="What's this crew about?"
-                placeholderTextColor="#4A4A5E"
+                placeholderTextColor={colors.textSecondary}
                 value={description}
                 onChangeText={setDescription}
                 multiline
@@ -110,22 +113,20 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
 
               <Text style={styles.label}>Who can join</Text>
               <View style={styles.chipRow}>
-                <TouchableOpacity
+                <Pressable
                   style={[styles.chip, visibility === "public" && styles.chipActive]}
                   onPress={() => setVisibility("public")}
-                  activeOpacity={0.7}
                 >
-                  <Globe size={14} color={visibility === "public" ? "#3B82F6" : "#6A6A7E"} />
-                  <Text style={[styles.chipText, visibility === "public" && { color: "#3B82F6" }]}>Anyone can join</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                  <Globe size={14} color={visibility === "public" ? colors.textPrimary : colors.textSecondary} strokeWidth={ICON_STROKE} />
+                  <Text style={[styles.chipText, visibility === "public" && styles.chipTextActive]}>Anyone can join</Text>
+                </Pressable>
+                <Pressable
                   style={[styles.chip, visibility === "invite_only" && styles.chipActive]}
                   onPress={() => setVisibility("invite_only")}
-                  activeOpacity={0.7}
                 >
-                  <Lock size={14} color={visibility === "invite_only" ? "#3B82F6" : "#6A6A7E"} />
-                  <Text style={[styles.chipText, visibility === "invite_only" && { color: "#3B82F6" }]}>Invite only</Text>
-                </TouchableOpacity>
+                  <Lock size={14} color={visibility === "invite_only" ? colors.textPrimary : colors.textSecondary} strokeWidth={ICON_STROKE} />
+                  <Text style={[styles.chipText, visibility === "invite_only" && styles.chipTextActive]}>Invite only</Text>
+                </Pressable>
               </View>
 
               <Text style={styles.label}>Max members</Text>
@@ -133,36 +134,28 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
                 {CAPACITY_OPTIONS.map((o) => {
                   const active = maxMembers === o.value;
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={o.label}
                       style={[styles.chip, active && styles.chipActive]}
                       onPress={() => setMaxMembers(o.value)}
-                      activeOpacity={0.7}
                     >
-                      <Users size={13} color={active ? "#3B82F6" : "#6A6A7E"} />
-                      <Text style={[styles.chipText, active && { color: "#3B82F6" }]}>{o.label}</Text>
-                    </TouchableOpacity>
+                      <Users size={13} color={active ? colors.textPrimary : colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.label}</Text>
+                    </Pressable>
                   );
                 })}
               </View>
 
               {error && <Text style={styles.errorText}>{error}</Text>}
 
-              <TouchableOpacity
-                style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
-                onPress={handleSubmit}
+              <CutCornerButton
+                title="Create Convoy"
+                corners="topRight"
                 disabled={!canSubmit}
-                activeOpacity={0.75}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Flag size={18} color="#FFFFFF" />
-                    <Text style={styles.submitBtnText}>Create Convoy</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                icon={submitting ? undefined : <Flag size={18} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
+                onPress={handleSubmit}
+                style={styles.submitBtn}
+              />
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -175,41 +168,74 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "flex-end" },
   sheetWrap: { justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#0E0E18",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 20,
-    paddingTop: 16,
+    backgroundColor: colors.carbonSurface,
+    borderTopWidth: borderWidth.hairline,
+    borderLeftWidth: borderWidth.hairline,
+    borderRightWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingXl,
+    paddingTop: spacing.spacingLg,
     maxHeight: "88%",
   },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.spacingMd },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.spacingSm },
   headerIcon: {
-    width: 34, height: 34, borderRadius: 17, justifyContent: "center", alignItems: "center",
-    backgroundColor: "rgba(59,130,246,0.18)", borderWidth: 1, borderColor: "rgba(59,130,246,0.5)",
+    width: 34,
+    height: 34,
+    borderRadius: radius.sharp,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
-  headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "700" },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: "rgba(255, 255, 255, 0.06)", justifyContent: "center", alignItems: "center" },
-  label: { color: "#8A8A9A", fontSize: 12, fontWeight: "600", marginTop: 14, marginBottom: 8, letterSpacing: 0.4, textTransform: "uppercase" },
+  headerTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  label: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
+    marginTop: spacing.spacingLg,
+    marginBottom: spacing.spacingSm,
+  },
   input: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.08)",
-    color: "#FFFFFF", fontSize: 15, paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingMd,
+    ...textStyle("body"),
   },
   inputMultiline: { minHeight: 60, textAlignVertical: "top" },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.spacingSm },
   chip: {
-    flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18,
-    borderWidth: 1, borderColor: "rgba(255, 255, 255, 0.12)", backgroundColor: "rgba(255, 255, 255, 0.04)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
   },
-  chipActive: { borderColor: "#3B82F6", backgroundColor: "rgba(59,130,246,0.12)" },
-  chipText: { color: "#8A8A9A", fontSize: 13, fontWeight: "600" },
-  errorText: { color: "#EF4444", fontSize: 13, fontWeight: "600", marginTop: 12 },
-  submitBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#3B82F6",
-    borderRadius: 16, paddingVertical: 15, marginTop: 20,
+  chipActive: { borderColor: colors.textPrimary, backgroundColor: colors.hairline },
+  chipText: {
+    ...textStyle("caption", { fontFamily: fontFamily.bodyMedium }),
+    color: colors.textSecondary,
   },
-  submitBtnDisabled: { opacity: 0.4 },
-  submitBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: 0.4 },
+  chipTextActive: { color: colors.textPrimary },
+  errorText: { ...textStyle("caption"), color: colors.racingRed, marginTop: spacing.spacingMd },
+  submitBtn: { marginTop: spacing.spacingXl, width: "100%" },
 });

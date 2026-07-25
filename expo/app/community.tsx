@@ -3,13 +3,12 @@ import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import {
   ArrowLeft,
@@ -26,14 +25,54 @@ import {
 import { useAuth } from "@/hooks/useAuthStore";
 import { useEvents } from "@/hooks/useEventsStore";
 import { useParty } from "@/hooks/usePartyStore";
-import { eventTypeColor, EventTypeIcon } from "@/components/EventMeta";
+import { EventTypeIcon } from "@/components/EventMeta";
 import CreateConvoyModal from "@/components/CreateConvoyModal";
-
-const ACCENT = "#3B82F6"; // Community blue (matches the Drive feature card)
+import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import {
+  alpha,
+  borderWidth,
+  colors,
+  cut,
+  fontFamily,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 
 function formatWhen(startsAt: string): string {
   const d = new Date(startsAt);
   return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function Message({
+  icon,
+  heading,
+  body,
+  action,
+}: {
+  icon: React.ReactNode;
+  heading: string;
+  body: string;
+  action?: { label: string; onPress: () => void };
+}) {
+  return (
+    <View style={styles.message}>
+      {icon}
+      <Text style={styles.messageHeading}>{heading}</Text>
+      <Text style={styles.messageBody}>{body}</Text>
+      {action ? (
+        <CutCornerButton
+          title={action.label}
+          variant="outline"
+          size="sm"
+          corners="topRight"
+          onPress={action.onPress}
+          style={styles.messageAction}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 export default function CommunityScreen() {
@@ -112,24 +151,19 @@ export default function CommunityScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={8}>
-          <ArrowLeft size={22} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.topTitle}>Community</Text>
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.spacingSm }]}>
+        <Pressable style={styles.iconBtn} onPress={() => router.back()} hitSlop={spacing.spacingSm}>
+          <ArrowLeft size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+        </Pressable>
+        <Text style={styles.topTitle}>COMMUNITY</Text>
         {tab === "convoy" ? (
-          <TouchableOpacity
-            onPress={handleCreate}
-            style={[styles.iconBtn, { backgroundColor: ACCENT + "26" }]}
-            hitSlop={8}
-          >
-            <Plus size={20} color={ACCENT} />
-          </TouchableOpacity>
+          <Pressable style={styles.iconBtn} onPress={handleCreate} hitSlop={spacing.spacingSm}>
+            <Plus size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+          </Pressable>
         ) : (
-          <View style={styles.iconBtn} />
+          <View style={{ width: 40 }} />
         )}
       </View>
 
@@ -140,18 +174,20 @@ export default function CommunityScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: 20, paddingTop: 8, paddingBottom: insets.bottom + 40 }}
+        contentContainerStyle={{ padding: spacing.spacingLg, paddingBottom: insets.bottom + spacing.spacingXxl }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.racingRed} />}
       >
         {!isAuthenticated ? (
-          <View style={styles.emptyState}>
-            <Users size={28} color={ACCENT + "60"} />
-            <Text style={styles.emptyText}>Sign in to join the community</Text>
-          </View>
+          <Message
+            icon={<Users size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
+            heading="SIGN IN TO JOIN THE COMMUNITY"
+            body="Convoys and events live on your account."
+            action={{ label: "Sign In", onPress: () => router.push("/login" as any) }}
+          />
         ) : (joinError || locationError) ? (
           <View style={styles.errorBanner}>
-            <AlertCircle size={14} color="#EF4444" />
+            <AlertCircle size={14} color={colors.racingRed} strokeWidth={ICON_STROKE} />
             <Text style={styles.errorBannerText}>{joinError ?? locationError}</Text>
           </View>
         ) : null}
@@ -161,89 +197,97 @@ export default function CommunityScreen() {
             {party && (
               <View style={styles.headerRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Your convoy</Text>
+                  <Text style={styles.sectionTitle}>YOUR CONVOY</Text>
                   <Text style={styles.sectionSub}>Riding with {members.length} driver{members.length === 1 ? "" : "s"}</Text>
                 </View>
               </View>
             )}
             {party && (
-              <TouchableOpacity style={styles.card} activeOpacity={0.8} onPress={() => router.push(`/convoy/${party.id}` as any)}>
-                <View style={styles.convoyTop}>
-                  <View style={[styles.colorDot, { backgroundColor: party.color }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{party.name}</Text>
-                    {!!party.description && <Text style={styles.cardDesc}>{party.description}</Text>}
+              <Pressable onPress={() => router.push(`/convoy/${party.id}` as any)}>
+                <CutCornerSurface
+                  fill={colors.carbonSurface}
+                  borderColor={colors.hairline}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.md}
+                  corners="topRight"
+                  contentStyle={styles.card}
+                >
+                  <View style={styles.cardTop}>
+                    <View style={[styles.colorDot, { backgroundColor: party.color }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle}>{party.name}</Text>
+                      {!!party.description && <Text style={styles.cardDesc}>{party.description}</Text>}
+                    </View>
+                    <Pressable onPress={() => router.push("/convoy" as any)} hitSlop={spacing.spacingSm}>
+                      <Settings size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    </Pressable>
                   </View>
-                  <TouchableOpacity onPress={() => router.push("/convoy" as any)} hitSlop={8}>
-                    <Settings size={18} color="#8A8A9A" />
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.convoyMeta}>
-                  <View style={styles.metaItem}>
-                    <Users size={13} color="#8A8A9A" />
-                    <Text style={styles.metaText}>{members.length} member{members.length === 1 ? "" : "s"}</Text>
+                  <View style={styles.cardMeta}>
+                    <View style={styles.metaItem}>
+                      <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      <Text style={styles.metaText}>{members.length} member{members.length === 1 ? "" : "s"}</Text>
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
+                </CutCornerSurface>
+              </Pressable>
             )}
 
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>{party ? "Other convoys" : "Join a convoy"}</Text>
+                <Text style={styles.sectionTitle}>{party ? "OTHER CONVOYS" : "JOIN A CONVOY"}</Text>
                 <Text style={styles.sectionSub}>Ride together — joined members are marked special</Text>
               </View>
             </View>
 
             {loadingPublicParties && browsableConvoys.length === 0 ? (
-              <ActivityIndicator color={ACCENT} style={{ marginTop: 12 }} />
+              <ActivityIndicator color={colors.racingRed} style={styles.loader} />
             ) : browsableConvoys.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Flag size={28} color={ACCENT + "60"} />
-                <Text style={styles.emptyText}>No public convoys yet — start one</Text>
-              </View>
+              <Message
+                icon={<Flag size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
+                heading="NO PUBLIC CONVOYS YET"
+                body="Tap the + in the top right to start the first one."
+              />
             ) : (
               browsableConvoys.map((c) => {
                 const full = c.max_members > 0 && c.member_count >= c.max_members;
                 return (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={styles.card}
-                    activeOpacity={0.8}
-                    onPress={() => router.push(`/convoy/${c.id}` as any)}
-                  >
-                    <View style={styles.convoyTop}>
-                      <View style={[styles.colorDot, { backgroundColor: c.color }]} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{c.name}</Text>
-                        <Text style={styles.cardDesc}>{c.description || `Led by ${c.leader_name}`}</Text>
+                  <Pressable key={c.id} onPress={() => router.push(`/convoy/${c.id}` as any)}>
+                    <CutCornerSurface
+                      fill={colors.carbonSurface}
+                      borderColor={colors.hairline}
+                      borderWidth={borderWidth.hairline}
+                      cutSize={cut.md}
+                      corners="topRight"
+                      contentStyle={styles.card}
+                    >
+                      <View style={styles.cardTop}>
+                        <View style={[styles.colorDot, { backgroundColor: c.color }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.cardTitle}>{c.name}</Text>
+                          <Text style={styles.cardDesc}>{c.description || `Led by ${c.leader_name}`}</Text>
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.convoyMeta}>
-                      <View style={styles.metaItem}>
-                        <Users size={13} color="#8A8A9A" />
-                        <Text style={styles.metaText}>
-                          {c.member_count}{c.max_members > 0 ? `/${c.max_members}` : ""} members
-                        </Text>
+                      <View style={styles.cardMeta}>
+                        <View style={styles.metaItem}>
+                          <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                          <Text style={styles.metaText}>
+                            {c.member_count}{c.max_members > 0 ? `/${c.max_members}` : ""} members
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                    {!party && (
-                      <TouchableOpacity
-                        style={[styles.actionBtn, styles.actionBtnPrimary, full && { opacity: 0.5 }]}
-                        onPress={() => handleJoinConvoy(c.id)}
-                        disabled={full || joiningId === c.id}
-                        activeOpacity={0.8}
-                      >
-                        {joiningId === c.id ? (
-                          <ActivityIndicator color="#FFFFFF" size="small" />
-                        ) : (
-                          <>
-                            <Flag size={15} color="#FFFFFF" />
-                            <Text style={styles.actionText}>{full ? "Full" : "Join convoy"}</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </TouchableOpacity>
+                      {!party && (
+                        <CutCornerButton
+                          title={full ? "Full" : "Join convoy"}
+                          size="sm"
+                          corners="topRight"
+                          disabled={full || joiningId === c.id}
+                          onPress={() => handleJoinConvoy(c.id)}
+                          icon={joiningId === c.id ? undefined : <Flag size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
+                          style={styles.actionBtn}
+                        />
+                      )}
+                    </CutCornerSurface>
+                  </Pressable>
                 );
               })
             )}
@@ -253,15 +297,15 @@ export default function CommunityScreen() {
         {isAuthenticated && tab === "events" ? (
           <>
             {!user?.country && (
-              <TouchableOpacity style={styles.warnBanner} onPress={() => router.push("/(tabs)/profile" as any)} activeOpacity={0.8}>
-                <AlertCircle size={14} color="#FBBF24" />
+              <Pressable style={styles.warnBanner} onPress={() => router.push("/(tabs)/profile" as any)}>
+                <AlertCircle size={14} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 <Text style={styles.warnBannerText}>Set your country to see local events</Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
 
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>Events near you</Text>
+                <Text style={styles.sectionTitle}>EVENTS NEAR YOU</Text>
                 <Text style={styles.sectionSub}>
                   {user?.country ? `Happening in ${user.country}` : "Set your country to find events"}
                 </Text>
@@ -269,69 +313,78 @@ export default function CommunityScreen() {
             </View>
 
             {loadingEvents && events.length === 0 ? (
-              <ActivityIndicator color={ACCENT} style={{ marginTop: 12 }} />
+              <ActivityIndicator color={colors.racingRed} style={styles.loader} />
             ) : events.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Calendar size={28} color={ACCENT + "60"} />
-                <Text style={styles.emptyText}>No events yet — host the first one</Text>
-              </View>
+              <Message
+                icon={<Calendar size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
+                heading="NO EVENTS NEAR YOU YET"
+                body="Open the map and tap Event to put the first one up."
+                action={{ label: "Open Map", onPress: () => router.push("/(tabs)/map" as any) }}
+              />
             ) : (
               events.map((ev) => (
-                <TouchableOpacity
-                  key={ev.id}
-                  style={styles.card}
-                  activeOpacity={0.8}
-                  onPress={() => router.push(`/event/${ev.id}` as any)}
-                >
-                  <View style={styles.meetupTop}>
-                    <View style={[styles.meetupThumb, { backgroundColor: `${eventTypeColor(ev.event_type)}18` }]}>
-                      <EventTypeIcon type={ev.event_type} size={22} color={eventTypeColor(ev.event_type)} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle}>{ev.title}</Text>
-                      <Text style={styles.hostText}>by {ev.host_name}{ev.is_live ? " · Live now" : ""}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.meetupMeta}>
-                    <View style={styles.metaItem}>
-                      <Clock size={13} color="#8A8A9A" />
-                      <Text style={styles.metaText}>{formatWhen(ev.starts_at)}</Text>
-                    </View>
-                    {!!ev.location_name && (
-                      <View style={styles.metaItem}>
-                        <MapPin size={13} color="#8A8A9A" />
-                        <Text style={styles.metaText}>{ev.location_name}</Text>
+                <Pressable key={ev.id} onPress={() => router.push(`/event/${ev.id}` as any)}>
+                  <CutCornerSurface
+                    fill={colors.carbonSurface}
+                    borderColor={ev.is_live ? colors.racingRed : colors.hairline}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={cut.md}
+                    corners="topRight"
+                    contentStyle={styles.card}
+                  >
+                    <View style={styles.cardTop}>
+                      <View style={styles.eventThumb}>
+                        <EventTypeIcon
+                          type={ev.event_type}
+                          size={20}
+                          color={ev.is_live ? colors.racingRed : colors.textPrimary}
+                          strokeWidth={ICON_STROKE}
+                        />
                       </View>
-                    )}
-                  </View>
-
-                  <View style={styles.meetupFooter}>
-                    <View style={styles.metaItem}>
-                      <Users size={13} color={ACCENT} />
-                      <Text style={[styles.metaText, { color: "#B8B8C8" }]}>
-                        {ev.participant_count}{ev.max_participants > 0 ? `/${ev.max_participants}` : ""} going
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.cardTitle}>{ev.title}</Text>
+                        <Text style={styles.hostText}>by {ev.host_name}{ev.is_live ? " · Live now" : ""}</Text>
+                      </View>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.rsvpBtn, ev.is_joined ? styles.rsvpBtnActive : styles.rsvpBtnIdle]}
-                      onPress={() => handleToggleEvent(ev.id, ev.is_joined)}
-                      disabled={joiningId === ev.id}
-                      activeOpacity={0.8}
-                    >
-                      {joiningId === ev.id ? (
-                        <ActivityIndicator size="small" color={ev.is_joined ? "#FFFFFF" : ACCENT} />
-                      ) : ev.is_joined ? (
-                        <>
-                          <Check size={14} color="#FFFFFF" />
-                          <Text style={styles.rsvpText}>Going</Text>
-                        </>
-                      ) : (
-                        <Text style={[styles.rsvpText, { color: ACCENT }]}>RSVP</Text>
+
+                    <View style={styles.eventMeta}>
+                      <View style={styles.metaItem}>
+                        <Clock size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        <Text style={styles.metaText}>{formatWhen(ev.starts_at)}</Text>
+                      </View>
+                      {!!ev.location_name && (
+                        <View style={styles.metaItem}>
+                          <MapPin size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                          <Text style={styles.metaText}>{ev.location_name}</Text>
+                        </View>
                       )}
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.eventFooter}>
+                      <View style={styles.metaItem}>
+                        <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        <Text style={styles.metaText}>
+                          {ev.participant_count}{ev.max_participants > 0 ? `/${ev.max_participants}` : ""} going
+                        </Text>
+                      </View>
+                      <CutCornerButton
+                        title={ev.is_joined ? "Going" : "RSVP"}
+                        variant={ev.is_joined ? "primary" : "outline"}
+                        size="sm"
+                        corners="topRight"
+                        disabled={joiningId === ev.id}
+                        onPress={() => handleToggleEvent(ev.id, ev.is_joined)}
+                        icon={
+                          joiningId === ev.id
+                            ? undefined
+                            : ev.is_joined
+                              ? <Check size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                              : undefined
+                        }
+                      />
+                    </View>
+                  </CutCornerSurface>
+                </Pressable>
               ))
             )}
           </>
@@ -354,64 +407,126 @@ function TabButton({
   onPress,
 }: {
   label: string;
-  icon: React.FC<{ size: number; color: string }>;
+  icon: React.FC<{ size: number; color: string; strokeWidth?: number }>;
   active: boolean;
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity style={[styles.tab, active && styles.tabActive]} onPress={onPress} activeOpacity={0.8}>
-      <Icon size={16} color={active ? ACCENT : "#5A5A6E"} />
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </TouchableOpacity>
+    <Pressable style={styles.tab} onPress={onPress}>
+      <View style={styles.tabInner}>
+        <Icon size={15} color={active ? colors.textPrimary : colors.textSecondary} strokeWidth={ICON_STROKE} />
+        <Text style={[styles.tabText, active && styles.tabTextActive]}>{label.toUpperCase()}</Text>
+      </View>
+      <View style={[styles.tabRule, active && styles.tabRuleActive]} />
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
 
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
-  topTitle: { fontSize: 18, fontWeight: "700", color: "#FFFFFF" },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.spacingLg,
+    paddingBottom: spacing.spacingMd,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
 
-  tabs: { flexDirection: "row", gap: 4, marginHorizontal: 20, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 4 },
-  tab: { flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, paddingVertical: 10, borderRadius: 10 },
-  tabActive: { backgroundColor: ACCENT + "1F" },
-  tabText: { fontSize: 13, fontWeight: "600", color: "#5A5A6E" },
-  tabTextActive: { color: ACCENT },
+  tabs: {
+    flexDirection: "row",
+    gap: spacing.spacingXl,
+    marginHorizontal: spacing.spacingLg,
+    borderBottomWidth: borderWidth.hairline,
+    borderBottomColor: colors.hairline,
+  },
+  tab: { flex: 1, gap: spacing.spacingSm, alignItems: "center" },
+  tabInner: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
+  tabText: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 13,
+    lineHeight: 16,
+    letterSpacing: 1,
+    color: colors.textSecondary,
+  },
+  tabTextActive: { color: colors.textPrimary },
+  tabRule: {
+    height: borderWidth.emphasis,
+    width: "100%",
+    backgroundColor: "transparent",
+    marginBottom: -borderWidth.hairline,
+  },
+  tabRuleActive: { backgroundColor: colors.racingRed },
 
-  headerRow: { flexDirection: "row", alignItems: "center", marginTop: 12, marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: "700", color: "#FFFFFF" },
-  sectionSub: { fontSize: 13, color: "#8A8A9A", marginTop: 2 },
+  headerRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.spacingLg, marginBottom: spacing.spacingMd },
+  sectionTitle: { ...textStyle("caption"), color: colors.textSecondary, letterSpacing: 1 },
+  sectionSub: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
 
-  card: { backgroundColor: "#12121A", borderRadius: 16, borderWidth: 1, borderColor: "#1E1E2E", padding: 16, marginBottom: 12 },
-  cardTitle: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
-  cardDesc: { fontSize: 13, color: "#8A8A9A", marginTop: 3, lineHeight: 18 },
+  card: { padding: spacing.spacingLg, gap: spacing.spacingMd, marginBottom: spacing.spacingMd },
+  cardTop: { flexDirection: "row", gap: spacing.spacingMd, alignItems: "center" },
+  cardTitle: { ...textStyle("displayMd"), color: colors.textPrimary },
+  cardDesc: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
 
-  convoyTop: { flexDirection: "row", gap: 12, alignItems: "center" },
-  colorDot: { width: 16, height: 16, borderRadius: 8 },
-  convoyMeta: { flexDirection: "row", gap: 16, marginTop: 14, marginBottom: 6 },
-  metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
-  metaText: { fontSize: 12.5, color: "#8A8A9A" },
+  colorDot: { width: 16, height: 16, borderRadius: radius.circle },
+  cardMeta: { flexDirection: "row", gap: spacing.spacingLg },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
+  metaText: { ...textStyle("caption"), color: colors.textSecondary },
 
-  actionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 11, borderRadius: 12, marginTop: 8 },
-  actionBtnPrimary: { backgroundColor: ACCENT },
-  actionText: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  actionBtn: { marginTop: spacing.spacingXs },
 
-  meetupTop: { flexDirection: "row", gap: 12, alignItems: "center" },
-  meetupThumb: { width: 48, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  hostText: { fontSize: 12.5, color: "#8A8A9A", marginTop: 2 },
-  meetupMeta: { gap: 7, marginTop: 14 },
-  meetupFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 14 },
-  rsvpBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10 },
-  rsvpBtnIdle: { backgroundColor: ACCENT + "1A", borderWidth: 1, borderColor: ACCENT + "44" },
-  rsvpBtnActive: { backgroundColor: ACCENT },
-  rsvpText: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
+  eventThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sharp,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+  },
+  hostText: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
+  eventMeta: { gap: spacing.spacingXs },
+  eventFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 
-  emptyState: { alignItems: "center", paddingVertical: 48, gap: 10 },
-  emptyText: { fontSize: 13.5, color: "#8A8A9A" },
+  message: { alignItems: "center", gap: spacing.spacingSm, paddingVertical: spacing.spacingXxl, paddingHorizontal: spacing.spacingLg },
+  messageHeading: { ...textStyle("displayMd"), color: colors.textPrimary, textAlign: "center" },
+  messageBody: { ...textStyle("body"), color: colors.textSecondary, textAlign: "center" },
+  messageAction: { marginTop: spacing.spacingSm },
+  loader: { marginTop: spacing.spacingMd },
 
-  errorBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.1)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", padding: 12, marginBottom: 12 },
-  errorBannerText: { color: "#EF4444", fontSize: 13, flex: 1 },
-  warnBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(251,191,36,0.1)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(251,191,36,0.25)", padding: 12, marginBottom: 12 },
-  warnBannerText: { color: "#FBBF24", fontSize: 13, flex: 1 },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    backgroundColor: alpha(colors.racingRed, 0.1),
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: alpha(colors.racingRed, 0.3),
+    padding: spacing.spacingMd,
+    marginBottom: spacing.spacingMd,
+  },
+  errorBannerText: { ...textStyle("caption"), color: colors.racingRed, flex: 1 },
+  warnBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingMd,
+    marginBottom: spacing.spacingMd,
+  },
+  warnBannerText: { ...textStyle("caption"), color: colors.textSecondary, flex: 1 },
 });
