@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Driverse Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --panel: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e2e2e6;
+    --user-bubble: #2563eb;
+    --user-text: #ffffff;
+    --assistant-bubble: #eceef1;
+    --assistant-text: #1a1a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a;
+      --panel: #1f2023;
+      --text: #e8e8ea;
+      --muted: #9aa0a6;
+      --border: #303136;
+      --user-bubble: #3b82f6;
+      --user-text: #ffffff;
+      --assistant-bubble: #2b2c30;
+      --assistant-text: #e8e8ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app {
+    max-width: 760px;
+    margin: 0 auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+  }
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+  }
+  header button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  header button:hover { color: var(--text); }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    line-height: 1.5;
+    font-size: 14px;
+    white-space: normal;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+    color: var(--user-text);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--assistant-bubble);
+    color: var(--assistant-text);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.pending { opacity: 0.6; font-style: italic; }
+  .msg.error { border: 1px solid #dc2626; }
+  .msg p:first-child { margin-top: 0; }
+  .msg p:last-child { margin-bottom: 0; }
+  .msg table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    width: 100%;
+    font-size: 13px;
+  }
+  .msg th, .msg td {
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    text-align: left;
+  }
+  .msg pre {
+    background: rgba(127,127,127,0.15);
+    padding: 8px 10px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+  }
+  .msg code {
+    background: rgba(127,127,127,0.15);
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .msg pre code { background: none; padding: 0; }
+  #composer {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+  }
+  #input {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--panel);
+    color: var(--text);
+    max-height: 140px;
+  }
+  #send {
+    border: none;
+    border-radius: 10px;
+    background: var(--user-bubble);
+    color: #fff;
+    padding: 0 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: 0.5; cursor: default; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Driverse Chat</h1>
+    <button id="clear">Clear conversation</button>
+  </header>
+  <div id="messages"></div>
+  <form id="composer">
+    <textarea id="input" rows="1" placeholder="Ask about the Supabase schema, content pipeline, etc." autofocus></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+<script src="/markdown.js"></script>
+<script>
+  const STORAGE_KEY = "driverse-chat-history";
+  const messagesEl = document.getElementById("messages");
+  const form = document.getElementById("composer");
+  const input = document.getElementById("input");
+  const sendBtn = document.getElementById("send");
+  const clearBtn = document.getElementById("clear");
+
+  function loadHistory() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORAGE_KEY)) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(history) {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  }
+
+  let history = loadHistory();
+
+  function renderMessage(role, text) {
+    const div = document.createElement("div");
+    div.className = `msg ${role}`;
+    div.innerHTML = renderMarkdown(text);
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function renderAll() {
+    messagesEl.innerHTML = "";
+    for (const turn of history) {
+      renderMessage(turn.role, turn.text);
+    }
+  }
+
+  async function sendMessage(message) {
+    history.push({ role: "user", text: message });
+    saveHistory(history);
+    renderMessage("user", message);
+
+    const pending = renderMessage("assistant", "Thinking...");
+    pending.classList.add("pending");
+
+    input.value = "";
+    input.style.height = "auto";
+    sendBtn.disabled = true;
+
+    try {
+      const res = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history: history.slice(0, -1) }),
+      });
+      const data = await res.json();
+      pending.classList.remove("pending");
+
+      if (!res.ok || data.error) {
+        pending.classList.add("error");
+        pending.innerHTML = renderMarkdown(`**Error:** ${data.error || "Request failed"}`);
+        return;
+      }
+
+      pending.innerHTML = renderMarkdown(data.reply);
+      history.push({ role: "assistant", text: data.reply });
+      saveHistory(history);
+    } catch (err) {
+      pending.classList.remove("pending");
+      pending.classList.add("error");
+      pending.innerHTML = renderMarkdown(`**Error:** ${err.message}`);
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+    sendMessage(message);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 140) + "px";
+  });
+
+  clearBtn.addEventListener("click", () => {
+    history = [];
+    saveHistory(history);
+    renderAll();
+  });
+
+  renderAll();
+</script>
+</body>
+</html>
