@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import { View, StyleSheet } from "react-native";
-import Svg, { Path, Circle, Defs, LinearGradient as SvgGradient, Stop } from "react-native-svg";
+import Svg, { Path, Circle } from "react-native-svg";
 import { decodePolyline } from "@/lib/polyline";
+import { borderWidth, colors, radius } from "@/constants/theme";
 
 interface RoutePreviewProps {
   polyline: string;
@@ -15,12 +16,19 @@ interface RoutePreviewProps {
  * Lightweight static map-less preview of a recorded route.
  * Normalizes the decoded polyline into the box and draws it as an SVG
  * path — cheap enough to render many of them in a scrolling feed.
+ *
+ * The trace is flat `racingRed`, matching the live route on the map screen
+ * and the trip-card trace in `components/RouteLine.tsx`. It was previously
+ * an orange→pink gradient with a teal start dot and a pink end dot — three
+ * hues outside the palette, and the only place a recorded route did not
+ * look like a recorded route. Start is hollow, finish is solid: direction
+ * without a second colour, the same convention RouteLine uses.
  */
 function RoutePreviewBase({
   polyline,
   width = 300,
   height = 130,
-  color = "#FF6B35",
+  color = colors.racingRed,
   strokeWidth = 3,
 }: RoutePreviewProps) {
   const { d, startPt, endPt } = useMemo(() => {
@@ -67,28 +75,27 @@ function RoutePreviewBase({
   return (
     <View style={[styles.wrap, { width, height }]}>
       <Svg width={width} height={height}>
-        <Defs>
-          <SvgGradient id="routeGrad" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={color} stopOpacity="1" />
-            <Stop offset="1" stopColor="#FF3B6F" stopOpacity="1" />
-          </SvgGradient>
-        </Defs>
         {d ? (
           <>
             <Path
               d={d}
-              stroke="url(#routeGrad)"
+              stroke={color}
               strokeWidth={strokeWidth}
               fill="none"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
             {startPt && (
-              <Circle cx={startPt.x} cy={startPt.y} r={5} fill="#00D4AA" stroke="#0A0A0F" strokeWidth={2} />
+              <Circle
+                cx={startPt.x}
+                cy={startPt.y}
+                r={5}
+                fill={colors.carbonSurface}
+                stroke={colors.textSecondary}
+                strokeWidth={borderWidth.emphasis}
+              />
             )}
-            {endPt && (
-              <Circle cx={endPt.x} cy={endPt.y} r={5} fill="#FF3B6F" stroke="#0A0A0F" strokeWidth={2} />
-            )}
+            {endPt && <Circle cx={endPt.x} cy={endPt.y} r={5} fill={colors.racingRed} />}
           </>
         ) : null}
       </Svg>
@@ -97,9 +104,12 @@ function RoutePreviewBase({
 }
 
 const styles = StyleSheet.create({
+  // Utility surface: the frame around a trace is a plain rectangle.
   wrap: {
-    backgroundColor: "#12121C",
-    borderRadius: 14,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     overflow: "hidden",
   },
 });

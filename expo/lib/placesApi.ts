@@ -45,7 +45,7 @@ export async function fetchNearbyPlaces({
 
     if (error) {
       console.error("[placesApi] fetchNearbyPlaces failed:", error);
-      return { places: [], error: "Couldn't load nearby places, try again." };
+      return { places: [], error: "Nearby places didn't load — the request to the places service failed." };
     }
     if (data?.error) {
       return { places: data.places ?? [], error: data.error };
@@ -53,7 +53,7 @@ export async function fetchNearbyPlaces({
     return { places: data?.places ?? [], error: null };
   } catch (err) {
     console.error("[placesApi] fetchNearbyPlaces threw:", err);
-    return { places: [], error: "Couldn't load nearby places, try again." };
+    return { places: [], error: "Nearby places didn't load — the request to the places service failed." };
   }
 }
 
@@ -76,7 +76,7 @@ export async function submitPlace(input: SubmitPlaceInput): Promise<{ place: Nor
 
     if (error) {
       console.error("[placesApi] submitPlace failed:", error);
-      return { place: null, error: "Couldn't submit place, try again." };
+      return { place: null, error: "The submission didn't reach the server." };
     }
     if (data?.error) {
       return { place: null, error: data.error };
@@ -84,6 +84,6 @@ export async function submitPlace(input: SubmitPlaceInput): Promise<{ place: Nor
     return { place: data?.place ?? null, error: null };
   } catch (err) {
     console.error("[placesApi] submitPlace threw:", err);
-    return { place: null, error: "Couldn't submit place, try again." };
+    return { place: null, error: "The submission didn't reach the server." };
   }
 }

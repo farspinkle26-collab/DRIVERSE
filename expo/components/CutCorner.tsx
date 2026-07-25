@@ -251,7 +251,15 @@ export function CutCornerCard({
  * CutCornerButton
  * ------------------------------------------------------------------ */
 
-export type CutCornerButtonVariant = "primary" | "outline";
+/**
+ * `ghost` was added for the map's driving HUD (MAP_SCREEN_REFERENCE D-2).
+ * `outline` is a *red* outline, so a row of three outline buttons puts
+ * three red controls in one viewport and the primary action stops being
+ * the loudest thing on screen. `ghost` is the neutral secondary: hairline
+ * border, primary-text label, no fill. Additive — the existing two
+ * variants are unchanged.
+ */
+export type CutCornerButtonVariant = "primary" | "outline" | "ghost";
 export type CutCornerButtonSize = "sm" | "md" | "lg";
 
 const BUTTON_SIZES: Record<
@@ -313,14 +321,25 @@ export function CutCornerButton({
   const metrics = BUTTON_SIZES[size];
 
   const isPrimary = variant === "primary";
+  const isGhost = variant === "ghost";
+
   const fill = isPrimary
     ? pressed
       ? alpha(colors.racingRed, 0.85)
       : colors.racingRed
-    : pressed
-      ? alpha(colors.racingRed, 0.12)
-      : "transparent";
-  const labelColor = isPrimary ? onRacingRed : colors.racingRed;
+    : isGhost
+      ? pressed
+        ? colors.hairline
+        : colors.carbonSurface
+      : pressed
+        ? alpha(colors.racingRed, 0.12)
+        : "transparent";
+  const outlineColor = isGhost ? colors.hairline : colors.racingRed;
+  const labelColor = isPrimary
+    ? onRacingRed
+    : isGhost
+      ? colors.textPrimary
+      : colors.racingRed;
 
   return (
     <Pressable
@@ -333,7 +352,7 @@ export function CutCornerButton({
     >
       <CutCornerSurface
         fill={fill}
-        borderColor={colors.racingRed}
+        borderColor={outlineColor}
         borderWidth={borderWidthTokens.hairline}
         cutSize={metrics.cut}
         corners={corners}
