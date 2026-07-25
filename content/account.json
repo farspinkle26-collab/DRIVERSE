@@ -1,0 +1,65 @@
+{
+  "updated_at": "2026-07-25",
+  "instagram": {
+    "followers": 8420,
+    "funnel_30d": {
+      "reach": 412000,
+      "accounts_engaged": 38400,
+      "profile_visits": 9600,
+      "link_taps": 720,
+      "new_follows": 1340
+    },
+    "demographics": {
+      "country": [
+        { "label": "United States", "pct": 34 },
+        { "label": "United Kingdom", "pct": 14 },
+        { "label": "Australia", "pct": 11 },
+        { "label": "Canada", "pct": 8 },
+        { "label": "Germany", "pct": 6 }
+      ],
+      "age": [
+        { "label": "13-17", "pct": 9 },
+        { "label": "18-24", "pct": 41 },
+        { "label": "25-34", "pct": 33 },
+        { "label": "35-44", "pct": 12 },
+        { "label": "45+", "pct": 5 }
+      ],
+      "gender": [
+        { "label": "Male", "pct": 82 },
+        { "label": "Female", "pct": 16 },
+        { "label": "Other", "pct": 2 }
+      ]
+    }
+  },
+  "tiktok": {
+    "followers": 12730,
+    "funnel_30d": {
+      "reach": 690000,
+      "accounts_engaged": 71500,
+      "profile_visits": 14200,
+      "link_taps": 540,
+      "new_follows": 2110
+    },
+    "demographics": {
+      "country": [
+        { "label": "United States", "pct": 39 },
+        { "label": "United Kingdom", "pct": 12 },
+        { "label": "Philippines", "pct": 9 },
+        { "label": "Australia", "pct": 7 },
+        { "label": "Canada", "pct": 6 }
+      ],
+      "age": [
+        { "label": "13-17", "pct": 14 },
+        { "label": "18-24", "pct": 46 },
+        { "label": "25-34", "pct": 28 },
+        { "label": "35-44", "pct": 9 },
+        { "label": "45+", "pct": 3 }
+      ],
+      "gender": [
+        { "label": "Male", "pct": 85 },
+        { "label": "Female", "pct": 13 },
+        { "label": "Other", "pct": 2 }
+      ]
+    }
+  }
+}

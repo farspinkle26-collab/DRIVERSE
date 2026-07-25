@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/places", label: "Places" },
   { href: "/garage", label: "Garage" },
   { href: "/monetization", label: "Monetization" },
+  { href: "/content", label: "Content" },
 ];
 
 export function Nav() {
@@ -33,7 +34,10 @@ export function Nav() {
       </div>
       <nav className="flex flex-1 flex-col gap-0.5">
         {LINKS.map((l) => {
-          const active = pathname === l.href;
+          const active =
+            l.href === "/"
+              ? pathname === "/"
+              : pathname === l.href || pathname.startsWith(l.href + "/");
           return (
             <Link
               key={l.href}
