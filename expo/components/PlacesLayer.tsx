@@ -1,21 +1,63 @@
+/**
+ * Driveverse — the OSM + community "nearby places" layer.
+ *
+ * Four pieces, all rebuilt on the Phase 1 tokens:
+ *   PlacesFilterBar   cafe / gas / workshop / hangout, cut-corner chips
+ *   PlacesMarkers     the map markers themselves
+ *   PlaceDetailSheet  the callout for a tapped place
+ *   SubmitPlaceFab    + SubmitPlaceModal, the community submission flow
+ *
+ * The colour rule for the whole layer: **category is shape, state is
+ * colour.** Each category has its own hand-drawn glyph (MapGlyphs.tsx) at
+ * one stroke weight, and the only colour that varies is whether the thing
+ * is active/selected (racingRed) or not (hairline + textSecondary). That
+ * is what lets four categories live inside a six-value palette; the
+ * previous version needed a hue per category and spent four of the six.
+ */
+
 import React, { useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, Modal, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from "react-native";
 import { Marker } from "react-native-maps";
-import { X, Plus, MapPin } from "lucide-react-native";
-import Card from "@/components/Card";
+import { Plus, X } from "lucide-react-native";
 import Input from "@/components/Input";
 import Dropdown from "@/components/Dropdown";
 import ImagePickerField from "@/components/ImagePicker";
-import Button from "@/components/Button";
-import Colors from "@/constants/colors";
-import { useTheme } from "@/hooks/useThemeStore";
+import {
+  CutCornerButton,
+  CutCornerSurface,
+} from "@/components/CutCorner";
+import {
+  CHROME_ICON_STROKE,
+  MAP_GLYPH_STROKE,
+} from "@/components/MapGlyphs";
+import {
+  alpha,
+  borderWidth,
+  colors,
+  cut,
+  fontFamily,
+  onRacingRed,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 import { useXP } from "@/hooks/useXPStore";
 import { uploadPlacePhoto } from "@/lib/uploadPlacePhoto";
 import { supabase } from "@/lib/supabase";
 import type { NormalizedPlace } from "@/lib/placesApi";
 import {
   PLACE_CATEGORIES,
-  PLACE_CATEGORY_COLORS,
   PLACE_CATEGORY_ICONS,
   PLACE_CATEGORY_LABELS,
   type PlaceCategory,
@@ -23,7 +65,22 @@ import {
 
 export const PLACE_SUBMIT_XP = 15;
 
-// ─── Category filter segmented control ──────────────────────
+/** Marker glyph size. On the spacing scale, per DRIVE_HUB_REFERENCE D-3. */
+const MARKER_GLYPH_SIZE = spacing.spacingLg;
+
+/* ------------------------------------------------------------------ *
+ * Category filter chips
+ * ------------------------------------------------------------------ */
+
+/**
+ * One chip per category. Active is a solid racingRed slab with black
+ * text; inactive is a carbon slab with a hairline outline — the same
+ * primary/outline pair `CutCornerButton` uses, so the chips read as part
+ * of the same control family as the screen's buttons.
+ *
+ * The label is Rajdhani, uppercase, tracked: a control sizing its own
+ * label (DRIVE_HUB_REFERENCE D-1), not body copy.
+ */
 export function PlacesFilterBar({
   active,
   onChange,
@@ -31,44 +88,85 @@ export function PlacesFilterBar({
 }: {
   active: PlaceCategory;
   onChange: (category: PlaceCategory) => void;
-  style?: object;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={[styles.filterBar, style]}>
+    // Horizontal scroll rather than a fixed row: four chips at Rajdhani 12
+    // overflow a 390pt screen once the chrome column is subtracted, and a
+    // clipped filter is a filter the driver cannot reach.
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={style as StyleProp<ViewStyle>}
+      contentContainerStyle={styles.filterBar}
+      keyboardShouldPersistTaps="handled"
+    >
       {PLACE_CATEGORIES.map((cat) => {
-        const Icon = PLACE_CATEGORY_ICONS[cat];
+        const Glyph = PLACE_CATEGORY_ICONS[cat];
         const isActive = active === cat;
         return (
-          <TouchableOpacity
+          <Pressable
             key={cat}
-            style={[styles.filterChip, isActive && { backgroundColor: PLACE_CATEGORY_COLORS[cat] }]}
-            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            accessibilityLabel={`Show ${PLACE_CATEGORY_LABELS[cat]} places`}
             onPress={() => onChange(cat)}
+            style={({ pressed }) => [styles.filterChipHit, pressed && styles.pressed]}
           >
-            <Icon size={14} color={isActive ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.3} />
-            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
-              {PLACE_CATEGORY_LABELS[cat]}
-            </Text>
-          </TouchableOpacity>
+            <CutCornerSurface
+              fill={isActive ? colors.racingRed : colors.carbonSurface}
+              borderColor={isActive ? colors.racingRed : colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.sm}
+              corners="topRight"
+              contentStyle={styles.filterChip}
+            >
+              <Glyph
+                size={spacing.spacingMd}
+                color={isActive ? onRacingRed : colors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { color: isActive ? onRacingRed : colors.textSecondary },
+                ]}
+              >
+                {PLACE_CATEGORY_LABELS[cat].toUpperCase()}
+              </Text>
+            </CutCornerSurface>
+          </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
-// ─── Markers (render as a child of <MapView>) ───────────────
+/* ------------------------------------------------------------------ *
+ * Markers (render as a child of <MapView>)
+ * ------------------------------------------------------------------ */
+
 export function PlacesMarkers({
   places,
   onSelect,
+  selectedId,
 }: {
   places: NormalizedPlace[];
   onSelect: (place: NormalizedPlace) => void;
+  selectedId?: string | null;
 }) {
   return (
     <>
       {places.map((place) => {
-        const Icon = PLACE_CATEGORY_ICONS[place.category];
-        const color = PLACE_CATEGORY_COLORS[place.category];
+        const Glyph = PLACE_CATEGORY_ICONS[place.category];
+        const isSelected = selectedId === place.id;
+        // A community submission gets the accent outline; an OSM import
+        // gets the hairline. One bit of information, one colour step.
+        const isCommunity = place.source === "user";
+        const borderColor = isSelected
+          ? colors.racingRed
+          : isCommunity
+            ? alpha(colors.racingRed, 0.55)
+            : colors.hairline;
         return (
           <Marker
             key={place.id}
@@ -76,8 +174,22 @@ export function PlacesMarkers({
             onPress={() => onSelect(place)}
             tracksViewChanges={false}
           >
-            <View style={[styles.markerBadge, { backgroundColor: color, borderColor: place.source === "user" ? Colors.primary : "#FFFFFF" }]}>
-              <Icon size={14} color="#0A0A14" strokeWidth={2.4} />
+            <View style={styles.markerBox} collapsable={false}>
+              <CutCornerSurface
+                fill={isSelected ? colors.racingRed : colors.carbonSurface}
+                borderColor={borderColor}
+                borderWidth={borderWidth.hairline}
+                cutSize={spacing.spacingSm}
+                corners="topRight"
+                style={styles.markerBadge}
+                contentStyle={styles.markerBadgeContent}
+              >
+                <Glyph
+                  size={MARKER_GLYPH_SIZE}
+                  color={isSelected ? onRacingRed : colors.textPrimary}
+                  strokeWidth={MAP_GLYPH_STROKE}
+                />
+              </CutCornerSurface>
             </View>
           </Marker>
         );
@@ -86,52 +198,150 @@ export function PlacesMarkers({
   );
 }
 
-// ─── Tap callout: bottom sheet with name/category/tags/attribution ──
-export function PlaceDetailSheet({ place, onClose }: { place: NormalizedPlace | null; onClose: () => void }) {
+/* ------------------------------------------------------------------ *
+ * Tap callout
+ * ------------------------------------------------------------------ */
+
+/** `1.2 km` / `840 m`, split so the unit can render in Inter beside the mono value. */
+function formatDistance(meters: number): { value: string; unit: string } {
+  if (meters < 1000) return { value: String(Math.round(meters)), unit: "m" };
+  return { value: (meters / 1000).toFixed(1), unit: "km" };
+}
+
+/**
+ * The callout for a tapped place. Carbon surface, hairline outline, one
+ * cut corner — the same slab as a trip card.
+ *
+ * Type roles, per the token file: Rajdhani for the place name, Inter for
+ * the description/notes/hours, JetBrains Mono for the distance and the
+ * coordinates. The coordinates are new — a place callout that cannot tell
+ * you where the place *is* was the one piece of information the sheet was
+ * missing.
+ */
+export function PlaceDetailSheet({
+  place,
+  onClose,
+  distanceMeters,
+  bottomInset = 0,
+}: {
+  place: NormalizedPlace | null;
+  onClose: () => void;
+  /** Metres from the driver. Omitted when there is no GPS fix yet. */
+  distanceMeters?: number | null;
+  /** Clearance for the floating tab bar, supplied by the screen. */
+  bottomInset?: number;
+}) {
   if (!place) return null;
-  const Icon = PLACE_CATEGORY_ICONS[place.category];
-  const color = PLACE_CATEGORY_COLORS[place.category];
+  const Glyph = PLACE_CATEGORY_ICONS[place.category];
   const openingHours = place.tags.opening_hours;
   const notes = place.tags.notes;
+  const distance = distanceMeters != null ? formatDistance(distanceMeters) : null;
 
   return (
-    <View style={styles.sheetWrap} pointerEvents="box-none">
-      <Card style={styles.sheetCard}>
+    <View style={[styles.sheetWrap, { paddingBottom: bottomInset }]} pointerEvents="box-none">
+      <CutCornerSurface
+        fill={colors.carbonSurface}
+        borderColor={colors.hairline}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.md}
+        corners="topRight"
+        contentStyle={styles.sheetCard}
+      >
         <View style={styles.sheetHeader}>
-          <View style={[styles.sheetIconBadge, { backgroundColor: color }]}>
-            <Icon size={18} color="#0A0A14" strokeWidth={2.4} />
+          <CutCornerSurface
+            fill={colors.voidBlack}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={spacing.spacingSm}
+            corners="topRight"
+            style={styles.sheetIconBadge}
+            contentStyle={styles.sheetIconBadgeContent}
+          >
+            <Glyph size={spacing.spacingLg} color={colors.textPrimary} />
+          </CutCornerSurface>
+          <View style={styles.sheetHeaderText}>
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              {place.name}
+            </Text>
+            <Text style={styles.sheetSubtitle}>
+              {PLACE_CATEGORY_LABELS[place.category]}
+              {place.source === "user" ? " · Community" : " · OpenStreetMap"}
+            </Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.sheetTitle} numberOfLines={1}>{place.name}</Text>
-            <Text style={styles.sheetSubtitle}>{PLACE_CATEGORY_LABELS[place.category]}</Text>
-          </View>
-          <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <X size={20} color={Colors.textSecondary} />
-          </TouchableOpacity>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close place details"
+            onPress={onClose}
+            hitSlop={spacing.spacingSm}
+          >
+            <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+          </Pressable>
         </View>
 
-        {place.source === "osm" && openingHours && (
-          <Text style={styles.sheetLine}>Hours: {openingHours}</Text>
-        )}
-        {place.source === "user" && (
+        <View style={styles.sheetReadouts}>
+          {distance ? (
+            <View style={styles.sheetReadout}>
+              <Text style={styles.sheetReadoutLabel}>AWAY</Text>
+              <View style={styles.sheetReadoutValueRow}>
+                <Text style={styles.sheetReadoutValue}>{distance.value}</Text>
+                <Text style={styles.sheetReadoutUnit}>{distance.unit}</Text>
+              </View>
+            </View>
+          ) : null}
+          <View style={styles.sheetReadout}>
+            <Text style={styles.sheetReadoutLabel}>COORDS</Text>
+            <Text style={styles.sheetReadoutValue}>
+              {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
+            </Text>
+          </View>
+        </View>
+
+        {place.source === "osm" && openingHours ? (
+          <Text style={styles.sheetLine}>Open {openingHours}</Text>
+        ) : null}
+        {place.source === "user" ? (
           <>
-            <Text style={styles.sheetLine}>Submitted by a Driveverse driver</Text>
+            <Text style={styles.sheetLine}>Added by a Driveverse driver.</Text>
             {notes ? <Text style={styles.sheetLine}>{notes}</Text> : null}
           </>
-        )}
-      </Card>
+        ) : null}
+      </CutCornerSurface>
     </View>
   );
 }
 
-// ─── Submit-a-place FAB + form modal ─────────────────────────
-const CATEGORY_OPTIONS = PLACE_CATEGORIES.map((cat) => ({ label: PLACE_CATEGORY_LABELS[cat], value: cat }));
+/* ------------------------------------------------------------------ *
+ * Submit a place
+ * ------------------------------------------------------------------ */
+
+const CATEGORY_OPTIONS = PLACE_CATEGORIES.map((cat) => ({
+  label: PLACE_CATEGORY_LABELS[cat],
+  value: cat,
+}));
 
 export function SubmitPlaceFab({ onPress, style }: { onPress: () => void; style?: object }) {
+  const [pressed, setPressed] = useState(false);
   return (
-    <TouchableOpacity style={[styles.fab, style]} activeOpacity={0.8} onPress={onPress}>
-      <Plus size={22} color="#0A0A14" strokeWidth={2.6} />
-    </TouchableOpacity>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Submit a new place"
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      style={style}
+    >
+      <CutCornerSurface
+        fill={pressed ? alpha(colors.racingRed, 0.85) : colors.racingRed}
+        borderColor={colors.racingRed}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.md}
+        corners="topRight"
+        style={styles.fab}
+        contentStyle={styles.fabContent}
+      >
+        <Plus size={spacing.spacingXl} color={onRacingRed} strokeWidth={MAP_GLYPH_STROKE} />
+      </CutCornerSurface>
+    </Pressable>
   );
 }
 
@@ -144,9 +354,15 @@ export function SubmitPlaceModal({
   visible: boolean;
   onClose: () => void;
   coordinate: { latitude: number; longitude: number } | null;
-  onSubmit: (input: { name: string; lat: number; lng: number; category: PlaceCategory; notes?: string; photoUrl?: string }) => Promise<{ error: string | null }>;
+  onSubmit: (input: {
+    name: string;
+    lat: number;
+    lng: number;
+    category: PlaceCategory;
+    notes?: string;
+    photoUrl?: string;
+  }) => Promise<{ error: string | null }>;
 }) {
-  const { theme } = useTheme();
   const { addXP } = useXP();
   const [name, setName] = useState("");
   const [category, setCategory] = useState<PlaceCategory>("cafe");
@@ -173,7 +389,7 @@ export function SubmitPlaceModal({
   const handleSubmit = async () => {
     if (!coordinate) return;
     if (!name.trim()) {
-      setError("Name is required");
+      setError("This place needs a name before it can be submitted. Type one above.");
       return;
     }
     setSubmitting(true);
@@ -203,162 +419,276 @@ export function SubmitPlaceModal({
       setSuccess(true);
       setTimeout(handleClose, 1400);
     } catch {
-      setError("Couldn't submit place, try again.");
+      setError("The submission didn't reach the server. Check your connection and tap Submit Place again.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const SuccessGlyph = PLACE_CATEGORY_ICONS[category];
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
-        <View style={[styles.modalSheet, { backgroundColor: theme.card }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.modalOverlay}
+      >
+        <CutCornerSurface
+          fill={colors.carbonSurface}
+          borderColor={colors.hairline}
+          borderWidth={borderWidth.hairline}
+          cutSize={cut.lg}
+          corners="topRight"
+          style={styles.modalSheet}
+          contentStyle={styles.modalContent}
+        >
           <View style={styles.modalHeader}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Submit a Place</Text>
-            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <X size={22} color={theme.textSecondary} />
-            </TouchableOpacity>
+            <Text style={styles.modalTitle}>SUBMIT A PLACE</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={handleClose}
+              hitSlop={spacing.spacingSm}
+            >
+              <X size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+            </Pressable>
           </View>
+
+          {coordinate ? (
+            <Text style={styles.modalCoords}>
+              {coordinate.latitude.toFixed(5)}, {coordinate.longitude.toFixed(5)}
+            </Text>
+          ) : null}
 
           {success ? (
             <View style={styles.successBox}>
-              <MapPin size={32} color={Colors.primary} />
-              <Text style={[styles.successText, { color: theme.text }]}>Place added! +{PLACE_SUBMIT_XP} XP</Text>
+              <SuccessGlyph size={spacing.spacingXxl} color={colors.racingRed} />
+              <Text style={styles.successText}>Place added. +{PLACE_SUBMIT_XP} XP</Text>
             </View>
           ) : (
             <ScrollView keyboardShouldPersistTaps="handled">
-              <Input label="Name" placeholder="e.g. Warkop Kang Ujang" value={name} onChangeText={setName} />
-              <Dropdown label="Category" placeholder="Select category" options={CATEGORY_OPTIONS} value={category} onChange={(v) => setCategory(v as PlaceCategory)} />
-              <Input label="Notes (optional)" placeholder="What's good here?" value={notes} onChangeText={setNotes} multiline />
+              <Input
+                label="Name"
+                placeholder="e.g. Warkop Kang Ujang"
+                value={name}
+                onChangeText={setName}
+              />
+              <Dropdown
+                label="Category"
+                placeholder="Select category"
+                options={CATEGORY_OPTIONS}
+                value={category}
+                onChange={(v) => setCategory(v as PlaceCategory)}
+              />
+              <Input
+                label="Notes (optional)"
+                placeholder="What's good here?"
+                value={notes}
+                onChangeText={setNotes}
+                multiline
+              />
               <ImagePickerField label="Photo (optional)" value={photoUri} onChange={setPhotoUri} />
-              {error && <Text style={styles.errorText}>{error}</Text>}
-              <Button title="Submit Place" onPress={handleSubmit} loading={submitting} disabled={submitting} style={styles.submitBtn} />
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {submitting ? (
+                <View style={styles.submittingRow}>
+                  <ActivityIndicator size="small" color={colors.racingRed} />
+                  <Text style={styles.submittingText}>Sending…</Text>
+                </View>
+              ) : (
+                <CutCornerButton
+                  title="Submit Place"
+                  onPress={handleSubmit}
+                  disabled={submitting}
+                  corners="topRight"
+                  style={styles.submitBtn}
+                />
+              )}
             </ScrollView>
           )}
-        </View>
+        </CutCornerSurface>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  /* Filter chips */
   filterBar: {
     flexDirection: "row",
-    gap: 8,
+    gap: spacing.spacingSm,
+  },
+  /** Press feedback, since Pressable has none by default. */
+  pressed: {
+    opacity: 0.7,
+  },
+  filterChipHit: {
+    // Keeps the tap target on the chip itself; the surface draws inside it.
+    minHeight: spacing.spacingXxl,
   },
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 18,
-    backgroundColor: "rgba(20,20,28,0.85)",
-    borderWidth: 1,
-    borderColor: "#2A2A3A",
+    gap: spacing.spacingXs,
+    paddingHorizontal: spacing.spacingSm,
+    paddingVertical: spacing.spacingSm,
   },
   filterChipText: {
+    fontFamily: fontFamily.displaySemiBold,
     fontSize: 12,
-    fontWeight: "600",
-    color: "#8A8A9A",
+    lineHeight: 15,
+    letterSpacing: 1,
   },
-  filterChipTextActive: {
-    color: "#0A0A14",
-  },
-  markerBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  /* Markers */
+  // Fixed outer box: the native Android marker bitmap is sized at capture
+  // time, so the bounds must not depend on content that lays out later.
+  markerBox: {
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXxxl,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
   },
+  markerBadge: {
+    width: spacing.spacingXl + spacing.spacingSm,
+    height: spacing.spacingXl + spacing.spacingSm,
+  },
+  markerBadgeContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  /* Detail sheet */
   sheetWrap: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    padding: 12,
+    padding: spacing.spacingMd,
   },
   sheetCard: {
-    padding: 14,
+    padding: spacing.spacingLg,
+    gap: spacing.spacingMd,
   },
   sheetHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: spacing.spacingMd,
   },
   sheetIconBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+  },
+  sheetIconBadgeContent: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  sheetHeaderText: {
+    flex: 1,
   },
   sheetTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: Colors.text,
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
   },
   sheetSubtitle: {
-    fontSize: 12,
-    color: Colors.textSecondary,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  sheetReadouts: {
+    flexDirection: "row",
+    gap: spacing.spacingXl,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
+  },
+  sheetReadout: {
+    gap: spacing.spacingXs,
+  },
+  sheetReadoutLabel: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
+  },
+  sheetReadoutValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
+  },
+  sheetReadoutValue: {
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
+  },
+  sheetReadoutUnit: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   sheetLine: {
-    marginTop: 8,
-    fontSize: 13,
-    color: Colors.textSecondary,
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
+  /* Submit FAB */
   fab: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: Colors.primary,
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXxxl,
+  },
+  fabContent: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
   },
+  /* Submit modal */
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: alpha(colors.voidBlack, 0.75),
   },
   modalSheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
     maxHeight: "85%",
+  },
+  modalContent: {
+    padding: spacing.spacingXl,
+    gap: spacing.spacingMd,
   },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+  },
+  modalCoords: {
+    ...textStyle("dataSm"),
+    color: colors.textSecondary,
   },
   errorText: {
-    color: Colors.danger,
-    fontSize: 13,
-    marginBottom: 8,
+    ...textStyle("body"),
+    color: colors.racingRed,
+    marginBottom: spacing.spacingSm,
   },
   submitBtn: {
-    marginTop: 8,
+    marginTop: spacing.spacingSm,
+  },
+  submittingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.spacingSm,
+    marginTop: spacing.spacingSm,
+    paddingVertical: spacing.spacingMd,
+  },
+  submittingText: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   successBox: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 40,
-    gap: 10,
+    paddingVertical: spacing.spacingXxxl,
+    gap: spacing.spacingMd,
   },
   successText: {
-    fontSize: 16,
-    fontWeight: "700",
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
   },
 });

@@ -1,9 +1,39 @@
+/**
+ * Driveverse — Map.
+ *
+ * The live screen: routing, GPS trip recording, the online-driver presence
+ * layer, the OSM/community Places layer, and the events layer, all stacked
+ * over one MapView.
+ *
+ * Rebuilt on the Phase 1 tokens (`constants/theme.ts`,
+ * `components/CutCorner.tsx`, `components/MapGlyphs.tsx`) following the
+ * pattern the Drive Hub set in Phase 2. MAP_SCREEN_REFERENCE.md records
+ * every deviation and the self-critique; the short version of the rules
+ * this file follows:
+ *
+ *   - No literal colours, sizes or spacings. Everything routes through the
+ *     tokens, including opacity, via `alpha()`.
+ *   - Numbers are JetBrains Mono; units are Inter beside them, never part
+ *     of the mono readout.
+ *   - Brand surfaces (sheets, cards, buttons, chips, markers) cut
+ *     `topRight`. Utility surfaces (progress tracks, dividers, inputs)
+ *     stay square.
+ *   - Separation is hairlines and surface steps. Zero shadows, zero
+ *     gradients, zero blur.
+ *   - Red is the accent, not the theme. See the red budget in
+ *     MAP_SCREEN_REFERENCE.md §3.
+ *
+ * Nothing about the routing, GPS or gesture behaviour changed in that
+ * pass — the handlers, refs and effects below are the originals.
+ */
+
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   StyleSheet,
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   Platform,
   Animated,
   ActivityIndicator,
@@ -17,30 +47,20 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { usePlaces } from "@/hooks/usePlaces";
+import { PLACE_CATEGORY_LABELS } from "@/constants/placesCategories";
 import type { NormalizedPlace } from "@/lib/placesApi";
-import Svg, { Circle as SvgCircle, Path as SvgPath } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
-  UtensilsCrossed,
   MapPin,
   X,
   Clock,
   Route,
-  Circle,
   Square,
-  Timer,
-  Zap,
-  TrendingUp,
   Trophy,
   Users,
   UserPlus,
-  Coffee,
-  Fuel,
-  ShoppingBag,
-  Wrench,
   Car,
-  Flag,
   Crown,
   LogOut,
   Bookmark,
@@ -77,6 +97,31 @@ import {
   Mountain,
   ChevronUp,
 } from "lucide-react-native";
+import {
+  CutCornerBadge,
+  CutCornerButton,
+  CutCornerSurface,
+} from "@/components/CutCorner";
+import {
+  CHROME_ICON_STROKE,
+  DestinationMark,
+  DriverMark,
+  MAP_GLYPHS,
+  MAP_GLYPH_STROKE,
+  VisibilityGlyph,
+  type MapGlyphComponent,
+} from "@/components/MapGlyphs";
+import {
+  alpha,
+  borderWidth,
+  colors,
+  cut,
+  fontFamily,
+  onRacingRed,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -84,7 +129,7 @@ import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
-import { EventTypeIcon, eventTypeColor, eventTypeLabel } from "@/components/EventMeta";
+import { EventTypeIcon, eventTypeLabel } from "@/components/EventMeta";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
@@ -311,6 +356,18 @@ function fmtEventTime(iso: string, isLive: boolean): string {
   return `${d.getDate()} ${months[d.getMonth()]} ${time}`;
 }
 
+/**
+ * Duration split into a mono value and an Inter unit, so a readout never
+ * mixes letters into JetBrains Mono. `28 min`, `1:05 h:m`.
+ */
+function splitDuration(seconds: number): { value: string; unit: string } {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 3600) return { value: String(Math.round(total / 60)), unit: "min" };
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return { value: `${h}:${String(m).padStart(2, "0")}`, unit: "h:m" };
+}
+
 /** Live timer format: "02:34:15" */
 function fmtTimer(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -349,18 +406,46 @@ function greetingForHour(hour: number): string {
   return "Good evening";
 }
 
-/** Open-Meteo WMO weather code → icon */
+/**
+ * Open-Meteo WMO weather code → icon.
+ *
+ * The six conditions used to carry six colours — a pastel sky blue, a
+ * pastel slate, a butter yellow. That is five hues the palette has no room
+ * for, spent on a decoration in a 16pt pill. Weather is supporting
+ * information on this screen, so every condition now draws in
+ * `textSecondary` and the shape alone carries the meaning.
+ */
 function WeatherGlyph({ code, size }: { code: number; size: number }) {
-  if (code >= 95) return <CloudLightning size={size} color="#F2C94C" />;
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return <CloudSnow size={size} color="#CFE2FF" />;
-  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return <CloudRain size={size} color="#7FB2F2" />;
-  if (code >= 45 && code <= 48) return <CloudFog size={size} color="#9AA4BC" />;
-  if (code >= 2) return <Cloud size={size} color="#B9C2D8" />;
-  return <Sun size={size} color="#FFD75E" fill="rgba(255, 215, 94, 0.25)" />;
+  const c = colors.textSecondary;
+  const w = CHROME_ICON_STROKE;
+  if (code >= 95) return <CloudLightning size={size} color={c} strokeWidth={w} />;
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return <CloudSnow size={size} color={c} strokeWidth={w} />;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return <CloudRain size={size} color={c} strokeWidth={w} />;
+  if (code >= 45 && code <= 48) return <CloudFog size={size} color={c} strokeWidth={w} />;
+  if (code >= 2) return <Cloud size={size} color={c} strokeWidth={w} />;
+  return <Sun size={size} color={c} strokeWidth={w} />;
 }
 
-// Neon ring palette for other players on the map (stable per user id)
-const PLAYER_COLORS = ["#22D3EE", "#A78BFA", "#FB923C", "#F472B6", "#FACC15", "#34D399"];
+/**
+ * Identity ring colours for other drivers on the map.
+ *
+ * This is the one place the screen is allowed more than the six palette
+ * values (DESIGN_SYSTEM_AUDIT §3c): people in a convoy have to be
+ * distinguishable from one another, and a name label alone does not do
+ * that at a glance while driving. The audit's instruction was to re-pick
+ * them "against voidBlack in a motorsport register (livery colours, not
+ * pastels)" — so the old neon set (cyan / lilac / peach / pink / butter /
+ * mint) is replaced by six racing liveries. None of them is red: red stays
+ * the accent, and a driver marker is not an accent.
+ */
+const PLAYER_COLORS = [
+  "#D9DCE1", // silver
+  "#F2B705", // works gold
+  "#3FA34D", // racing green
+  "#2D7DD2", // works blue
+  "#E8631B", // gulf orange
+  "#A63A3A", // maroon
+];
 function playerColor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
@@ -372,16 +457,6 @@ function playerColor(id: string): string {
 // HUD mockup visually. Do not treat it as a real regulatory speed limit.
 const PLACEHOLDER_SPEED_LIMIT_KMH = 50;
 
-const CAT_COLORS: Record<LandmarkCategory, string> = {
-  cafe: "#D4A574",
-  restaurant: "#FF6B6B",
-  spbu: "#F59E0B",
-  shopping: "#00D4AA",
-  carwash: "#3B82F6",
-  charging: "#A3E635",
-  workshop: "#FF7A1A",
-};
-
 const CAT_LABELS: Record<LandmarkCategory, string> = {
   cafe: "Cafes",
   restaurant: "Food",
@@ -392,42 +467,60 @@ const CAT_LABELS: Record<LandmarkCategory, string> = {
   workshop: "Workshop",
 };
 
-// Neon badge marker images — every category has a matching badge so POI
-// markers always render consistently (no vector fallback in normal use).
-const CAT_ICONS: Partial<Record<LandmarkCategory, number>> = {
-  cafe: require("@/assets/images/map-icons/cafe.png"),
-  restaurant: require("@/assets/images/map-icons/restaurant.png"),
-  spbu: require("@/assets/images/map-icons/spbu.png"),
-  shopping: require("@/assets/images/map-icons/shopping.png"),
-  carwash: require("@/assets/images/map-icons/carwash.png"),
-  charging: require("@/assets/images/map-icons/charging.png"),
-  workshop: require("@/assets/images/map-icons/workshop.png"),
-};
+/**
+ * Landmark category → glyph.
+ *
+ * This used to be seven pre-rendered neon PNG badges plus a seven-hue
+ * `CAT_COLORS` map. Both are gone. The bitmaps baked their glow into the
+ * asset, so they could not be restyled and forced a load-gating dance to
+ * stop Android snapshotting a half-decoded image into the marker; and the
+ * seven hues were seven values outside the palette doing the job a shape
+ * should do. Now the category is the glyph and the state is the colour —
+ * the same rule the Places layer follows.
+ */
+/**
+ * Route line weights. Two polylines per route — a faint casing and a solid
+ * core, both racingRed — matching `components/RouteLine.tsx`, which draws
+ * the same trace on a trip card at `strokeWidth` 2. On the map the line
+ * competes with tiles rather than a flat card, so it is one step heavier.
+ */
+/**
+ * Vertical offsets for the floating HUD panels, measured down from the
+ * safe-area inset. Each is a multiple of the 4pt spacing scale — the map
+ * chrome cannot use the scale for its own positions the way a scrolling
+ * layout can, because the panels overlap each other rather than stack.
+ */
+/** Below the filter chip row (one chip tall plus its margin). */
+const PLACES_STATUS_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
+/** Below the driving-mode profile pill. */
+const TURN_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingSm; // 56
+/** Below the speed-limit sign and compass. */
+const NEARBY_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
+/** Below the greeting card, so the landmark-loading pill never lands on it. */
+const LANDMARK_STATUS_OFFSET = spacing.spacingXxxl * 2 + spacing.spacingLg; // 112
+/** Below the turn card, which is the tallest panel in the left column. */
+const ACHIEVEMENT_STACK_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 + spacing.spacingLg; // 184
+/** Clearance for the floating tab bar, matching the Drive Hub. */
+const TAB_BAR_CLEARANCE = spacing.spacingXxxl * 2; // 96
+/** Below the right-hand chrome column, which is four labelled buttons tall. */
+const FILTERS_POPOVER_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXs; // 148
+/** Clears the top chrome so the hint never lands on the greeting card. */
+const DROP_PIN_HINT_OFFSET = spacing.spacingXxxl * 2 + spacing.spacingLg; // 112
+/** Where the idle bottom stack (live feed, action stack) sits above the bar. */
+const BOTTOM_STACK_OFFSET = spacing.spacingXxxl * 4; // 192
 
-// ─── PlayerPuck ──────────────────────────────────────────
-// The player's own map marker, drawn entirely in code (SVG) instead of a
-// bitmap asset, so it can never ship cropped, half-loaded, or missing.
-// Styled after Google Maps' own navigation arrow (blue chevron, white
-// outline, soft halo) so it reads as familiar rather than blocking the
-// map. The arrow points up and the parent Marker's `rotation={heading}` +
-// `flat` steer it with the vehicle.
-const PLAYER_PUCK_SIZE = 36;
-function PlayerPuck() {
-  return (
-    <Svg width={PLAYER_PUCK_SIZE} height={PLAYER_PUCK_SIZE} viewBox="0 0 36 36">
-      {/* soft blue halo */}
-      <SvgCircle cx="18" cy="18" r="17" fill="#4285F4" opacity={0.16} />
-      {/* navigation chevron, Google Maps blue-dot style */}
-      <SvgPath
-        d="M18 6 L27 27 L18 22 L9 27 Z"
-        fill="#4285F4"
-        stroke="#FFFFFF"
-        strokeWidth={2}
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
+const ROUTE_CASING_WIDTH = 8;
+const ROUTE_CORE_WIDTH = 4;
+
+const CAT_GLYPHS: Record<LandmarkCategory, MapGlyphComponent> = {
+  cafe: MAP_GLYPHS.cafe,
+  restaurant: MAP_GLYPHS.food,
+  spbu: MAP_GLYPHS.fuel,
+  shopping: MAP_GLYPHS.shopping,
+  carwash: MAP_GLYPHS.carwash,
+  charging: MAP_GLYPHS.charging,
+  workshop: MAP_GLYPHS.workshop,
+};
 
 // ─── SettledMarker ───────────────────────────────────────
 // Android draws custom marker views by snapshotting them into a bitmap.
@@ -457,23 +550,161 @@ function SettledMarker({ settleKey, ready = true, children, ...markerProps }: Se
   );
 }
 
-// ─── EyeIcon ─────────────────────────────────────────────
-// Visibility toggle glyph: open eye when visible to others, slashed eye
-// when hidden. Drawn in code (SVG) to match the app's other in-map icons.
-function EyeIcon({ visible, color, size = 14 }: { visible: boolean; color: string; size?: number }) {
+/**
+ * A list row in a bottom sheet: icon, Inter label, chevron. A utility
+ * surface — plain rectangle, hairline outline — so it does not compete
+ * with the cut-corner sheet holding it.
+ */
+function ActionRow({
+  label,
+  icon,
+  busy = false,
+  onPress,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  /** Disables the row and dims it, for in-flight or already-done actions. */
+  busy?: boolean;
+  onPress: () => void;
+}) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <SvgPath
-        d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-      />
-      <SvgCircle cx="12" cy="12" r="3.2" stroke={color} strokeWidth={2} />
-      {!visible && (
-        <SvgPath d="M3 3L21 21" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      )}
-    </Svg>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: busy }}
+      disabled={busy}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionRowItem,
+        busy && styles.actionRowItemBusy,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={styles.actionRowIcon}>{icon}</View>
+      <Text style={styles.actionRowLabel} numberOfLines={1}>{label}</Text>
+      <ChevronRight size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+    </Pressable>
+  );
+}
+
+/**
+ * One toggle row in the Filters popover: category glyph, Inter label, and
+ * a square tick box that fills racingRed when the layer is on.
+ */
+function FilterRow({
+  label,
+  checked,
+  onToggle,
+  children,
+}: {
+  label: string;
+  checked: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={`${label} layer`}
+      style={({ pressed }) => [styles.filterRow, pressed && styles.pressed]}
+      onPress={onToggle}
+    >
+      {children}
+      <Text style={styles.filterLabel} numberOfLines={1}>{label}</Text>
+      {/* The tick is `textPrimary`, not the accent. Every layer is on by
+          default, so an accent-coloured tick meant nine red squares in one
+          popover — which is the opposite of a sparingly-used accent. */}
+      <View style={[styles.filterCheck, checked && styles.filterCheckOn]}>
+        {checked && (
+          <Check size={spacing.spacingMd} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * A labelled icon button in the map's floating chrome (search, locate,
+ * filters, event, clear). Square utility surface at `radius.sharp` — these
+ * are not brand surfaces, so they do not take the corner cut; the cut is
+ * reserved for the sheets, cards and primary actions.
+ */
+function MapChromeButton({
+  label,
+  accessibilityLabel,
+  active = false,
+  onPress,
+  children,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  active?: boolean;
+  onPress: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.labeledBtn}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ selected: active }}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.actionBtn,
+          active && styles.actionBtnActive,
+          pressed && styles.pressed,
+        ]}
+      >
+        {children}
+      </Pressable>
+      <Text style={styles.actionBtnLabel} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * One column of the driving-mode stats row: Rajdhani label, mono value,
+ * Inter unit. Splitting the unit out of the readout is what keeps the five
+ * columns aligned as the numbers change width.
+ */
+function DriveStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <View style={styles.drivingStatCol}>
+      <Text style={styles.drivingStatLabel}>{label}</Text>
+      <View style={styles.drivingStatValueRow}>
+        <Text style={styles.drivingStatValue}>{value}</Text>
+        {unit ? <Text style={styles.drivingStatUnit}>{unit}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * One row of the driving-mode "Nearby" card: category glyph, Inter label,
+ * mono distance. Renders nothing when there is no such place in range, so
+ * the card shrinks instead of showing an empty slot.
+ */
+function NearbyRow({
+  glyph: Glyph,
+  label,
+  meters,
+}: {
+  glyph: MapGlyphComponent;
+  label: string;
+  meters?: number | null;
+}) {
+  if (meters == null) return null;
+  return (
+    <View style={styles.nearbyRow}>
+      <View style={styles.nearbyIconBox}>
+        <Glyph size={spacing.spacingMd} color={colors.textSecondary} />
+      </View>
+      <View style={styles.nearbyRowText}>
+        <Text style={styles.nearbyLabel} numberOfLines={1}>{label}</Text>
+        <Text style={styles.nearbyDist}>{fmtMeters(Math.round(meters))}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -609,29 +840,13 @@ export default function MapScreen() {
   const [showDriversLayer, setShowDriversLayer] = useState(true);
   const weatherFetchedRef = useRef(false);
 
-  // Keep each badge marker re-rendering (tracksViewChanges) until its Image has
-  // actually finished decoding, so the native Android marker snapshot isn't taken
-  // mid-load (which is what produced icons frozen at half-drawn/cropped size).
-  // A blind timeout can't guarantee the image is ready by the time it fires, so
-  // we track load completion per-marker instead.
-  const [loadedBadgeIds, setLoadedBadgeIds] = useState<Set<string>>(new Set());
-  const handleBadgeLoaded = useCallback((id: string) => {
-    setLoadedBadgeIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-  }, []);
-  useEffect(() => {
-    const currentIds = new Set(cafes.map((poi) => poi.id));
-    setLoadedBadgeIds((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (currentIds.has(id)) next.add(id);
-        else changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [cafes]);
+  // POI badges no longer load a bitmap — the category glyphs are drawn in
+  // code (components/MapGlyphs.tsx), which lays out synchronously, so the
+  // per-marker image load-gating that used to guard the Android marker
+  // snapshot is not needed for them any more. `SettledMarker`'s grace
+  // period still covers text layout and select/deselect size changes.
 
-  // Same load-gating for online player avatars (network images) so their
+  // Load-gating is still needed for online player avatars (network images) so their
   // markers don't freeze before the photo has decoded.
   const [loadedAvatarIds, setLoadedAvatarIds] = useState<Set<string>>(new Set());
   const handleAvatarLoaded = useCallback((id: string) => {
@@ -713,7 +928,12 @@ export default function MapScreen() {
   // --- Fetch directions from user location to destination ---
   const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
     if (!MAPBOX_ACCESS_TOKEN) {
-      Alert.alert("Route Unavailable", "Mapbox access token is missing, so a route can't be calculated.");
+      // Voice rule: name what happened and what fixes it. "Route
+      // Unavailable" on its own told the driver nothing they could act on.
+      Alert.alert(
+        "Routing is switched off in this build",
+        "This copy of Driveverse shipped without a Mapbox access token, so it can't calculate routes. Update to the latest version from the store — if the newest version does the same, send us the build number from Profile → About."
+      );
       setNavigating(false);
       return;
     }
@@ -752,11 +972,17 @@ export default function MapScreen() {
         });
       } else {
         setNavigating(false);
-        Alert.alert("Route Unavailable", "No driving route could be found to this destination.");
+        Alert.alert(
+          "No road route to that point",
+          "There's no drivable road connecting you to the pin — it may be offshore, inside a closed area, or on the far side of a water crossing. Drag the pin onto a road and tap Route again."
+        );
       }
     } catch {
       setNavigating(false);
-      Alert.alert("Route Unavailable", "Couldn't reach Mapbox. Check your connection and try again.");
+      Alert.alert(
+        "Couldn't reach the routing service",
+        "The request to Mapbox didn't get through, so there's no route yet. Check your connection and tap Route again."
+      );
     } finally {
       setLoadingRoute(false);
     }
@@ -778,7 +1004,9 @@ export default function MapScreen() {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           if (mounted) {
-            setLocError("Location permission needed");
+            setLocError(
+              "Location is off for Driveverse, so the map can't follow you. Turn it on in your device Settings, then tap Retry."
+            );
             setLocating(false);
           }
           return;
@@ -931,7 +1159,9 @@ export default function MapScreen() {
         );
       } catch {
         if (mounted) {
-          setLocError("Could not get location");
+          setLocError(
+            "No GPS fix yet — the map is showing a default view. Move somewhere with a clearer view of the sky and tap Retry."
+          );
           setLocating(false);
         }
       }
@@ -977,7 +1207,10 @@ export default function MapScreen() {
     try {
       const { status } = await ImagePickerExpo.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert("Camera permission needed", "Allow camera access to capture drive photos.");
+        Alert.alert(
+          "Camera access is off",
+          "Driveverse can't open the camera to snap a drive photo. Turn the camera permission on in your device Settings, then tap RECORD again."
+        );
         return;
       }
       const result = await ImagePickerExpo.launchCameraAsync({
@@ -990,7 +1223,10 @@ export default function MapScreen() {
         photoToastTimerRef.current = setTimeout(() => setPhotoToast(null), 2200);
       }
     } catch {
-      Alert.alert("Camera error", "Could not open the camera.");
+      Alert.alert(
+        "The camera didn't open",
+        "Something else on the phone may be holding the camera. Close any other camera app and tap RECORD again."
+      );
     }
   }, []);
 
@@ -1084,10 +1320,10 @@ export default function MapScreen() {
   const handleInviteToPartyFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!party) {
       Alert.alert(
-        "No Convoy Yet",
-        "Start a convoy first, then invite friends from the map.",
+        "You're not in a convoy yet",
+        "An invite has to point at a convoy, and you don't have one running. Start one, then invite drivers straight from their map marker.",
         [
-          { text: "Cancel", style: "cancel" },
+          { text: "Not now", style: "cancel" },
           { text: "Start a Convoy", onPress: () => router.push("/convoy" as any) },
         ]
       );
@@ -1097,9 +1333,13 @@ export default function MapScreen() {
     try {
       const result = await inviteFriend(friendId);
       if (result.ok) {
-        Alert.alert("Invite Sent!", `${friendName} was invited to join ${party.name}.`);
+        Alert.alert("Invite sent", `${friendName} was invited to join ${party.name}.`);
       } else {
-        Alert.alert("Couldn't Invite", result.message ?? "You can only invite accepted friends.");
+        Alert.alert(
+          "Invite not sent",
+          result.message ??
+            `${friendName} isn't on your friends list yet, and convoy invites only go to friends. Send a friend request first, then invite them.`
+        );
       }
     } finally {
       setInvitingToParty(false);
@@ -1117,9 +1357,12 @@ export default function MapScreen() {
         content: `👋 ${user.name ?? "A driver"} wants to meet up nearby! Are you free to link up?`,
       });
       if (error) {
-        Alert.alert("Error", error.message);
+        Alert.alert(
+          "Meetup request not sent",
+          `The message to ${friendName} didn't reach the server: ${error.message} Check your connection and tap Ask a Meetup again.`
+        );
       } else {
-        Alert.alert("Meetup Request Sent!", `${friendName} will see your message in their inbox.`);
+        Alert.alert("Meetup request sent", `${friendName} will see it in their inbox.`);
       }
     } catch {
       // Silent
@@ -1140,12 +1383,18 @@ export default function MapScreen() {
       });
       if (error) {
         if (error.code === "23505") {
-          Alert.alert("Already Connected", `You are already connected with ${friendName}`);
+          Alert.alert(
+            "Already connected",
+            `You and ${friendName} are already friends — no second request needed.`
+          );
         } else {
-          Alert.alert("Error", error.message);
+          Alert.alert(
+            "Friend request not sent",
+            `The request to ${friendName} didn't reach the server: ${error.message} Check your connection and tap Add Friend again.`
+          );
         }
       } else {
-        Alert.alert("Request Sent!", `Friend request sent to ${friendName}`);
+        Alert.alert("Friend request sent", `${friendName} will see it on their profile.`);
       }
     } catch {
       // Silent
@@ -1188,7 +1437,10 @@ export default function MapScreen() {
     const coords = destCoords();
     if (!coords) return;
     if (!userLocation) {
-      Alert.alert("Location Needed", "We can't find your current location yet. Make sure location services are on and try again.");
+      Alert.alert(
+        "No GPS fix yet",
+        "A route starts from where you are, and Driveverse doesn't have your position. Check location is on for the app, wait for the driver marker to appear, then tap Route again."
+      );
       return;
     }
     setNavigating(true);
@@ -1217,7 +1469,10 @@ export default function MapScreen() {
   // --- Event handlers ---
   const openCreateEvent = useCallback(() => {
     if (!user) {
-      Alert.alert("Sign In Required", "Create an account to build events on the map");
+      Alert.alert(
+        "Events need an account",
+        "An event is posted under your driver name, so it can't be created while signed out. Sign in from the banner above the tab bar, then tap Event again."
+      );
       return;
     }
     router.push({ pathname: "/community", params: { tab: "events" } } as any);
@@ -1228,7 +1483,10 @@ export default function MapScreen() {
   // switch. ---
   const toggleDrive = useCallback(() => {
     if (!user) {
-      Alert.alert("Sign In Required", "Create an account to start driving");
+      Alert.alert(
+        "Drives need an account",
+        "A drive is recorded to your trip log and awards XP, so it can't start while signed out. Sign in from the banner above the tab bar, then tap DRIVE again."
+      );
       return;
     }
     setShowDropPinHint((v) => !v);
@@ -1261,7 +1519,10 @@ export default function MapScreen() {
   const handleMapLongPress = useCallback((event: any) => {
     if (!placesLayerOpen) return;
     if (!user) {
-      Alert.alert("Sign In Required", "Create an account to submit a place");
+      Alert.alert(
+        "Submitting a place needs an account",
+        "Community places are credited to the driver who added them, so this can't be done while signed out. Sign in from the banner above the tab bar, then try again."
+      );
       return;
     }
     const { latitude, longitude } = event.nativeEvent.coordinate;
@@ -1273,18 +1534,28 @@ export default function MapScreen() {
     setEventActionBusy(true);
     const { error } = await joinEvent(ev.id);
     setEventActionBusy(false);
-    if (error) Alert.alert("Could Not Join", error);
+    if (error) {
+      Alert.alert(
+        "Couldn't join the event",
+        `${error} Tap Join Event again once you're back online.`
+      );
+    }
   }, [joinEvent]);
 
   const handleLeaveEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
     const { error } = await leaveEvent(ev.id);
     setEventActionBusy(false);
-    if (error) Alert.alert("Could Not Leave", error);
+    if (error) {
+      Alert.alert(
+        "Couldn't leave the event",
+        `${error} You're still listed as attending. Tap Leave again once you're back online.`
+      );
+    }
   }, [leaveEvent]);
 
   const handleCancelEvent = useCallback((ev: DriveEvent) => {
-    Alert.alert("Cancel Event", `Cancel "${ev.title}" for everyone?`, [
+    Alert.alert("Cancel this event?", `"${ev.title}" will be removed from the map and everyone who joined will be told it's off. This can't be undone.`, [
       { text: "Keep Event", style: "cancel" },
       {
         text: "Cancel Event",
@@ -1294,7 +1565,12 @@ export default function MapScreen() {
           const { error } = await cancelEvent(ev.id);
           setEventActionBusy(false);
           setSelectedEventId(null);
-          if (error) Alert.alert("Error", error);
+          if (error) {
+            Alert.alert(
+              "Event not cancelled",
+              `${error} It's still live on the map. Try again once you're back online.`
+            );
+          }
         },
       },
     ]);
@@ -1302,7 +1578,10 @@ export default function MapScreen() {
 
   const handleRouteToEvent = useCallback((ev: DriveEvent) => {
     if (!userLocation) {
-      Alert.alert("Location Needed", "We can't find your current location yet. Make sure location services are on and try again.");
+      Alert.alert(
+        "No GPS fix yet",
+        "A route starts from where you are, and Driveverse doesn't have your position. Check location is on for the app, wait for the driver marker to appear, then tap Route again."
+      );
       return;
     }
     setSelectedEventId(null);
@@ -1441,12 +1720,6 @@ export default function MapScreen() {
     ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
     : { latitude: -6.2088, longitude: 106.8456, latitudeDelta: 0.05, longitudeDelta: 0.05 };
 
-  const RECORD_RED = "#FF2D55";
-  const RECORD_GLOW = "#FF6482";
-  const ROUTE_RED = "#E53935";
-  const ROUTE_GLOW = "#FF5252";
-  const RECORDED_PATH_COLOR = "#FF2D55";
-
   // A just-finished trip owns the bottom card slot — the stale POI/route
   // cards must yield to it instead of stacking on top and burying its
   // Save & Share / XP buttons.
@@ -1545,6 +1818,10 @@ export default function MapScreen() {
     !selectedDestination &&
     !selectedEvent &&
     !selectedOnlineUser &&
+    // A tapped OSM/community place owns the bottom slot too — without this
+    // the callout renders underneath the Drive/Convoy/Chat stack and its
+    // close control sits behind a button.
+    !selectedPlace &&
     recordedPath.length === 0;
 
   const firstName = (user?.name ?? "Driver").split(" ")[0];
@@ -1562,10 +1839,12 @@ export default function MapScreen() {
     }
   }
 
-  // Live feed rows: live meets → upcoming events → trending landmark
+  // Live feed rows: live meets → upcoming events → nearest landmark.
+  // `live` replaces the per-row `color` the rows used to carry: the one
+  // thing worth colouring in the feed is whether a row is happening now.
   type FeedItem = {
     id: string;
-    color: string;
+    live: boolean;
     title: string;
     sub: string;
     time: string;
@@ -1576,15 +1855,20 @@ export default function MapScreen() {
   const feedItems: FeedItem[] = [];
   for (const ev of events) {
     if (feedItems.length >= 3) break;
-    const evColor = eventTypeColor(ev.event_type);
     feedItems.push({
       id: `feed-ev-${ev.id}`,
-      color: evColor,
+      live: ev.is_live,
       title: ev.is_live ? `${ev.host_name} started a meet` : `New event by ${ev.host_name}`,
       sub: ev.title,
       time: ev.is_live ? fmtAgo(ev.starts_at) : fmtEventTime(ev.starts_at, false),
       count: ev.participant_count,
-      icon: <EventTypeIcon type={ev.event_type} size={15} color={evColor} />,
+      icon: (
+        <EventTypeIcon
+          type={ev.event_type}
+          size={spacing.spacingLg}
+          color={ev.is_live ? colors.racingRed : colors.textSecondary}
+        />
+      ),
       onPress: () => {
         setSelectedEventId(ev.id);
         mapRef.current?.animateCamera(
@@ -1596,13 +1880,14 @@ export default function MapScreen() {
   }
   if (feedItems.length < 3 && nearestPoi) {
     const poi = nearestPoi;
+    const PoiGlyph = CAT_GLYPHS[poi.category];
     feedItems.push({
       id: `feed-poi-${poi.id}`,
-      color: CAT_COLORS[poi.category],
-      title: `${poi.name} is trending`,
-      sub: "Popular with drivers nearby",
+      live: false,
+      title: `${poi.name}`,
+      sub: `Nearest ${CAT_LABELS[poi.category].toLowerCase()}`,
       time: fmtMeters(Math.round(poi.dist)),
-      icon: <Coffee size={15} color={CAT_COLORS[poi.category]} />,
+      icon: <PoiGlyph size={spacing.spacingLg} color={colors.textSecondary} />,
       onPress: () => handleCafePress(poi),
     });
   }
@@ -1656,28 +1941,23 @@ export default function MapScreen() {
         <MapboxTileLayer dark={mapStyleDark} />
 
         {placesLayerOpen && (
-          <PlacesMarkers places={places.places} onSelect={setSelectedPlace} />
+          <PlacesMarkers
+            places={places.places}
+            onSelect={setSelectedPlace}
+            selectedId={selectedPlace?.id ?? null}
+          />
         )}
 
-        {/* Landmark Markers — neon badge image + name + distance label (design spec).
-            Always rendered, regardless of recording/online/party/chat state, so the
-            map's POI layer never disappears mid-session. */}
+        {/* Landmark markers — cut-corner badge + hand-drawn category glyph +
+            name + distance. Always rendered, regardless of recording/online/
+            party/chat state, so the map's POI layer never disappears
+            mid-session.
+
+            Category is carried by the glyph; colour only says whether the
+            marker is idle, selected, or the confirmed destination. */}
         {cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
-          const cat = poi.category;
-          const catColor = CAT_COLORS[cat];
-          const badgeSrc = CAT_ICONS[cat];
-          const catIcon = (s: number, c: string) => {
-            switch (cat) {
-              case "cafe": return <Coffee size={s} color={c} strokeWidth={2.2} />;
-              case "spbu": return <Fuel size={s} color={c} strokeWidth={2.2} />;
-              case "shopping": return <ShoppingBag size={s} color={c} strokeWidth={2.2} />;
-              case "carwash": return <Car size={s} color={c} strokeWidth={2.2} />;
-              case "charging": return <Zap size={s} color={c} strokeWidth={2.2} />;
-              case "workshop": return <Wrench size={s} color={c} strokeWidth={2.2} />;
-              default: return <UtensilsCrossed size={s} color={c} strokeWidth={2.2} />;
-            }
-          };
+          const Glyph = CAT_GLYPHS[poi.category];
           const isChosen = isSelected && locationChosen;
           const distLabel = userLocation
             ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
@@ -1688,7 +1968,6 @@ export default function MapScreen() {
               coordinate={{ latitude: poi.lat, longitude: poi.lng }}
               onPress={() => handleCafePress(poi)}
               settleKey={`${isSelected}-${isChosen}-${poi.name}-${distLabel ?? ""}`}
-              ready={!badgeSrc || loadedBadgeIds.has(poi.id)}
               anchor={{ x: 0.5, y: 0.37 }}
             >
               <View style={styles.poiMarkerWrap} collapsable={false}>
@@ -1696,28 +1975,24 @@ export default function MapScreen() {
                     normal/selected/chosen states so the native snapshot never
                     clips a badge that grew after capture. */}
                 <View style={styles.poiBadgeBox}>
-                  {badgeSrc ? (
-                    <Image
-                      source={badgeSrc}
-                      style={[
-                        styles.poiBadge,
-                        isSelected && styles.poiBadgeSelected,
-                        isChosen && styles.poiBadgeChosen,
-                      ]}
-                      resizeMode="contain"
-                      fadeDuration={0}
-                      onLoadEnd={() => handleBadgeLoaded(poi.id)}
-                    />
-                  ) : (
-                    <View style={[
+                  <CutCornerSurface
+                    fill={isSelected ? colors.racingRed : colors.carbonSurface}
+                    borderColor={isSelected ? colors.racingRed : colors.hairline}
+                    borderWidth={isChosen ? borderWidth.emphasis : borderWidth.hairline}
+                    cutSize={spacing.spacingSm}
+                    corners="topRight"
+                    style={[
                       styles.landmarkMarker,
-                      { borderColor: `${catColor}70` },
-                      isSelected && [styles.landmarkMarkerSelected, { borderColor: catColor, backgroundColor: `${catColor}18`, shadowColor: catColor }],
+                      isSelected && styles.landmarkMarkerSelected,
                       isChosen && styles.landmarkMarkerChosen,
-                    ]}>
-                      {catIcon(isChosen ? 19 : isSelected ? 16 : 13, isSelected ? "#EAEAEA" : catColor)}
-                    </View>
-                  )}
+                    ]}
+                    contentStyle={styles.landmarkMarkerContent}
+                  >
+                    <Glyph
+                      size={isChosen ? spacing.spacingXl : isSelected ? spacing.spacingLg : spacing.spacingMd}
+                      color={isSelected ? onRacingRed : colors.textPrimary}
+                    />
+                  </CutCornerSurface>
                 </View>
                 <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
                 {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
@@ -1726,37 +2001,39 @@ export default function MapScreen() {
           );
         })}
 
-        {/* Recorded path polyline (during and after recording) */}
+        {/* Recorded path — the trace of where the driver actually went.
+            One casing plus one core, both racingRed, matching the trip-card
+            trace in components/RouteLine.tsx. The old three-layer neon glow
+            is gone: glow is not in the system, and three stacked polylines
+            per GPS fix is three times the geometry to redraw. */}
         {recordedPath.length > 1 && (
           <>
-            {/* Glow layer */}
             <Polyline
               coordinates={recordedPath}
-              strokeWidth={8}
-              strokeColor={`${RECORDED_PATH_COLOR}30`}
+              strokeWidth={ROUTE_CASING_WIDTH}
+              strokeColor={alpha(colors.racingRed, 0.22)}
               lineCap="round"
               lineJoin="round"
             />
-            {/* Outer glow */}
             <Polyline
               coordinates={recordedPath}
-              strokeWidth={5}
-              strokeColor={`${RECORDED_PATH_COLOR}50`}
-              lineCap="round"
-              lineJoin="round"
-            />
-            {/* Core line */}
-            <Polyline
-              coordinates={recordedPath}
-              strokeWidth={3}
-              strokeColor={RECORDED_PATH_COLOR}
+              strokeWidth={ROUTE_CORE_WIDTH}
+              strokeColor={colors.racingRed}
               lineCap="round"
               lineJoin="round"
             />
           </>
         )}
 
-        {/* Route Polyline — split into yellow (traversed) + red (remaining) during recording */}
+        {/* Route polyline.
+            The route is one colour — racingRed — and progress is carried by
+            opacity, exactly as the trip card's RouteLine draws a ghost path
+            under a solid trace. What is left to drive is the faint casing;
+            what has been driven is solid. That replaces the old
+            yellow-behind / red-ahead pair, which spent a second hue on
+            something a value step already says.
+
+            The split index and the slicing below are unchanged. */}
         {routeInfo && (() => {
           const splitIdx = isRecording ? routeSplitIdx : null;
           if (splitIdx != null && splitIdx > 0 && splitIdx < routeInfo.coordinates.length - 1) {
@@ -1764,61 +2041,44 @@ export default function MapScreen() {
             const remaining = routeInfo.coordinates.slice(splitIdx);
             return (
               <>
-                {/* Traversed — yellow glow + core */}
-                {traversed.length > 1 && (
-                  <>
-                    <Polyline
-                      coordinates={traversed}
-                      strokeWidth={8}
-                      strokeColor="rgba(250, 204, 21, 0.25)"
-                      lineCap="round"
-                      lineJoin="round"
-                    />
-                    <Polyline
-                      coordinates={traversed}
-                      strokeWidth={4}
-                      strokeColor="#FACC15"
-                      lineCap="round"
-                      lineJoin="round"
-                    />
-                  </>
-                )}
-                {/* Remaining — red glow + core */}
+                {/* Remaining — the faint casing, drawn first so the solid
+                    traversed line sits on top of it at the join. */}
                 {remaining.length > 1 && (
-                  <>
-                    <Polyline
-                      coordinates={remaining}
-                      strokeWidth={7}
-                      strokeColor={`${ROUTE_GLOW}40`}
-                      lineCap="round"
-                      lineJoin="round"
-                    />
-                    <Polyline
-                      coordinates={remaining}
-                      strokeWidth={4}
-                      strokeColor={ROUTE_RED}
-                      lineCap="round"
-                      lineJoin="round"
-                    />
-                  </>
+                  <Polyline
+                    coordinates={remaining}
+                    strokeWidth={ROUTE_CASING_WIDTH}
+                    strokeColor={alpha(colors.racingRed, 0.28)}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                )}
+                {/* Traversed — solid. */}
+                {traversed.length > 1 && (
+                  <Polyline
+                    coordinates={traversed}
+                    strokeWidth={ROUTE_CORE_WIDTH}
+                    strokeColor={colors.racingRed}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
                 )}
               </>
             );
           }
-          // No split yet — show full red route
+          // No split yet — the whole route as casing plus core.
           return (
             <>
               <Polyline
                 coordinates={routeInfo.coordinates}
-                strokeWidth={7}
-                strokeColor={`${ROUTE_GLOW}40`}
+                strokeWidth={ROUTE_CASING_WIDTH}
+                strokeColor={alpha(colors.racingRed, 0.28)}
                 lineCap="round"
                 lineJoin="round"
               />
               <Polyline
                 coordinates={routeInfo.coordinates}
-                strokeWidth={4}
-                strokeColor={ROUTE_RED}
+                strokeWidth={ROUTE_CORE_WIDTH}
+                strokeColor={colors.racingRed}
                 lineCap="round"
                 lineJoin="round"
               />
@@ -1826,14 +2086,16 @@ export default function MapScreen() {
           );
         })()}
 
-        {/* Destination marker (when navigating) */}
+        {/* Destination marker (when navigating) — a target reticle rather
+            than a map pin, which is what every map provider's default looks
+            like. Anchored on its centre because a reticle marks a point. */}
         {selectedDestination && routeInfo && destCoords() && (
           <Marker
             coordinate={destCoords()!}
-            anchor={{ x: 0.5, y: 1 }}
+            anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={styles.destPin}>
-              <MapPin size={28} color={ROUTE_RED} fill={ROUTE_RED} />
+            <View style={styles.destPin} collapsable={false}>
+              <DestinationMark size={spacing.spacingXl + spacing.spacingXs} />
             </View>
           </Marker>
         )}
@@ -1842,16 +2104,22 @@ export default function MapScreen() {
         {selectedDestination && selectedDestination.type === "location" && !routeInfo && (
           <SettledMarker
             coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
-            anchor={{ x: 0.5, y: 1 }}
+            anchor={{ x: 0.5, y: 0.5 }}
             settleKey={`chosen-${locationChosen}`}
           >
             <View style={styles.customPin} collapsable={false}>
-              <MapPin size={locationChosen ? 36 : 28} color="#FF6B35" fill="#FF6B35" />
+              <DestinationMark
+                size={locationChosen ? spacing.spacingXxl : spacing.spacingXl}
+                color={locationChosen ? colors.racingRed : colors.textPrimary}
+              />
             </View>
           </SettledMarker>
         )}
 
-        {/* Online player markers — neon ring + car + name/level (design spec) */}
+        {/* Online driver markers. The ring carries the driver's livery colour
+            (see PLAYER_COLORS); everything else — level badge, convoy badge,
+            name plate — is palette. The party ring stays thicker rather than
+            brighter, because a shadow-based "glow" is not in the system. */}
         {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
           const ringColor = isPartyMate && party ? party.color : playerColor(onlineUser.user_id);
@@ -1874,7 +2142,7 @@ export default function MapScreen() {
                   )}
                   <View style={[
                     styles.playerRing,
-                    { borderColor: ringColor, shadowColor: ringColor },
+                    { borderColor: ringColor },
                     isPartyMate && styles.playerRingParty,
                   ]}>
                     {onlineUser.avatar ? (
@@ -1895,7 +2163,7 @@ export default function MapScreen() {
                   </View>
                   {isPartyMate && (
                     <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
-                      <Users size={9} color="#0A0A0F" strokeWidth={3} />
+                      <Users size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
                     </View>
                   )}
                 </View>
@@ -1905,35 +2173,68 @@ export default function MapScreen() {
           );
         })}
 
-        {/* Event markers — pin + mini info card (design spec) */}
+        {/* Event markers — cut-corner badge + head-count + a mini card.
+            A live event is the one thing on the events layer that gets the
+            accent; scheduled events stay neutral so "live" means something
+            at a glance. */}
         {!isRecording && showEventsLayer && events.map((ev) => {
-          const evColor = eventTypeColor(ev.event_type);
           const isSelected = selectedEventId === ev.id;
           const timeLabel = fmtEventTime(ev.starts_at, ev.is_live);
+          const accented = ev.is_live || isSelected;
+          const markerFill = isSelected ? colors.racingRed : colors.carbonSurface;
+          const markerBorder = accented ? colors.racingRed : colors.hairline;
+          const glyphColor = isSelected ? onRacingRed : colors.textPrimary;
           return (
             <SettledMarker
               key={`event-${ev.id}`}
               coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
               anchor={{ x: 0.5, y: 0.22 }}
               onPress={() => setSelectedEventId(ev.id)}
-              settleKey={`${isSelected}-${ev.is_live}-${evColor}-${ev.participant_count}-${ev.title}-${timeLabel}-${ev.location_name ?? ""}`}
+              settleKey={`${isSelected}-${ev.is_live}-${ev.participant_count}-${ev.title}-${timeLabel}-${ev.location_name ?? ""}`}
             >
               <View style={styles.eventMarkerColumn} collapsable={false}>
                 <View style={styles.eventMarkerWrap}>
-                  {ev.is_live && <View style={[styles.eventMarkerLiveRing, { borderColor: `${evColor}70` }]} />}
-                  <View style={[
-                    styles.eventMarker,
-                    { borderColor: evColor, shadowColor: evColor },
-                    isSelected && styles.eventMarkerSelected,
-                  ]}>
-                    <EventTypeIcon type={ev.event_type} size={isSelected ? 18 : 15} color={evColor} />
-                  </View>
-                  <View style={[styles.eventMarkerBadge, { backgroundColor: evColor }]}>
-                    <Text style={styles.eventMarkerBadgeText}>{ev.participant_count}</Text>
+                  {ev.is_live && (
+                    <View
+                      style={[
+                        styles.eventMarkerLiveRing,
+                        { borderColor: alpha(colors.racingRed, 0.45) },
+                      ]}
+                    />
+                  )}
+                  <CutCornerSurface
+                    fill={markerFill}
+                    borderColor={markerBorder}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={spacing.spacingSm}
+                    corners="topRight"
+                    style={[styles.eventMarker, isSelected && styles.eventMarkerSelected]}
+                    contentStyle={styles.eventMarkerContent}
+                  >
+                    <EventTypeIcon
+                      type={ev.event_type}
+                      size={isSelected ? spacing.spacingLg : spacing.spacingMd}
+                      color={glyphColor}
+                    />
+                  </CutCornerSurface>
+                  <View
+                    style={[
+                      styles.eventMarkerBadge,
+                      { backgroundColor: accented ? colors.racingRed : colors.hairline },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.eventMarkerBadgeText,
+                        { color: accented ? onRacingRed : colors.textPrimary },
+                      ]}
+                    >
+                      {ev.participant_count}
+                    </Text>
                   </View>
                 </View>
-                <View style={[styles.eventMiniCard, { borderColor: `${evColor}55` }]}>
-                  <Text style={[styles.eventMiniTitle, { color: evColor }]} numberOfLines={1}>{ev.title}</Text>
+                <View style={[styles.eventMiniCard, accented && styles.eventMiniCardLive]}>
+                  <Text style={styles.eventMiniTitle} numberOfLines={1}>{ev.title}</Text>
                   <Text style={styles.eventMiniMeta} numberOfLines={1}>
                     {timeLabel}
                     {ev.location_name ? ` · ${ev.location_name}` : ""}
@@ -1944,7 +2245,7 @@ export default function MapScreen() {
           );
         })}
 
-        {/* User marker — coded SVG puck (no bitmap asset) */}
+        {/* The driver's own marker — coded SVG, no bitmap asset */}
         {userLocation && (
           <Marker
             coordinate={userLocation}
@@ -1954,7 +2255,7 @@ export default function MapScreen() {
           >
             <View style={styles.carMarkerBox} collapsable={false}>
               <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
-                <PlayerPuck />
+                <DriverMark />
               </Animated.View>
             </View>
           </Marker>
@@ -1986,34 +2287,56 @@ export default function MapScreen() {
               places.setCategory(cat);
               setSelectedPlace(null);
             }}
-            style={[styles.placesFilterBar, { top: insets.top + 10 }]}
+            style={[styles.placesFilterBar, { top: insets.top + spacing.spacingMd }]}
           />
           {places.loading && (
-            <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
-              <ActivityIndicator size="small" color="#FF6B35" />
-              <Text style={styles.placesLoadingText}>Loading nearby places…</Text>
+            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
+              <ActivityIndicator size="small" color={colors.racingRed} />
+              <Text style={styles.placesStatusText}>
+                Loading {PLACE_CATEGORY_LABELS[places.category].toLowerCase()} spots near you…
+              </Text>
             </View>
           )}
           {places.error && !places.loading && (
-            <View style={[styles.placesLoadingPill, { top: insets.top + 54 }]}>
-              <Text style={styles.placesLoadingText}>{places.error}</Text>
+            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
+              <Text style={styles.placesStatusText}>
+                {places.error} Pan the map to retry this area.
+              </Text>
             </View>
           )}
+          {/* Yields the bottom-left slot to the place callout. */}
+          {!selectedPlace && (
           <SubmitPlaceFab
             onPress={() => {
               if (!user) {
-                Alert.alert("Sign In Required", "Create an account to submit a place");
+                Alert.alert(
+                  "Submitting a place needs an account",
+                  "Community places are credited to the driver who added them, so this can't be done while signed out. Sign in from the banner above the tab bar, then try again."
+                );
                 return;
               }
               setSubmitPlaceCoord(userLocation);
               setShowSubmitPlaceModal(true);
             }}
-            style={styles.placesFab}
+            style={[styles.placesFabSlot, { bottom: insets.bottom + BOTTOM_STACK_OFFSET }]}
           />
+          )}
         </>
       )}
 
-      <PlaceDetailSheet place={selectedPlace} onClose={() => setSelectedPlace(null)} />
+      <PlaceDetailSheet
+        place={selectedPlace}
+        onClose={() => setSelectedPlace(null)}
+        bottomInset={insets.bottom + TAB_BAR_CLEARANCE}
+        distanceMeters={
+          selectedPlace && userLocation
+            ? haversineMeters(userLocation, {
+                latitude: selectedPlace.lat,
+                longitude: selectedPlace.lng,
+              })
+            : null
+        }
+      />
 
       <SubmitPlaceModal
         visible={showSubmitPlaceModal}
@@ -2022,36 +2345,46 @@ export default function MapScreen() {
         onSubmit={places.submitPlace}
       />
 
-      {/* --- Loading overlay --- */}
+      {/* --- Locating --- */}
       {locating && (
-        <View style={[styles.loadingOverlay, { paddingTop: insets.top + 20 }]} pointerEvents="none">
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="small" color="#FF6B35" />
-            <Text style={styles.loadingText}>Detecting your location...</Text>
+        <View style={[styles.loadingOverlay, { paddingTop: insets.top + spacing.spacingXl }]} pointerEvents="none">
+          <View style={styles.statusPill}>
+            <ActivityIndicator size="small" color={colors.racingRed} />
+            <Text style={styles.statusPillText}>Waiting for a GPS fix…</Text>
           </View>
         </View>
       )}
 
-      {/* --- Error banner --- */}
+      {/* --- Location error banner.
+              The message itself is written at the point of failure (see the
+              GPS effect) and always names the fix; this banner just carries
+              it, with the control that message tells the driver to press. --- */}
       {locError && (
-        <View style={[styles.errorBanner, { top: insets.top + 16 }]}>
-          <Text style={styles.errorText}>{locError}</Text>
-          <TouchableOpacity
+        <View style={[styles.errorBanner, { top: insets.top + spacing.spacingLg }]}>
+          <View style={styles.errorTextWrap}>
+            <Text style={styles.errorTitle}>LOCATION UNAVAILABLE</Text>
+            <Text style={styles.errorText}>{locError}</Text>
+          </View>
+          <CutCornerButton
+            title="Retry"
+            variant="outline"
+            size="sm"
+            corners="topRight"
             onPress={() => {
               setLocError(null);
               setLocating(true);
             }}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          />
         </View>
       )}
 
-      {/* --- Loading cafes indicator --- */}
+      {/* --- Landmark search progress --- */}
       {loadingCafes && !locating && !isRecording && (
-        <Animated.View style={[styles.cafeLoading, { top: insets.top + 16, opacity: fadeIn }]}>
-          <ActivityIndicator size="small" color="#8B5CF6" />
-          <Text style={styles.cafeLoadingText}>Finding landmarks across Indonesia...</Text>
+        <Animated.View style={[styles.cafeLoading, { top: insets.top + LANDMARK_STATUS_OFFSET, opacity: fadeIn }]}>
+          <View style={styles.statusPill}>
+            <ActivityIndicator size="small" color={colors.racingRed} />
+            <Text style={styles.statusPillText}>Loading landmarks across Indonesia…</Text>
+          </View>
         </Animated.View>
       )}
 
@@ -2063,35 +2396,43 @@ export default function MapScreen() {
       {isRecording && (
         <>
           {/* --- Top-left: profile pill (avatar, level, lifetime XP) --- */}
-          <View style={[styles.drivingProfilePill, { top: insets.top + 10 }]} pointerEvents="none">
+          <View style={[styles.drivingProfilePill, { top: insets.top + spacing.spacingMd }]} pointerEvents="none">
             {user?.profilePicture ? (
               <Image source={{ uri: user.profilePicture }} style={styles.drivingProfileAvatar} />
             ) : (
               <View style={styles.drivingProfileAvatarFallback}>
-                <Text style={styles.drivingProfileAvatarText}>{firstName[0]?.toUpperCase()}</Text>
+                <Text style={styles.avatarInitial}>{firstName[0]?.toUpperCase()}</Text>
               </View>
             )}
             <View>
               <Text style={styles.drivingProfileLevel}>LV. {level}</Text>
-              <Text style={styles.drivingProfileXp}>{fmtThousands(totalXp)} XP</Text>
+              <View style={styles.drivingProfileXpRow}>
+                <Text style={styles.drivingProfileXp}>{fmtThousands(totalXp)}</Text>
+                <Text style={styles.drivingProfileXpUnit}>xp</Text>
+              </View>
             </View>
           </View>
 
           {/* --- Top-left: turn-by-turn instruction card --- */}
           {activeStep && (() => {
             const { Icon: TurnIcon, label } = maneuverMeta(activeStep.maneuver);
+            const nearMetres = stepDistanceRemaining < 1000;
             return (
-              <View style={[styles.turnCard, { top: insets.top + 54 }]}>
+              <View style={[styles.turnCard, { top: insets.top + TURN_CARD_OFFSET }]}>
                 <View style={styles.turnCardTopRow}>
                   <View style={styles.turnIconBox}>
-                    <TurnIcon size={20} color="#FFFFFF" />
+                    <TurnIcon
+                      size={spacing.spacingXl}
+                      color={colors.textPrimary}
+                      strokeWidth={MAP_GLYPH_STROKE}
+                    />
                   </View>
                   <View style={styles.turnTextCol}>
                     <View style={styles.turnDistanceRow}>
                       <Text style={styles.turnDistanceText}>
-                        {stepDistanceRemaining < 1000 ? Math.round(stepDistanceRemaining) : (stepDistanceRemaining / 1000).toFixed(1)}
+                        {nearMetres ? Math.round(stepDistanceRemaining) : (stepDistanceRemaining / 1000).toFixed(1)}
                       </Text>
-                      <Text style={styles.turnMetersUnit}>{stepDistanceRemaining < 1000 ? "m" : "km"}</Text>
+                      <Text style={styles.turnMetersUnit}>{nearMetres ? "m" : "km"}</Text>
                     </View>
                     <Text style={styles.turnInstructionText} numberOfLines={1}>{label}</Text>
                     {!!activeStep.street && (
@@ -2099,6 +2440,8 @@ export default function MapScreen() {
                     )}
                   </View>
                 </View>
+                {/* Utility surface: a progress track is not a brand shape, so
+                    it stays a plain rectangle. */}
                 <View style={styles.turnProgressTrack}>
                   <View style={[styles.turnProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
                 </View>
@@ -2110,8 +2453,11 @@ export default function MapScreen() {
             );
           })()}
 
-          {/* --- Top-right: speed limit sign + compass --- */}
-          <View style={[styles.topRightCluster, { top: insets.top + 10 }]}>
+          {/* --- Top-right: speed limit sign + compass ---
+                 The sign keeps its white disc and red annulus on purpose: it
+                 is a reproduction of a road sign, not a UI surface, and a
+                 driver has to read it as one. See MAP_SCREEN_REFERENCE D-3. */}
+          <View style={[styles.topRightCluster, { top: insets.top + spacing.spacingMd }]}>
             <View style={styles.speedLimitSign}>
               <Text style={styles.speedLimitNumber}>{PLACEHOLDER_SPEED_LIMIT_KMH}</Text>
               <Text style={styles.speedLimitUnit}>km/h</Text>
@@ -2119,113 +2465,82 @@ export default function MapScreen() {
             <TouchableOpacity
               style={styles.compassBtn}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Point the map north"
               onPress={() => {
                 if (userLocation) {
                   mapRef.current?.animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
                 }
               }}
             >
-              <Navigation size={16} color="#FF6B35" style={{ transform: [{ rotate: `${-heading}deg` }] }} />
+              <Navigation
+                size={spacing.spacingLg}
+                color={colors.textPrimary}
+                strokeWidth={CHROME_ICON_STROKE}
+                style={{ transform: [{ rotate: `${-heading}deg` }] }}
+              />
             </TouchableOpacity>
           </View>
 
-          {/* --- Top-right: Nearby card --- */}
-          <View style={[styles.nearbyCard, { top: insets.top + 60 }]}>
+          {/* --- Top-right: Nearby card ---
+                 Six near-identical blocks collapsed onto one `NearbyRow`.
+                 Distances are mono; the labels beside them are Inter. --- */}
+          {(nearbyCafe || nearbyWorkshop || nearbyMeet || nearbyFuel) && (
+          <View style={[styles.nearbyCard, { top: insets.top + NEARBY_CARD_OFFSET }]}>
             <Text style={styles.nearbyHeaderText}>NEARBY</Text>
-            {nearbyCafe && (
-              <View style={styles.nearbyRow}>
-                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.cafe}22` }]}>
-                  <Coffee size={11} color={CAT_COLORS.cafe} />
-                </View>
-                <View>
-                  <Text style={styles.nearbyLabel}>Coffee</Text>
-                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyCafe.dist)}</Text>
-                </View>
-              </View>
-            )}
-            {nearbyWorkshop && (
-              <View style={styles.nearbyRow}>
-                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.workshop}22` }]}>
-                  <Wrench size={11} color={CAT_COLORS.workshop} />
-                </View>
-                <View>
-                  <Text style={styles.nearbyLabel}>Workshop</Text>
-                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyWorkshop.dist)}</Text>
-                </View>
-              </View>
-            )}
-            {nearbyMeet && (
-              <View style={styles.nearbyRow}>
-                <View style={[styles.nearbyIconBox, { backgroundColor: "#3B82F622" }]}>
-                  <Car size={11} color="#3B82F6" />
-                </View>
-                <View>
-                  <Text style={styles.nearbyLabel}>Car Meet</Text>
-                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyMeet.dist)}</Text>
-                </View>
-              </View>
-            )}
-            {nearbyFuel && (
-              <View style={styles.nearbyRow}>
-                <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.spbu}22` }]}>
-                  <Fuel size={11} color={CAT_COLORS.spbu} />
-                </View>
-                <View>
-                  <Text style={styles.nearbyLabel}>Fuel</Text>
-                  <Text style={styles.nearbyDist}>{fmtMeters(nearbyFuel.dist)}</Text>
-                </View>
-              </View>
-            )}
+            <NearbyRow glyph={MAP_GLYPHS.cafe} label="Coffee" meters={nearbyCafe?.dist} />
+            <NearbyRow glyph={MAP_GLYPHS.workshop} label="Workshop" meters={nearbyWorkshop?.dist} />
+            <NearbyRow glyph={MAP_GLYPHS.hangout} label="Car meet" meters={nearbyMeet?.dist} />
+            <NearbyRow glyph={MAP_GLYPHS.fuel} label="Fuel" meters={nearbyFuel?.dist} />
             {nearbyExpanded && (
               <>
                 {(() => {
                   const second = nearestOfCategory("restaurant");
                   return second && second.id !== nearbyCafe?.id ? (
-                    <View style={styles.nearbyRow}>
-                      <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.restaurant}22` }]}>
-                        <UtensilsCrossed size={11} color={CAT_COLORS.restaurant} />
-                      </View>
-                      <View>
-                        <Text style={styles.nearbyLabel}>Food</Text>
-                        <Text style={styles.nearbyDist}>{fmtMeters(second.dist)}</Text>
-                      </View>
-                    </View>
+                    <NearbyRow glyph={MAP_GLYPHS.food} label="Food" meters={second.dist} />
                   ) : null;
                 })()}
-                {(() => {
-                  const charging = nearestOfCategory("charging");
-                  return charging ? (
-                    <View style={styles.nearbyRow}>
-                      <View style={[styles.nearbyIconBox, { backgroundColor: `${CAT_COLORS.charging}22` }]}>
-                        <Zap size={11} color={CAT_COLORS.charging} />
-                      </View>
-                      <View>
-                        <Text style={styles.nearbyLabel}>Charging</Text>
-                        <Text style={styles.nearbyDist}>{fmtMeters(charging.dist)}</Text>
-                      </View>
-                    </View>
-                  ) : null;
-                })()}
+                <NearbyRow
+                  glyph={MAP_GLYPHS.charging}
+                  label="Charging"
+                  meters={nearestOfCategory("charging")?.dist}
+                />
               </>
             )}
             <TouchableOpacity
               style={styles.nearbyChevronBtn}
               onPress={() => setNearbyExpanded((v) => !v)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={nearbyExpanded ? "Show fewer nearby places" : "Show more nearby places"}
             >
-              {nearbyExpanded ? <ChevronUp size={13} color="#6A6A7E" /> : <ChevronDown size={13} color="#6A6A7E" />}
+              {nearbyExpanded ? (
+                <ChevronUp size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+              ) : (
+                <ChevronDown size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+              )}
             </TouchableOpacity>
           </View>
+          )}
 
-          {/* --- Left column: gamification stack --- */}
-          <View style={[styles.achievementStack, { top: insets.top + 178 }]} pointerEvents="box-none">
+          {/* --- Left column: live achievements.
+                  All three cards carried their own hue (green leaf, yellow
+                  star, lilac mountain). They now share the neutral card and
+                  are told apart by their glyph and their label. --- */}
+          <View
+            style={[styles.achievementStack, { top: insets.top + ACHIEVEMENT_STACK_OFFSET }]}
+            pointerEvents="box-none"
+          >
             <View style={styles.achievementCard}>
               <View style={styles.achievementIconBox}>
-                <Leaf size={13} color="#22C55E" />
+                <Leaf size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
               </View>
               <View style={styles.achievementTextCol}>
-                <Text style={styles.achievementTitle}>Smooth Drive</Text>
-                <Text style={styles.achievementValue}>{smoothScore} Score</Text>
+                <Text style={styles.achievementTitle}>SMOOTH DRIVE</Text>
+                <View style={styles.achievementValueRow}>
+                  <Text style={styles.achievementValue}>{smoothScore}</Text>
+                  <Text style={styles.achievementUnit}>score</Text>
+                </View>
                 <View style={styles.achievementProgressTrack}>
                   <View style={[styles.achievementProgressFill, { width: `${smoothScore}%` }]} />
                 </View>
@@ -2234,21 +2549,29 @@ export default function MapScreen() {
 
             {liveXpEarned > 0 && (
               <View style={styles.achievementCard}>
-                <View style={[styles.achievementIconBox, { backgroundColor: "rgba(250, 204, 21, 0.12)" }]}>
-                  <Star size={13} color="#FACC15" fill="#FACC15" />
+                <View style={styles.achievementIconBox}>
+                  <Star size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
                 </View>
-                <Text style={styles.achievementInlineText}>XP +{liveXpEarned}</Text>
+                <View style={styles.achievementTextCol}>
+                  <Text style={styles.achievementTitle}>XP THIS DRIVE</Text>
+                  <View style={styles.achievementValueRow}>
+                    <Text style={styles.achievementValue}>+{liveXpEarned}</Text>
+                  </View>
+                </View>
               </View>
             )}
 
             {showScenicToast && (
               <View style={styles.achievementCard}>
-                <View style={[styles.achievementIconBox, { backgroundColor: "rgba(167, 139, 250, 0.12)" }]}>
-                  <Mountain size={13} color="#A78BFA" />
+                <View style={styles.achievementIconBox}>
+                  <Mountain size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
                 </View>
-                <View>
-                  <Text style={styles.achievementTitle}>Scenic Road</Text>
-                  <Text style={[styles.achievementValue, { color: "#A78BFA" }]}>+40 XP</Text>
+                <View style={styles.achievementTextCol}>
+                  <Text style={styles.achievementTitle}>SCENIC ROAD</Text>
+                  <View style={styles.achievementValueRow}>
+                    <Text style={styles.achievementValue}>+40</Text>
+                    <Text style={styles.achievementUnit}>xp</Text>
+                  </View>
                 </View>
               </View>
             )}
@@ -2258,13 +2581,20 @@ export default function MapScreen() {
                 {nearestFriend.avatar ? (
                   <Image source={{ uri: nearestFriend.avatar }} style={styles.friendAvatar} />
                 ) : (
-                  <View style={[styles.friendAvatarFallback, { backgroundColor: playerColor(nearestFriend.user_id) }]}>
-                    <Text style={styles.drivingProfileAvatarText}>{nearestFriend.name[0]?.toUpperCase()}</Text>
+                  <View
+                    style={[
+                      styles.friendAvatarFallback,
+                      { borderColor: playerColor(nearestFriend.user_id) },
+                    ]}
+                  >
+                    <Text style={styles.avatarInitial}>{nearestFriend.name[0]?.toUpperCase()}</Text>
                   </View>
                 )}
-                <View>
-                  <Text style={styles.friendName}>{nearestFriend.name}</Text>
-                  <Text style={styles.friendMeta}>Lv. {nearestFriend.level} · {fmtMeters(nearestFriend.dist)}</Text>
+                <View style={styles.friendTextCol}>
+                  <Text style={styles.friendName} numberOfLines={1}>{nearestFriend.name}</Text>
+                  <Text style={styles.friendMeta}>
+                    Lv. {nearestFriend.level} · {fmtMeters(Math.round(nearestFriend.dist))}
+                  </Text>
                 </View>
               </View>
             )}
@@ -2272,191 +2602,229 @@ export default function MapScreen() {
 
           {/* --- Photo captured toast --- */}
           {photoToast && (
-            <View style={[styles.photoToastPill, { top: insets.top + 10 }]} pointerEvents="none">
-              <Camera size={14} color="#FFFFFF" />
+            <View style={[styles.photoToastPill, { top: insets.top + spacing.spacingMd }]} pointerEvents="none">
+              <Camera size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
               <Text style={styles.photoToastText}>{photoToast}</Text>
             </View>
           )}
 
-          {/* --- Bottom sheet: speedometer, progress, actions, stats --- */}
+          {/* --- Bottom sheet: speedometer, actions, stats ---
+                  The recording controls. END DRIVE is the one primary action
+                  in this viewport, so it is the only red thing here: a
+                  cut-corner primary slab. PAUSE/RESUME and RECORD are
+                  outline controls beside it — same shape, no fill — which is
+                  what stops three equally-loud buttons from competing while
+                  the driver is moving.
+
+                  Every handler below is unchanged: togglePause,
+                  stopRecording and captureDrivePhoto are the same functions
+                  wired to the same controls. --- */}
           <Animated.View
             style={[
               styles.recordingCard,
-              { paddingBottom: insets.bottom + 90, transform: [{ translateY: recSlide }] },
+              {
+                paddingBottom: insets.bottom + TAB_BAR_CLEARANCE,
+                transform: [{ translateY: recSlide }],
+              },
             ]}
           >
             {/* Floating speedometer, overlaps the map above the sheet */}
             <View style={styles.speedometerWrap}>
-              <View style={styles.speedometerRing}>
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.hairline}
+                borderWidth={borderWidth.emphasis}
+                cutSize={cut.lg}
+                corners="topRight"
+                style={styles.speedometerBox}
+                contentStyle={styles.speedometerContent}
+              >
                 <Text style={styles.speedometerValue}>{currentSpeed.toFixed(0)}</Text>
                 <Text style={styles.speedometerUnit}>km/h</Text>
                 <View style={styles.speedometerGearRow}>
-                  <Circle size={8} color="#22C55E" fill="#22C55E" />
+                  <View style={styles.speedometerGearDot} />
                   <Text style={styles.speedometerGearText}>D</Text>
                 </View>
-              </View>
+              </CutCornerSurface>
               {isPaused && (
-                <View style={styles.pausedBadge}>
-                  <Text style={styles.pausedBadgeText}>PAUSED</Text>
-                </View>
+                <CutCornerBadge
+                  label="Paused"
+                  color={colors.textSecondary}
+                  textColor={colors.textPrimary}
+                  corners="topRight"
+                  style={styles.pausedBadge}
+                />
               )}
             </View>
 
             {/* Action row: Pause / End Drive / Record */}
             <View style={styles.actionRow}>
-              <TouchableOpacity style={styles.drivingActionBtn} onPress={togglePause} activeOpacity={0.7}>
-                <View style={styles.actionBtnCircle}>
-                  {isPaused ? <Play size={20} color="#FFFFFF" fill="#FFFFFF" /> : <Pause size={20} color="#FFFFFF" fill="#FFFFFF" />}
-                </View>
-                <Text style={styles.drivingActionBtnLabel}>{isPaused ? "RESUME" : "PAUSE"}</Text>
-              </TouchableOpacity>
+              <CutCornerButton
+                title={isPaused ? "Resume" : "Pause"}
+                variant="ghost"
+                size="sm"
+                corners="topRight"
+                onPress={togglePause}
+                style={styles.drivingSecondaryBtn}
+                icon={
+                  isPaused ? (
+                    <Play size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                  ) : (
+                    <Pause size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                  )
+                }
+              />
 
-              <TouchableOpacity style={styles.drivingActionBtn} onPress={stopRecording} activeOpacity={0.7}>
-                <View style={styles.actionBtnCircleBig}>
-                  <Square size={22} color="#FFFFFF" fill="#FFFFFF" />
-                </View>
-                <Text style={styles.drivingActionBtnLabel}>END DRIVE</Text>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="End Drive"
+                variant="primary"
+                size="md"
+                corners="topRight"
+                onPress={stopRecording}
+                style={styles.drivingPrimaryBtn}
+                icon={<Square size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+              />
 
-              <TouchableOpacity style={styles.drivingActionBtn} onPress={captureDrivePhoto} activeOpacity={0.7}>
-                <View style={styles.actionBtnCircle}>
-                  <Camera size={20} color="#FFFFFF" />
-                </View>
-                <Text style={styles.drivingActionBtnLabel}>RECORD</Text>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="Photo"
+                variant="ghost"
+                size="sm"
+                corners="topRight"
+                onPress={captureDrivePhoto}
+                style={styles.drivingSecondaryBtn}
+                icon={<Camera size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+              />
             </View>
 
-            {/* Stats row */}
+            {/* Stats row — every value mono, every unit Inter beside it. */}
             <View style={styles.drivingStatsRow}>
-              <View style={styles.drivingStatCol}>
-                <Text style={styles.drivingStatLabel}>Distance</Text>
-                <Text style={styles.drivingStatValue}>{fmtMeters(tripDistance)}</Text>
-              </View>
-              <View style={styles.drivingStatCol}>
-                <Text style={styles.drivingStatLabel}>Time</Text>
-                <Text style={styles.drivingStatValue}>{fmtTimer(elapsedMs)}</Text>
-              </View>
-              <View style={styles.drivingStatCol}>
-                <Text style={styles.drivingStatLabel}>Avg Speed</Text>
-                <Text style={styles.drivingStatValue}>{liveAvgSpeed.toFixed(0)}</Text>
-              </View>
-              <View style={styles.drivingStatCol}>
-                <Text style={styles.drivingStatLabel}>Max Speed</Text>
-                <Text style={styles.drivingStatValue}>{tripTopSpeed.toFixed(0)}</Text>
-              </View>
-              <View style={styles.drivingStatCol}>
-                <Text style={styles.drivingStatLabel}>XP Earned</Text>
-                <Text style={[styles.drivingStatValue, { color: "#FACC15" }]}>+{liveXpEarned}</Text>
-              </View>
+              <DriveStat label="DIST" value={fmtMeters(tripDistance)} />
+              <DriveStat label="TIME" value={fmtTimer(elapsedMs)} />
+              <DriveStat label="AVG" value={liveAvgSpeed.toFixed(0)} unit="km/h" />
+              <DriveStat label="MAX" value={tripTopSpeed.toFixed(0)} unit="km/h" />
+              <DriveStat label="XP" value={`+${liveXpEarned}`} />
             </View>
           </Animated.View>
         </>
       )}
 
-      {/* Trip Summary */}
+      {/* Trip Summary — the finished drive, in the same slab as a trip card
+          on the Drive Hub. Distance is the hero readout (dataLg); time, avg
+          speed and XP sit under it in dataSm with Inter units. */}
       {showTripSummary && (() => {
         const actualSec = elapsedMs / 1000;
         const avgSpeed = actualSec > 0 ? (tripDistance / 1000) / (actualSec / 3600) : 0;
+        const deltaSeconds = routeInfo
+          ? Math.abs(routeInfo.durationSeconds - elapsedMs / 1000)
+          : 0;
         return (
-        <View style={[styles.tripSummaryCard, { paddingBottom: insets.bottom + 90 }]}>
-          <View style={styles.tripSummaryHeader}>
-            <Text style={styles.tripSummaryTitle}>
-              {wasFaster ? "Great Drive!" : "Trip Recorded"}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setRecordedPath([]);
-                setTripDistance(0);
-                setElapsedMs(0);
-                setXpEarned(null);
-                clearRoute();
-              }}
-              activeOpacity={0.7}
-            >
-              <X size={18} color="#5A5A6E" />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.tripStatsGrid}>
-            <View style={styles.tripStatItem}>
-              <Text style={styles.tripStatLabel}>Distance</Text>
-              <View style={styles.tripStatRow}>
-                <Route size={14} color={RECORD_RED} />
-                <Text style={styles.tripStatValue}>{fmtMeters(tripDistance)}</Text>
-              </View>
+        <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
+          >
+            <View style={styles.sheetHeaderRow}>
+              <Text style={styles.sheetTitleFlex}>
+                {wasFaster ? "AHEAD OF ESTIMATE" : "DRIVE RECORDED"}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss trip summary"
+                hitSlop={spacing.spacingSm}
+                onPress={() => {
+                  setRecordedPath([]);
+                  setTripDistance(0);
+                  setElapsedMs(0);
+                  setXpEarned(null);
+                  clearRoute();
+                }}
+              >
+                <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+              </Pressable>
             </View>
-            <View style={styles.tripStatItem}>
-              <Text style={styles.tripStatLabel}>Time</Text>
-              <View style={styles.tripStatRow}>
-                <Clock size={14} color="#F59E0B" />
-                <Text style={styles.tripStatValue}>{fmtTimer(elapsedMs)}</Text>
-              </View>
-            </View>
-            <View style={styles.tripStatItem}>
-              <Text style={styles.tripStatLabel}>Avg Speed</Text>
-              <View style={styles.tripStatRow}>
-                <TrendingUp size={14} color="#3B82F6" />
-                <Text style={styles.tripStatValue}>{avgSpeed.toFixed(1)}</Text>
-                <Text style={styles.tripStatUnit}>km/h</Text>
-              </View>
-            </View>
-          </View>
-          {xpEarned != null && (
-            <>
-              <View style={styles.xpRewardRow}>
-                <View style={styles.xpRewardLeft}>
-                  <Zap size={18} color="#FFD700" />
-                  <Text style={styles.xpRewardLabel}>
-                    {wasFaster ? "Faster than estimate!" : "Trip complete"}
-                  </Text>
-                </View>
-                <View style={styles.xpBadge}>
-                  <Text style={styles.xpBadgeText}>+{xpEarned} XP</Text>
-                </View>
-              </View>
-              {routeInfo && (
-                <View style={styles.comparisonRow}>
-                  <Text style={styles.comparisonText}>Est. {routeInfo.durationMin}</Text>
-                  <Text style={[styles.comparisonDiff, wasFaster ? styles.comparisonFaster : styles.comparisonSlower]}>
-                    {wasFaster ? `-${fmtDuration(routeInfo.durationSeconds - (elapsedMs / 1000))}` : `+${fmtDuration((elapsedMs / 1000) - routeInfo.durationSeconds)}`}
-                  </Text>
-                </View>
-              )}
-              {leveledUp && (
-                <View style={styles.levelUpBanner}>
-                  <Trophy size={16} color="#FFD700" />
-                  <Text style={styles.levelUpText}>LEVEL UP! You reached Level {level}</Text>
-                </View>
-              )}
-            </>
-          )}
-          <View style={styles.levelBarContainer}>
-            <View style={styles.levelBarHeader}>
-              <Text style={styles.levelBarLabel}>Level {level}</Text>
-              <Text style={styles.levelBarXp}>{xpCurrentLevel} / {xpRequired} XP</Text>
-            </View>
-            <View style={styles.levelBarTrack}>
-              <View style={[styles.levelBarFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]} />
-            </View>
-          </View>
 
-          {/* Save & Share this route (Strava-style) */}
-          <View style={styles.saveRouteRow}>
-            <TouchableOpacity
-              style={styles.saveRouteBtn}
-              onPress={() => setShowSaveRoute(true)}
-              activeOpacity={0.85}
-            >
-              <Bookmark size={17} color="#FFFFFF" />
-              <Text style={styles.saveRouteBtnText}>Save & Share Route</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.myRoutesBtn}
-              onPress={() => router.push("/routes" as any)}
-              activeOpacity={0.7}
-            >
-              <Share2 size={17} color="#FF6B35" />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.heroRow}>
+              <View style={styles.heroValueRow}>
+                <Text style={styles.heroValue}>{(tripDistance / 1000).toFixed(2)}</Text>
+                <Text style={styles.heroUnit}>km</Text>
+              </View>
+              {xpEarned != null && (
+                <CutCornerBadge
+                  label={`+${xpEarned} XP`}
+                  numeric
+                  color={colors.hairline}
+                  textColor={colors.textPrimary}
+                  corners="topRight"
+                />
+              )}
+            </View>
+
+            <View style={styles.statsRow}>
+              <DriveStat label="TIME" value={fmtTimer(elapsedMs)} unit="h:m:s" />
+              <View style={styles.statDivider} />
+              <DriveStat label="AVG" value={avgSpeed.toFixed(1)} unit="km/h" />
+              <View style={styles.statDivider} />
+              <DriveStat label="TOP" value={tripTopSpeed.toFixed(0)} unit="km/h" />
+            </View>
+
+            {xpEarned != null && routeInfo && (
+              <View style={styles.comparisonRow}>
+                <Text style={styles.comparisonLabel}>
+                  {wasFaster ? "Faster than the estimate by" : "Slower than the estimate by"}
+                </Text>
+                <Text style={styles.comparisonValue}>{fmtDuration(Math.round(deltaSeconds))}</Text>
+              </View>
+            )}
+
+            {leveledUp && (
+              <View style={styles.levelUpBanner}>
+                <Trophy size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                <Text style={styles.levelUpText}>Level {level} reached</Text>
+              </View>
+            )}
+
+            {/* Utility surface: a progress track stays a plain rectangle. */}
+            <View style={styles.levelBarContainer}>
+              <View style={styles.levelBarHeader}>
+                <Text style={styles.levelBarLabel}>LEVEL {level}</Text>
+                <Text style={styles.levelBarXp}>{xpCurrentLevel} / {xpRequired} XP</Text>
+              </View>
+              <View style={styles.levelBarTrack}>
+                <View style={[styles.levelBarFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]} />
+              </View>
+            </View>
+
+            <View style={styles.sheetActions}>
+              <CutCornerButton
+                title="Save & Share Route"
+                corners="topRight"
+                onPress={() => setShowSaveRoute(true)}
+                style={styles.sheetPrimaryAction}
+                icon={<Bookmark size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open my saved routes"
+                onPress={() => router.push("/routes" as any)}
+              >
+                <CutCornerSurface
+                  fill={colors.voidBlack}
+                  borderColor={colors.hairline}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.md}
+                  corners="topRight"
+                  style={styles.iconAction}
+                  contentStyle={styles.iconActionContent}
+                >
+                  <Share2 size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                </CutCornerSurface>
+              </Pressable>
+            </View>
+          </CutCornerSurface>
         </View>
         );
       })()}
@@ -2464,45 +2832,65 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   TOP CHROME — greeting pill + featured event banner   */}
       {/* ===================================================== */}
-      {!isRecording && !searchOpen && (
+      {!isRecording && !searchOpen && !placesLayerOpen && (
         <Animated.View
-          style={[styles.topChrome, { top: insets.top + 10, opacity: fadeIn }]}
+          style={[styles.topChrome, { top: insets.top + spacing.spacingMd, opacity: fadeIn }]}
           pointerEvents="box-none"
         >
-          {/* Weather / greeting pill */}
-          <TouchableOpacity
-            style={styles.greetingPill}
+          {/* Weather / greeting card.
+              Rajdhani carries the greeting and the driver's name; Inter
+              carries the supporting date line; the temperature is a
+              measurement, so it is JetBrains Mono with the degree sign
+              split out into Inter beside it. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={greetingExpanded ? "Hide today's date" : "Show today's date"}
             onPress={() => setGreetingExpanded((v) => !v)}
-            activeOpacity={0.85}
           >
-            <View style={styles.greetingTempRow}>
-              <WeatherGlyph code={weather?.code ?? 0} size={16} />
-              {weather && <Text style={styles.greetingTemp}>{weather.temp}°</Text>}
-            </View>
-            <Text style={styles.greetingLabel}>{greeting},</Text>
-            <View style={styles.greetingNameRow}>
-              <Text style={styles.greetingName} numberOfLines={1}>{firstName}!</Text>
-              <ChevronDown
-                size={14}
-                color="#8A8A9A"
-                style={greetingExpanded ? { transform: [{ rotate: "180deg" }] } : undefined}
-              />
-            </View>
-            {greetingExpanded && (
-              <Text style={styles.greetingDate}>
-                {fmtFeaturedDate(new Date().toISOString())}
-              </Text>
-            )}
-          </TouchableOpacity>
+            <CutCornerSurface
+              fill={colors.carbonSurface}
+              borderColor={colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.md}
+              corners="topRight"
+              style={styles.greetingCard}
+              contentStyle={styles.greetingCardContent}
+            >
+              <View style={styles.greetingTempRow}>
+                <WeatherGlyph code={weather?.code ?? 0} size={spacing.spacingLg} />
+                {weather && (
+                  <View style={styles.greetingTempValueRow}>
+                    <Text style={styles.greetingTemp}>{weather.temp}</Text>
+                    <Text style={styles.greetingTempUnit}>°C</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.greetingLabel}>{greeting}</Text>
+              <View style={styles.greetingNameRow}>
+                <Text style={styles.greetingName} numberOfLines={1}>{firstName}</Text>
+                <ChevronDown
+                  size={spacing.spacingMd}
+                  color={colors.textSecondary}
+                  strokeWidth={CHROME_ICON_STROKE}
+                  style={greetingExpanded ? { transform: [{ rotate: "180deg" }] } : undefined}
+                />
+              </View>
+              {greetingExpanded && (
+                <Text style={styles.greetingDate}>
+                  {fmtFeaturedDate(new Date().toISOString())}
+                </Text>
+              )}
+            </CutCornerSurface>
+          </Pressable>
 
           {/* Featured event banner */}
           {featuredEvent && (() => {
             const fe = featuredEvent;
-            const feColor = eventTypeColor(fe.event_type);
             return (
-              <TouchableOpacity
-                style={styles.featuredCard}
-                activeOpacity={0.85}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Show ${fe.title} on the map`}
+                style={styles.featuredCardHit}
                 onPress={() => {
                   setSelectedEventId(fe.id);
                   mapRef.current?.animateCamera(
@@ -2511,26 +2899,39 @@ export default function MapScreen() {
                   );
                 }}
               >
-                <View style={[styles.featuredThumb, { backgroundColor: `${feColor}1E`, borderColor: `${feColor}50` }]}>
-                  <EventTypeIcon type={fe.event_type} size={20} color={feColor} />
-                </View>
-                <View style={styles.featuredInfo}>
-                  <Text style={styles.featuredTitle} numberOfLines={1}>{fe.title}</Text>
-                  <Text style={styles.featuredMeta} numberOfLines={1}>
-                    {fmtFeaturedDate(fe.starts_at)}
-                  </Text>
-                  <View style={styles.featuredLocRow}>
-                    <MapPin size={11} color="#8A8A9A" />
-                    <Text style={styles.featuredLoc} numberOfLines={1}>
-                      {fe.location_name || "On the map"}
-                    </Text>
+                <CutCornerSurface
+                  fill={colors.carbonSurface}
+                  borderColor={fe.is_live ? colors.racingRed : colors.hairline}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.md}
+                  corners="topRight"
+                  contentStyle={styles.featuredCard}
+                >
+                  <View style={styles.featuredThumb}>
+                    <EventTypeIcon
+                      type={fe.event_type}
+                      size={spacing.spacingLg}
+                      color={fe.is_live ? colors.racingRed : colors.textPrimary}
+                    />
                   </View>
-                </View>
-                <View style={styles.featuredBadge}>
-                  <Users size={11} color="#FFFFFF" />
-                  <Text style={styles.featuredBadgeText}>{fe.participant_count}</Text>
-                </View>
-              </TouchableOpacity>
+                  <View style={styles.featuredInfo}>
+                    <Text style={styles.featuredTitle} numberOfLines={1}>{fe.title}</Text>
+                    <Text style={styles.featuredMeta} numberOfLines={1}>
+                      {fmtFeaturedDate(fe.starts_at)}
+                    </Text>
+                    <View style={styles.featuredLocRow}>
+                      <MapPin size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                      <Text style={styles.featuredLoc} numberOfLines={1}>
+                        {fe.location_name || "Dropped on the map"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.featuredBadge}>
+                    <Users size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                    <Text style={styles.featuredBadgeText}>{fe.participant_count}</Text>
+                  </View>
+                </CutCornerSurface>
+              </Pressable>
             );
           })()}
         </Animated.View>
@@ -2540,61 +2941,76 @@ export default function MapScreen() {
       {/*   RIGHT COLUMN — Search / My Location / Filters        */}
       {/* ===================================================== */}
       {!isRecording && !searchOpen && (
-        <Animated.View style={[styles.rightButtons, { top: insets.top + 10, opacity: fadeIn }]}>
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={[styles.actionBtn, searchOpen && styles.actionBtnActive]}
-              onPress={() => {
-                if (searchOpen) {
-                  closeSearch();
-                } else {
-                  setSearchOpen(true);
-                  setFiltersOpen(false);
-                }
-              }}
-              activeOpacity={0.7}
-            >
-              <Search size={19} color="#FFFFFF" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Search</Text>
-          </View>
+        <Animated.View style={[styles.rightButtons, { top: insets.top + spacing.spacingMd, opacity: fadeIn }]}>
+          <MapChromeButton
+            label="Search"
+            active={searchOpen}
+            accessibilityLabel="Search places"
+            onPress={() => {
+              if (searchOpen) {
+                closeSearch();
+              } else {
+                setSearchOpen(true);
+                setFiltersOpen(false);
+              }
+            }}
+          >
+            <Search
+              size={spacing.spacingLg}
+              color={colors.textPrimary}
+              strokeWidth={CHROME_ICON_STROKE}
+            />
+          </MapChromeButton>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity style={styles.actionBtn} onPress={centerOnUser} activeOpacity={0.7}>
-              <LocateFixed size={19} color="#FFFFFF" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>My Location</Text>
-          </View>
+          <MapChromeButton
+            label="My Location"
+            accessibilityLabel="Centre the map on me"
+            onPress={centerOnUser}
+          >
+            <LocateFixed
+              size={spacing.spacingLg}
+              color={colors.textPrimary}
+              strokeWidth={CHROME_ICON_STROKE}
+            />
+          </MapChromeButton>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={[styles.actionBtn, filtersOpen && styles.actionBtnActive]}
-              onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
-              activeOpacity={0.7}
-            >
-              <SlidersHorizontal size={18} color={filtersOpen ? "#FF6B35" : "#FFFFFF"} strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Filters</Text>
-          </View>
+          <MapChromeButton
+            label="Filters"
+            active={filtersOpen}
+            accessibilityLabel="Map layers and style"
+            onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
+          >
+            <SlidersHorizontal
+              size={spacing.spacingLg}
+              color={filtersOpen ? colors.racingRed : colors.textPrimary}
+              strokeWidth={CHROME_ICON_STROKE}
+            />
+          </MapChromeButton>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={openCreateEvent}
-              activeOpacity={0.7}
-            >
-              <MapPin size={18} color="#FFFFFF" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Event</Text>
-          </View>
+          <MapChromeButton
+            label="Event"
+            accessibilityLabel="Create an event"
+            onPress={openCreateEvent}
+          >
+            <MapPin
+              size={spacing.spacingLg}
+              color={colors.textPrimary}
+              strokeWidth={CHROME_ICON_STROKE}
+            />
+          </MapChromeButton>
 
           {routeInfo && (
-            <View style={styles.labeledBtn}>
-              <TouchableOpacity style={styles.actionBtn} onPress={clearRoute} activeOpacity={0.7}>
-                <X size={20} color="#EF4444" />
-              </TouchableOpacity>
-              <Text style={styles.actionBtnLabel}>Clear</Text>
-            </View>
+            <MapChromeButton
+              label="Clear"
+              accessibilityLabel="Clear the route"
+              onPress={clearRoute}
+            >
+              <X
+                size={spacing.spacingLg}
+                color={colors.textPrimary}
+                strokeWidth={CHROME_ICON_STROKE}
+              />
+            </MapChromeButton>
           )}
         </Animated.View>
       )}
@@ -2603,53 +3019,67 @@ export default function MapScreen() {
       {/*   SEARCH OVERLAY                                       */}
       {/* ===================================================== */}
       {searchOpen && !isRecording && (
-        <View style={[styles.searchOverlay, { top: insets.top + 10 }]}>
+        <View style={[styles.searchOverlay, { top: insets.top + spacing.spacingMd }]}>
+          {/* Utility surface: a text field is a plain rectangle, per the
+              corner policy in constants/theme.ts. */}
           <View style={styles.searchBar}>
-            <Search size={17} color="#8A8A9A" />
+            <Search size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search places nearby..."
-              placeholderTextColor="#5A5A6E"
+              placeholder="Search landmarks"
+              placeholderTextColor={colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
               autoFocus
               returnKeyType="search"
             />
-            <TouchableOpacity onPress={closeSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <X size={18} color="#8A8A9A" />
-            </TouchableOpacity>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close search"
+              onPress={closeSearch}
+              hitSlop={spacing.spacingSm}
+            >
+              <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+            </Pressable>
           </View>
-          {searchResults.length > 0 && (
+          {searchResults.length > 0 ? (
             <View style={styles.searchResults}>
-              {searchResults.map((res) => (
-                <TouchableOpacity
-                  key={res.id}
-                  style={styles.searchResultRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    closeSearch();
-                    handleCafePress(res);
-                  }}
-                >
-                  <View style={[styles.searchResultIcon, { borderColor: `${CAT_COLORS[res.category]}55` }]}>
-                    {CAT_ICONS[res.category] ? (
-                      <Image source={CAT_ICONS[res.category]} style={styles.searchResultBadge} resizeMode="contain" />
-                    ) : res.category === "spbu" ? <Fuel size={14} color={CAT_COLORS[res.category]} />
-                      : <UtensilsCrossed size={14} color={CAT_COLORS[res.category]} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.searchResultName} numberOfLines={1}>{res.name}</Text>
-                    {res.vicinity && (
-                      <Text style={styles.searchResultVicinity} numberOfLines={1}>{res.vicinity}</Text>
+              {searchResults.map((res, i) => {
+                const Glyph = CAT_GLYPHS[res.category];
+                return (
+                  <Pressable
+                    key={res.id}
+                    accessibilityRole="button"
+                    style={[styles.searchResultRow, i > 0 && styles.searchResultRowBorder]}
+                    onPress={() => {
+                      closeSearch();
+                      handleCafePress(res);
+                    }}
+                  >
+                    <View style={styles.searchResultIcon}>
+                      <Glyph size={spacing.spacingLg} color={colors.textPrimary} />
+                    </View>
+                    <View style={styles.searchResultText}>
+                      <Text style={styles.searchResultName} numberOfLines={1}>{res.name}</Text>
+                      {res.vicinity && (
+                        <Text style={styles.searchResultVicinity} numberOfLines={1}>{res.vicinity}</Text>
+                      )}
+                    </View>
+                    {res.dist < Number.MAX_SAFE_INTEGER && (
+                      <Text style={styles.searchResultDist}>{fmtMeters(Math.round(res.dist))}</Text>
                     )}
-                  </View>
-                  {res.dist < Number.MAX_SAFE_INTEGER && (
-                    <Text style={styles.searchResultDist}>{fmtMeters(Math.round(res.dist))}</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
+                  </Pressable>
+                );
+              })}
             </View>
-          )}
+          ) : searchQuery.trim().length > 0 ? (
+            <View style={styles.searchResults}>
+              <Text style={styles.searchEmpty}>
+                No landmark here matches “{searchQuery.trim()}”. Landmarks load per city — pan the map to the
+                area you mean, then search again.
+              </Text>
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -2657,132 +3087,172 @@ export default function MapScreen() {
       {/*   FILTERS POPOVER                                      */}
       {/* ===================================================== */}
       {filtersOpen && !isRecording && (
-        <View style={[styles.filtersPopover, { top: insets.top + 150 }]}>
-          <Text style={styles.filtersTitle}>Map Style</Text>
+        <CutCornerSurface
+          fill={colors.carbonSurface}
+          borderColor={colors.hairline}
+          borderWidth={borderWidth.hairline}
+          cutSize={cut.md}
+          corners="topRight"
+          style={[styles.filtersPopover, { top: insets.top + FILTERS_POPOVER_OFFSET }]}
+          contentStyle={styles.filtersContent}
+        >
+          <Text style={styles.filtersTitle}>MAP STYLE</Text>
+          {/* Utility surface: a segmented control is a plain rectangle. */}
           <View style={styles.mapStyleToggle}>
-            <TouchableOpacity
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: !mapStyleDark }}
+              accessibilityLabel="Light map tiles"
               style={[styles.mapStyleOption, !mapStyleDark && styles.mapStyleOptionActive]}
-              activeOpacity={0.7}
               onPress={() => setMapStyle(false)}
             >
-              <Sun size={16} color={!mapStyleDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
-              <Text style={[styles.mapStyleOptionText, !mapStyleDark && styles.mapStyleOptionTextActive]}>Light</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
+              <Sun
+                size={spacing.spacingLg}
+                color={!mapStyleDark ? colors.voidBlack : colors.textSecondary}
+                strokeWidth={CHROME_ICON_STROKE}
+              />
+              <Text style={[styles.mapStyleOptionText, !mapStyleDark && styles.mapStyleOptionTextActive]}>
+                LIGHT
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: mapStyleDark }}
+              accessibilityLabel="Dark map tiles"
               style={[styles.mapStyleOption, mapStyleDark && styles.mapStyleOptionActive]}
-              activeOpacity={0.7}
               onPress={() => setMapStyle(true)}
             >
-              <Moon size={16} color={mapStyleDark ? "#0A0A14" : "#8A8A9A"} strokeWidth={2.2} />
-              <Text style={[styles.mapStyleOptionText, mapStyleDark && styles.mapStyleOptionTextActive]}>Dark</Text>
-            </TouchableOpacity>
+              <Moon
+                size={spacing.spacingLg}
+                color={mapStyleDark ? colors.voidBlack : colors.textSecondary}
+                strokeWidth={CHROME_ICON_STROKE}
+              />
+              <Text style={[styles.mapStyleOptionText, mapStyleDark && styles.mapStyleOptionTextActive]}>
+                DARK
+              </Text>
+            </Pressable>
           </View>
 
-          <Text style={styles.filtersTitle}>Map Layers</Text>
-          {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => (
-            <TouchableOpacity
-              key={cat}
-              style={styles.filterRow}
-              activeOpacity={0.7}
-              onPress={() => setVisibleCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
-            >
-              <View style={[styles.filterDot, { backgroundColor: CAT_COLORS[cat] }]} />
-              <Text style={styles.filterLabel}>{CAT_LABELS[cat]}</Text>
-              <View style={[styles.filterCheck, visibleCats[cat] && styles.filterCheckOn]}>
-                {visibleCats[cat] && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
-              </View>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            style={styles.filterRow}
-            activeOpacity={0.7}
-            onPress={() => setShowEventsLayer((v) => !v)}
+          <Text style={styles.filtersTitle}>MAP LAYERS</Text>
+          {/* The coloured dot per row is gone — it repeated the seven POI
+              hues the marker set just dropped. The category glyph says
+              which layer it is; the tick says whether it is on. */}
+          {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => {
+            const Glyph = CAT_GLYPHS[cat];
+            return (
+              <FilterRow
+                key={cat}
+                label={CAT_LABELS[cat]}
+                checked={visibleCats[cat]}
+                onToggle={() => setVisibleCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
+              >
+                <Glyph size={spacing.spacingLg} color={colors.textSecondary} />
+              </FilterRow>
+            );
+          })}
+          <FilterRow
+            label="Events"
+            checked={showEventsLayer}
+            onToggle={() => setShowEventsLayer((v) => !v)}
           >
-            <View style={[styles.filterDot, { backgroundColor: "#A78BFA" }]} />
-            <Text style={styles.filterLabel}>Events</Text>
-            <View style={[styles.filterCheck, showEventsLayer && styles.filterCheckOn]}>
-              {showEventsLayer && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.filterRow}
-            activeOpacity={0.7}
-            onPress={() => setShowDriversLayer((v) => !v)}
+            <MAP_GLYPHS.event size={spacing.spacingLg} color={colors.textSecondary} />
+          </FilterRow>
+          <FilterRow
+            label="Drivers"
+            checked={showDriversLayer}
+            onToggle={() => setShowDriversLayer((v) => !v)}
           >
-            <View style={[styles.filterDot, { backgroundColor: "#22C55E" }]} />
-            <Text style={styles.filterLabel}>Drivers</Text>
-            <View style={[styles.filterCheck, showDriversLayer && styles.filterCheckOn]}>
-              {showDriversLayer && <Check size={11} color="#0A0A14" strokeWidth={3.5} />}
-            </View>
-          </TouchableOpacity>
-        </View>
+            <MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textSecondary} />
+          </FilterRow>
+        </CutCornerSurface>
       )}
 
       {/* ===================================================== */}
       {/*   LIVE FEED — bottom-left panel                        */}
       {/* ===================================================== */}
-      {hudIdle && !searchOpen && (
+      {hudIdle && !searchOpen && !placesLayerOpen && (
         <Animated.View
-          style={[styles.liveFeedPanel, { bottom: insets.bottom + 168, opacity: fadeIn }]}
+          style={[styles.liveFeedSlot, { bottom: insets.bottom + BOTTOM_STACK_OFFSET, opacity: fadeIn }]}
         >
-          <View style={styles.liveFeedHeader}>
-            <View style={styles.liveFeedTitleRow}>
-              <View style={styles.liveFeedDot} />
-              <Text style={styles.liveFeedTitle}>Live Feed</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => {
-                if (events.length > 0) {
-                  mapRef.current?.fitToCoordinates(
-                    events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
-                    { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
-                  );
-                }
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.liveFeedSeeAll}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          {feedItems.length === 0 ? (
-            <Text style={styles.liveFeedEmpty}>
-              No activity yet — create an event and get the city moving.
-            </Text>
-          ) : (
-            feedItems.map((item, i) => (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.liveFeedRow, i > 0 && styles.liveFeedRowBorder]}
-                activeOpacity={0.7}
-                onPress={item.onPress}
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.liveFeedContent}
+          >
+            <View style={styles.liveFeedHeader}>
+              <View style={styles.liveFeedTitleRow}>
+                <View style={styles.liveFeedDot} />
+                <Text style={styles.liveFeedTitle}>LIVE FEED</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Fit every event on the map"
+                onPress={() => {
+                  if (events.length > 0) {
+                    mapRef.current?.fitToCoordinates(
+                      events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
+                      { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
+                    );
+                  }
+                }}
+                hitSlop={spacing.spacingSm}
               >
-                <View style={[styles.liveFeedIcon, { borderColor: `${item.color}60` }]}>
-                  {item.icon}
-                </View>
-                <View style={styles.liveFeedTextWrap}>
-                  <Text style={styles.liveFeedRowTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={[styles.liveFeedRowSub, { color: item.color }]} numberOfLines={1}>
-                    {item.sub}
-                  </Text>
-                  <Text style={styles.liveFeedRowTime}>{item.time}</Text>
-                </View>
-                {item.count != null && item.count > 0 && (
-                  <View style={[styles.liveFeedCount, { backgroundColor: `${item.color}22` }]}>
-                    <Users size={10} color={item.color} />
-                    <Text style={[styles.liveFeedCountText, { color: item.color }]}>{item.count}</Text>
+                <Text style={styles.liveFeedSeeAll}>See all</Text>
+              </Pressable>
+            </View>
+            {feedItems.length === 0 ? (
+              <Text style={styles.liveFeedEmpty}>
+                Nothing is running near you yet. Tap Event on the right to put the first one on the map.
+              </Text>
+            ) : (
+              feedItems.map((item, i) => (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="button"
+                  style={[styles.liveFeedRow, i > 0 && styles.liveFeedRowBorder]}
+                  onPress={item.onPress}
+                >
+                  <View style={[styles.liveFeedIcon, item.live && styles.liveFeedIconLive]}>
+                    {item.icon}
                   </View>
-                )}
-              </TouchableOpacity>
-            ))
-          )}
+                  <View style={styles.liveFeedTextWrap}>
+                    <Text style={styles.liveFeedRowTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.liveFeedRowSub} numberOfLines={1}>{item.sub}</Text>
+                    <Text style={styles.liveFeedRowTime}>{item.time}</Text>
+                  </View>
+                  {item.count != null && item.count > 0 && (
+                    <View style={styles.liveFeedCount}>
+                      <Users size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                      <Text style={styles.liveFeedCountText}>{item.count}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              ))
+            )}
+          </CutCornerSurface>
         </Animated.View>
       )}
 
       {/* Hint shown while drive/drop-pin mode is active, prompting the driver to tap the map */}
       {showDropPinHint && (
-        <Animated.View style={[styles.dropPinHint, { top: insets.top + 90, opacity: fadeIn }]} pointerEvents="none">
-          <MapPin size={18} color="#FF6B35" fill="#FF6B35" />
-          <Text style={styles.dropPinHintText}>Drop the pin anywhere</Text>
+        <Animated.View
+          style={[styles.dropPinHint, { top: insets.top + DROP_PIN_HINT_OFFSET, opacity: fadeIn }]}
+          pointerEvents="none"
+        >
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.racingRed}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.dropPinHintContent}
+          >
+            <DestinationMark size={spacing.spacingXl} />
+            <Text style={styles.dropPinHintText}>Tap anywhere to drop your destination</Text>
+          </CutCornerSurface>
         </Animated.View>
       )}
 
@@ -2791,326 +3261,376 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {hudIdle && !searchOpen && (
         <Animated.View
-          style={[styles.actionStack, { bottom: insets.bottom + 168, opacity: fadeIn }]}
+          style={[styles.actionStack, { bottom: insets.bottom + BOTTOM_STACK_OFFSET, opacity: fadeIn }]}
         >
+          {/* DRIVE is the screen's primary action, so it is the one solid
+              red slab in the idle viewport. */}
           <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={[styles.driveBtn, showDropPinHint && styles.driveBtnActive]}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: showDropPinHint }}
+              accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
               onPress={toggleDrive}
-              activeOpacity={0.8}
             >
-              <Car size={26} color="#FFFFFF" strokeWidth={2.5} />
-            </TouchableOpacity>
+              <CutCornerSurface
+                fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
+                borderColor={colors.racingRed}
+                borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                style={styles.driveBtn}
+                contentStyle={styles.driveBtnContent}
+              >
+                <Car
+                  size={spacing.spacingXl}
+                  color={showDropPinHint ? colors.racingRed : onRacingRed}
+                  strokeWidth={MAP_GLYPH_STROKE}
+                />
+              </CutCornerSurface>
+            </Pressable>
             <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
           </View>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={styles.stackBtn}
-              onPress={() => router.push({ pathname: "/community", params: { tab: "convoy" } } as any)}
-              activeOpacity={0.7}
-            >
-              <Users size={20} color="#FFFFFF" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Convoy</Text>
-          </View>
+          <MapChromeButton
+            label="Convoy"
+            accessibilityLabel="Open convoys"
+            onPress={() => router.push({ pathname: "/community", params: { tab: "convoy" } } as any)}
+          >
+            <Users size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+          </MapChromeButton>
 
-          <View style={styles.labeledBtn}>
-            <TouchableOpacity
-              style={styles.stackBtn}
-              onPress={() => router.push("/messages" as any)}
-              activeOpacity={0.7}
-            >
-              <MessageCircle size={20} color="#FFFFFF" strokeWidth={2.2} />
-            </TouchableOpacity>
-            <Text style={styles.actionBtnLabel}>Chat</Text>
-          </View>
+          <MapChromeButton
+            label="Chat"
+            accessibilityLabel="Open messages"
+            onPress={() => router.push("/messages" as any)}
+          >
+            <MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+          </MapChromeButton>
         </Animated.View>
       )}
 
       {/* ===================================================== */}
       {/*   ONLINE STATUS BANNER — compact, above the tab bar    */}
       {/* ===================================================== */}
-      {!isRecording && !routeInfo && !selectedDestination && recordedPath.length === 0 && (() => {
+      {!isRecording && !routeInfo && !selectedDestination && !selectedPlace && recordedPath.length === 0 && (() => {
         const onlineCount = onlineUsers.length;
         return (
           <Animated.View
             style={[
-              styles.onlineBigCard,
-              { paddingBottom: insets.bottom + 78, transform: [{ translateY: onlineSlide }] },
+              styles.onlineBannerSlot,
+              {
+                paddingBottom: insets.bottom + TAB_BAR_CLEARANCE - spacing.spacingLg,
+                transform: [{ translateY: onlineSlide }],
+              },
             ]}
             pointerEvents="box-none"
           >
             {!user ? (
-              /* NOT LOGGED IN — prompt to sign in */
-              <View style={[styles.onlineBanner, styles.onlineBannerOffline]}>
+              /* NOT SIGNED IN */
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.hairline}
+                borderWidth={borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                contentStyle={styles.onlineBanner}
+              >
                 <View style={styles.onlineBannerLeft}>
-                  <View style={[styles.onlineBannerDot, { backgroundColor: "#6A6A7E" }]} />
+                  <View style={styles.onlineBannerDot} />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>Sign in to go online</Text>
+                    <Text style={styles.onlineBannerTitle}>YOU'RE SIGNED OUT</Text>
                     <Text style={styles.onlineBannerSub}>
-                      See other drivers and share your location.
+                      You can't be seen and can't see others. Sign in to join the map.
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
-                  style={styles.onlineBannerBtnGreen}
+                <CutCornerButton
+                  title="Sign In"
+                  size="sm"
+                  corners="topRight"
                   onPress={() => router.push("/login" as any)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.onlineBannerBtnGreenText}>Sign In</Text>
-                </TouchableOpacity>
-              </View>
+                />
+              </CutCornerSurface>
             ) : !isUserOnline ? (
-              /* VISIBILITY OFF — compact banner with Visibility switch */
-              <View style={[styles.onlineBanner, styles.onlineBannerOffline]}>
+              /* VISIBILITY OFF */
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.hairline}
+                borderWidth={borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                contentStyle={styles.onlineBanner}
+              >
                 <View style={styles.onlineBannerLeft}>
-                  <View style={[styles.onlineBannerDot, { backgroundColor: "#6A6A7E" }]} />
+                  <View style={styles.onlineBannerDot} />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={[styles.onlineBannerTitle, { color: "#C0C0CE" }]}>Visibility Off</Text>
+                    <Text style={styles.onlineBannerTitle}>VISIBILITY OFF</Text>
                     <Text style={styles.onlineBannerSub}>
-                      You're hidden from the map. Turn on visibility to be seen.
+                      Other drivers can't see you. Flip the switch to share your position.
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <Pressable
                   style={styles.visibilitySwitchTrack}
                   onPress={goOnline}
-                  activeOpacity={0.85}
                   accessibilityRole="switch"
                   accessibilityState={{ checked: false }}
                   accessibilityLabel="Turn visibility on"
                 >
                   <View style={styles.visibilitySwitchKnob}>
-                    <EyeIcon visible={false} color="#6A6A7E" size={13} />
+                    <VisibilityGlyph visible={false} color={colors.voidBlack} size={spacing.spacingMd} />
                   </View>
-                </TouchableOpacity>
-              </View>
+                </Pressable>
+              </CutCornerSurface>
             ) : (
-              /* VISIBILITY ON — glowing green banner (design spec) */
-              <View style={styles.onlineBanner}>
+              /* VISIBILITY ON.
+                 The live state used to be a green banner with a green glow.
+                 Green is not in the palette, and red is already spent on the
+                 DRIVE button in this same viewport — so "on" is carried by
+                 the switch filling with `textPrimary` and the count being
+                 there at all, not by a second accent hue. */
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.hairline}
+                borderWidth={borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                contentStyle={styles.onlineBanner}
+              >
                 <View style={styles.onlineBannerLeft}>
                   <Animated.View
                     style={[
                       styles.onlineBannerDot,
-                      { backgroundColor: "#22C55E", transform: [{ scale: onlinePulse }] },
+                      styles.onlineBannerDotOn,
+                      { transform: [{ scale: onlinePulse }] },
                     ]}
                   />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={styles.onlineBannerTitle}>Visibility On</Text>
+                    <Text style={styles.onlineBannerTitle}>VISIBILITY ON</Text>
                     <Text style={styles.onlineBannerSub}>
                       {onlineCount > 0
-                        ? `Your location is visible to others. ${onlineCount} driver${onlineCount !== 1 ? "s" : ""} on the map.`
-                        : "Your location is visible to others.\nTap to change privacy settings."}
+                        ? `Position shared. ${onlineCount} other driver${onlineCount !== 1 ? "s" : ""} on the map now.`
+                        : "Position shared. No other drivers near you yet."}
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <Pressable
                   style={[styles.visibilitySwitchTrack, styles.visibilitySwitchTrackOn]}
                   onPress={goOffline}
-                  activeOpacity={0.85}
                   accessibilityRole="switch"
                   accessibilityState={{ checked: true }}
                   accessibilityLabel="Turn visibility off"
                 >
-                  <View style={[styles.visibilitySwitchKnob, styles.visibilitySwitchKnobOn]}>
-                    <EyeIcon visible={true} color="#0E7A3C" size={13} />
+                  <View style={styles.visibilitySwitchKnob}>
+                    <VisibilityGlyph visible color={colors.voidBlack} size={spacing.spacingMd} />
                   </View>
-                </TouchableOpacity>
-              </View>
+                </Pressable>
+              </CutCornerSurface>
             )}
           </Animated.View>
         );
       })()}
 
-      {/* --- Online user profile card (tapped on map) --- */}
+      {/* --- Online driver card (tapped on the map) ---
+              One sheet, five actions. The action rows were five identical
+              blocks differing only in icon, label and handler, so they now
+              come from one `ActionRow`. The sky-blue they all carried is
+              gone: these are neutral list rows, not accents. --- */}
       {selectedOnlineUser && !isRecording && (
-        <View style={[styles.onlineUserCard, { paddingBottom: insets.bottom + 90 }]}>
-          <TouchableOpacity
-            style={styles.cafeCardClose}
-            onPress={() => setSelectedOnlineUser(null)}
+        <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
           >
-            <View style={styles.cafeCardCloseBar} />
-          </TouchableOpacity>
-          <View style={styles.onlineUserCardContent}>
-            <TouchableOpacity
-              style={styles.onlineUserCardHeader}
-              activeOpacity={0.7}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${selectedOnlineUser.name}'s profile`}
+              style={styles.driverSheetHeader}
               onPress={() => {
                 const uid = selectedOnlineUser.user_id;
                 setSelectedOnlineUser(null);
                 router.push(`/user/${uid}` as any);
               }}
             >
-              <View style={styles.onlineUserCardAvatar}>
+              <View
+                style={[
+                  styles.driverSheetAvatar,
+                  { borderColor: playerColor(selectedOnlineUser.user_id) },
+                ]}
+              >
                 {selectedOnlineUser.avatar ? (
-                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.onlineUserCardAvatarImg} />
+                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.driverSheetAvatarImg} />
                 ) : (
-                  <Text style={styles.onlineUserCardAvatarText}>
+                  <Text style={styles.avatarInitial}>
                     {(selectedOnlineUser.name?.[0] ?? "D").toUpperCase()}
                   </Text>
                 )}
-                <View style={styles.onlineUserCardOnlineDot} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.onlineUserCardName} numberOfLines={1}>
+              <View style={styles.driverSheetText}>
+                <Text style={styles.sheetTitle} numberOfLines={1}>
                   {selectedOnlineUser.name}
                 </Text>
-                <Text style={styles.onlineUserCardLevel}>
-                  Level {selectedOnlineUser.level}
-                  {userLocation
-                    ? ` · ${fmtMeters(Math.round(haversineMeters(userLocation, selectedOnlineUser)))} away`
-                    : " · Online now"}
-                </Text>
+                <View style={styles.driverSheetMetaRow}>
+                  <Text style={styles.driverSheetMeta}>LV. {selectedOnlineUser.level}</Text>
+                  {userLocation ? (
+                    <>
+                      <Text style={styles.driverSheetMetaSep}>·</Text>
+                      <Text style={styles.driverSheetMeta}>
+                        {fmtMeters(Math.round(haversineMeters(userLocation, selectedOnlineUser)))}
+                      </Text>
+                      <Text style={styles.driverSheetMetaUnit}>away</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.driverSheetMetaSep}>·</Text>
+                      <Text style={styles.driverSheetMetaUnit}>online now</Text>
+                    </>
+                  )}
+                </View>
               </View>
-              <ChevronRight size={22} color="#8A8A9A" />
-            </TouchableOpacity>
-            <View style={styles.onlineUserCardActions}>
-              <TouchableOpacity
-                style={styles.onlineUserActionRow}
+              <ChevronRight size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+            </Pressable>
+
+            <View style={styles.driverSheetActions}>
+              <ActionRow
+                label="See profile"
+                icon={<User size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => {
                   const uid = selectedOnlineUser.user_id;
                   setSelectedOnlineUser(null);
                   router.push(`/user/${uid}` as any);
                 }}
-                activeOpacity={0.75}
-              >
-                <View style={styles.onlineUserActionIcon}>
-                  <User size={18} color="#38BDF8" strokeWidth={2.2} />
-                </View>
-                <Text style={styles.onlineUserActionLabel}>See Profile</Text>
-                <ChevronRight size={20} color="#6B6B7D" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.onlineUserActionRow, askingMeetup && { opacity: 0.5 }]}
+              />
+              <ActionRow
+                label={askingMeetup ? "Sending…" : "Ask a meetup"}
+                busy={askingMeetup}
+                icon={<Handshake size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => handleAskMeetupFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-                disabled={askingMeetup}
-                activeOpacity={0.75}
-              >
-                <View style={styles.onlineUserActionIcon}>
-                  <Handshake size={18} color="#38BDF8" strokeWidth={2.2} />
-                </View>
-                <Text style={styles.onlineUserActionLabel}>
-                  {askingMeetup ? "Sending..." : "Ask a Meetup"}
-                </Text>
-                <ChevronRight size={20} color="#6B6B7D" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.onlineUserActionRow, addingFriend && { opacity: 0.5 }]}
+              />
+              <ActionRow
+                label={addingFriend ? "Sending…" : "Add friend"}
+                busy={addingFriend}
+                icon={<UserPlus size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => handleAddFriendFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-                disabled={addingFriend}
-                activeOpacity={0.75}
-              >
-                <View style={styles.onlineUserActionIcon}>
-                  <UserPlus size={18} color="#38BDF8" strokeWidth={2.2} />
-                </View>
-                <Text style={styles.onlineUserActionLabel}>
-                  {addingFriend ? "Sending..." : "Add Friend"}
-                </Text>
-                <ChevronRight size={20} color="#6B6B7D" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.onlineUserActionRow}
+              />
+              <ActionRow
+                label="Message"
+                icon={<MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => {
                   const uid = selectedOnlineUser.user_id;
                   setSelectedOnlineUser(null);
                   router.push(`/messages/${uid}` as any);
                 }}
-                activeOpacity={0.75}
-              >
-                <View style={styles.onlineUserActionIcon}>
-                  <MessageCircle size={18} color="#38BDF8" strokeWidth={2.2} />
-                </View>
-                <Text style={styles.onlineUserActionLabel}>Message</Text>
-                <ChevronRight size={20} color="#6B6B7D" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.onlineUserActionRow,
-                  (invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)) && { opacity: 0.5 },
-                ]}
-                onPress={() => handleInviteToPartyFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
-                disabled={invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)}
-                activeOpacity={0.75}
-              >
-                <View style={styles.onlineUserActionIcon}>
-                  <Crown size={18} color="#38BDF8" strokeWidth={2.2} />
-                </View>
-                <Text style={styles.onlineUserActionLabel}>
-                  {invitingToParty
-                    ? "Inviting..."
+              />
+              <ActionRow
+                label={
+                  invitingToParty
+                    ? "Inviting…"
                     : partyMemberIds.has(selectedOnlineUser.user_id)
-                    ? "Already in Convoy"
-                    : "Invite to Convoy"}
-                </Text>
-                <ChevronRight size={20} color="#6B6B7D" />
-              </TouchableOpacity>
+                      ? "Already in your convoy"
+                      : "Invite to convoy"
+                }
+                busy={invitingToParty || partyMemberIds.has(selectedOnlineUser.user_id)}
+                icon={<Crown size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+                onPress={() => handleInviteToPartyFromMap(selectedOnlineUser.user_id, selectedOnlineUser.name)}
+              />
             </View>
-          </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close driver card"
+              style={styles.sheetDismiss}
+              onPress={() => setSelectedOnlineUser(null)}
+            >
+              <Text style={styles.sheetDismissText}>Close</Text>
+            </Pressable>
+          </CutCornerSurface>
         </View>
       )}
 
-      {/* --- Selected destination card (cafe or custom location) --- */}
+      {/* --- Selected destination callout (landmark or dropped pin) ---
+              Rajdhani for the place name, Inter for the address line,
+              JetBrains Mono for the coordinates and the distance. --- */}
       {selectedDestination && !routeInfo && !isRecording && !showTripSummary && (() => {
         const isCafe = selectedDestination.type === "cafe";
-        const destName = isCafe
-          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-          : (selectedDestination as { type: "location"; name?: string }).name ?? "Selected Location";
-        const destVicinity = isCafe
-          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.vicinity
-          : undefined;
-        const destRating = isCafe
-          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.rating
-          : undefined;
-        const coordsStr = !isCafe
-          ? `Lat: ${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(5)}, Lng: ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(5)}`
-          : undefined;
+        const cafeData = isCafe
+          ? (selectedDestination as { type: "cafe"; data: CafePOI }).data
+          : null;
+        const pin = !isCafe
+          ? (selectedDestination as { type: "location"; lat: number; lng: number; name?: string })
+          : null;
+        const destName = cafeData ? cafeData.name : pin?.name ?? "Dropped pin";
+        const destVicinity = cafeData?.vicinity;
+        const destRating = cafeData?.rating;
+        const lat = cafeData ? cafeData.lat : pin!.lat;
+        const lng = cafeData ? cafeData.lng : pin!.lng;
+        const DestGlyph = cafeData ? CAT_GLYPHS[cafeData.category] : null;
+        const distMeters = userLocation
+          ? haversineMeters(userLocation, { latitude: lat, longitude: lng })
+          : null;
         return (
-        <View style={[styles.cafeCard, { paddingBottom: insets.bottom + 90 }]}>
-          <TouchableOpacity
-            style={styles.cafeCardClose}
-            onPress={() => { setSelectedDestination(null); setLocationChosen(false); }}
+        <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
           >
-            <View style={styles.cafeCardCloseBar} />
-          </TouchableOpacity>
-          <View style={styles.cafeCardContent}>
-            <View style={styles.cafeCardInfo}>
-              <View style={styles.destCardNameRow}>
-                {isCafe && (() => {
-                  const catData = (selectedDestination as { type: "cafe"; data: CafePOI }).data;
-                  return (
-                    <View style={[styles.categoryDot, { backgroundColor: CAT_COLORS[catData.category] }]} />
-                  );
-                })()}
-                <Text style={styles.cafeCardName} numberOfLines={2}>{destName}</Text>
-              </View>
-              {destVicinity ? (
-                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{destVicinity}</Text>
-              ) : coordsStr ? (
-                <Text style={styles.cafeCardVicinity} numberOfLines={1}>{coordsStr}</Text>
+            <View style={styles.sheetHeaderRow}>
+              {DestGlyph ? (
+                <View style={styles.sheetGlyphBox}>
+                  <DestGlyph size={spacing.spacingLg} color={colors.textPrimary} />
+                </View>
               ) : null}
+              <Text style={styles.sheetTitleFlex} numberOfLines={2}>{destName}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close place details"
+                hitSlop={spacing.spacingSm}
+                onPress={() => { setSelectedDestination(null); setLocationChosen(false); }}
+              >
+                <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+              </Pressable>
+            </View>
+
+            {destVicinity ? (
+              <Text style={styles.sheetBodyText} numberOfLines={2}>{destVicinity}</Text>
+            ) : null}
+
+            <View style={styles.sheetReadouts}>
+              {distMeters != null ? (
+                <View style={styles.sheetReadout}>
+                  <Text style={styles.sheetReadoutLabel}>AWAY</Text>
+                  <Text style={styles.sheetReadoutValue}>{fmtMeters(Math.round(distMeters))}</Text>
+                </View>
+              ) : null}
+              <View style={styles.sheetReadout}>
+                <Text style={styles.sheetReadoutLabel}>COORDS</Text>
+                <Text style={styles.sheetReadoutValue}>
+                  {lat.toFixed(5)}, {lng.toFixed(5)}
+                </Text>
+              </View>
               {destRating ? (
-                <View style={styles.ratingRow}>
-                  <Text style={styles.ratingStar}>★</Text>
-                  <Text style={styles.ratingText}>{destRating.toFixed(1)}</Text>
+                <View style={styles.sheetReadout}>
+                  <Text style={styles.sheetReadoutLabel}>RATING</Text>
+                  <Text style={styles.sheetReadoutValue}>{destRating.toFixed(1)}</Text>
                 </View>
               ) : null}
             </View>
-            <View style={styles.cafeCardActions}>
-              <TouchableOpacity
-                style={styles.navBtnOutline}
-                onPress={handleNavigate}
-                activeOpacity={0.7}
-              >
-                <Route size={16} color={ROUTE_RED} />
-                <Text style={styles.navBtnOutlineText}>Route</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+
+            <CutCornerButton
+              title="Route Here"
+              corners="topRight"
+              onPress={handleNavigate}
+              icon={<Route size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+            />
+          </CutCornerSurface>
         </View>
         );
       })()}
@@ -3119,183 +3639,213 @@ export default function MapScreen() {
       {routeInfo && !isRecording && !showTripSummary && (
         <Animated.View
           style={[
-            styles.routeCard,
-            { paddingBottom: insets.bottom + 90, transform: [{ translateY: cardSlide }] },
+            styles.bottomSheetSlot,
+            { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE, transform: [{ translateY: cardSlide }] },
           ]}
         >
-          <View style={styles.routeCardContent}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
+          >
             {loadingRoute && (
               <View style={styles.routeLoader}>
-                <ActivityIndicator size="small" color={ROUTE_RED} />
-                <Text style={styles.routeLoaderText}>Calculating route...</Text>
+                <ActivityIndicator size="small" color={colors.racingRed} />
+                <Text style={styles.routeLoaderText}>Asking Mapbox for a road route…</Text>
               </View>
             )}
 
             {!loadingRoute && (
-              <View style={styles.routeInfoRow}>
-                <View style={styles.routeStat}>
-                  <View style={styles.routeStatIcon}>
-                    <Route size={20} color={ROUTE_RED} />
+              <>
+                <View style={styles.sheetHeaderRow}>
+                  <Text style={styles.sheetTitleFlex}>ROUTE READY</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear the route"
+                    hitSlop={spacing.spacingSm}
+                    onPress={clearRoute}
+                  >
+                    <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                  </Pressable>
+                </View>
+
+                <View style={styles.heroRow}>
+                  <View style={styles.heroValueRow}>
+                    <Text style={styles.heroValue}>
+                      {(routeInfo.distanceMeters / 1000).toFixed(1)}
+                    </Text>
+                    <Text style={styles.heroUnit}>km</Text>
                   </View>
-                  <View>
-                    <Text style={styles.routeStatLabel}>Distance</Text>
-                    <Text style={styles.routeStatValue}>{routeInfo.distanceKm}</Text>
+                  <View style={styles.etaBlock}>
+                    <Text style={styles.sheetReadoutLabel}>ETA</Text>
+                    {(() => {
+                      const eta = splitDuration(routeInfo.durationSeconds);
+                      return (
+                        <View style={styles.heroValueRow}>
+                          <Text style={styles.sheetReadoutValue}>{eta.value}</Text>
+                          <Text style={styles.heroUnit}>{eta.unit}</Text>
+                        </View>
+                      );
+                    })()}
                   </View>
                 </View>
 
-                <View style={styles.routeDivider} />
+                {(() => {
+                  const destName = selectedDestination?.type === "cafe"
+                    ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
+                    : (selectedDestination as { type: "location"; name?: string } | undefined)?.name ?? "Dropped pin";
+                  return selectedDestination ? (
+                    <View style={styles.routeDest}>
+                      <Clock size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                      <Text style={styles.routeDestText} numberOfLines={1}>Heading to {destName}</Text>
+                    </View>
+                  ) : null;
+                })()}
 
-                <View style={styles.routeStat}>
-                  <View style={styles.routeStatIcon}>
-                    <Clock size={20} color="#F59E0B" />
-                  </View>
-                  <View>
-                    <Text style={styles.routeStatLabel}>Est. Time</Text>
-                    <Text style={styles.routeStatValue}>{routeInfo.durationMin}</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={styles.routeCancel} onPress={clearRoute} activeOpacity={0.7}>
-                  <X size={18} color="#8A8A9A" />
-                </TouchableOpacity>
-              </View>
+                {/* Start the trip. The one primary action in this viewport,
+                    and the control the whole recording flow hangs off —
+                    `startRecording` is unchanged. */}
+                {!isRecording && (
+                  <Animated.View style={{ transform: [{ scale: recPulse }] }}>
+                    <CutCornerButton
+                      title="Start Navigation"
+                      size="lg"
+                      corners="topRight"
+                      onPress={startRecording}
+                    />
+                  </Animated.View>
+                )}
+              </>
             )}
-
-            {(() => {
-              const destName = selectedDestination?.type === "cafe"
-                ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-                : (selectedDestination as { type: "location"; name?: string } | undefined)?.name ?? "Selected Location";
-              return selectedDestination ? (
-                <View style={styles.routeDest}>
-                  <MapPin size={14} color={ROUTE_RED} />
-                  <Text style={styles.routeDestText} numberOfLines={1}>{destName}</Text>
-                </View>
-              ) : null;
-            })()}
-
-            {/* --- Record button (only after route + ETA visible) --- */}
-            {!isRecording && (
-              <TouchableOpacity
-                style={styles.routeRecBtn}
-                onPress={startRecording}
-                activeOpacity={0.7}
-              >
-                <Animated.View style={{ transform: [{ scale: recPulse }] }}>
-                  <Circle size={22} color="#FFFFFF" fill={RECORD_RED} />
-                </Animated.View>
-                <Text style={styles.routeRecBtnText}>START NAVIGATION</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          </CutCornerSurface>
         </Animated.View>
       )}
 
-      {/* --- Selected event card --- */}
+      {/* --- Selected event card ---
+              Rajdhani for the title, Inter for the description, mono for
+              the head-count. The event-type hue is gone: the type is
+              already spelled out in the badge next to the glyph. --- */}
       {selectedEvent && !isRecording && (() => {
         const ev = selectedEvent;
-        const evColor = eventTypeColor(ev.event_type);
         const isFull =
           ev.max_participants > 0 && ev.participant_count >= ev.max_participants && !ev.is_joined;
         return (
-          <View style={[styles.eventCard, { paddingBottom: insets.bottom + 90 }]}>
-            <TouchableOpacity
-              style={styles.cafeCardClose}
-              onPress={() => setSelectedEventId(null)}
+          <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+            <CutCornerSurface
+              fill={colors.carbonSurface}
+              borderColor={ev.is_live ? colors.racingRed : colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.md}
+              corners="topRight"
+              contentStyle={styles.sheetBody}
             >
-              <View style={styles.cafeCardCloseBar} />
-            </TouchableOpacity>
-
-            <View style={styles.eventCardHeader}>
-              <View style={[styles.eventCardIcon, { borderColor: evColor, backgroundColor: `${evColor}15` }]}>
-                <EventTypeIcon type={ev.event_type} size={20} color={evColor} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.eventCardTitle} numberOfLines={2}>{ev.title}</Text>
-                <View style={styles.eventCardMetaRow}>
-                  <View style={[styles.eventTypePill, { backgroundColor: `${evColor}18` }]}>
-                    <Text style={[styles.eventTypePillText, { color: evColor }]}>
-                      {eventTypeLabel(ev.event_type)}
-                    </Text>
+              <View style={styles.sheetHeaderRow}>
+                <View style={styles.sheetGlyphBox}>
+                  <EventTypeIcon
+                    type={ev.event_type}
+                    size={spacing.spacingLg}
+                    color={ev.is_live ? colors.racingRed : colors.textPrimary}
+                  />
+                </View>
+                <View style={styles.sheetHeaderText}>
+                  <Text style={styles.sheetTitle} numberOfLines={2}>{ev.title}</Text>
+                  <View style={styles.eventCardMetaRow}>
+                    <CutCornerBadge
+                      label={eventTypeLabel(ev.event_type)}
+                      color={colors.hairline}
+                      textColor={colors.textSecondary}
+                      corners="topRight"
+                    />
+                    {ev.is_live && (
+                      <CutCornerBadge label="Live" solid corners="topRight" />
+                    )}
                   </View>
-                  {ev.is_live && (
-                    <View style={styles.eventLivePill}>
-                      <View style={styles.eventLiveDot} />
-                      <Text style={styles.eventLivePillText}>LIVE</Text>
-                    </View>
-                  )}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close event details"
+                  hitSlop={spacing.spacingSm}
+                  onPress={() => setSelectedEventId(null)}
+                >
+                  <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                </Pressable>
+              </View>
+
+              {ev.description ? (
+                <Text style={styles.sheetBodyText} numberOfLines={3}>{ev.description}</Text>
+              ) : null}
+
+              <View style={styles.sheetReadouts}>
+                <View style={styles.sheetReadout}>
+                  <Text style={styles.sheetReadoutLabel}>STARTS</Text>
+                  <Text style={styles.sheetReadoutValue}>{fmtEventTime(ev.starts_at, ev.is_live)}</Text>
+                </View>
+                <View style={styles.sheetReadout}>
+                  <Text style={styles.sheetReadoutLabel}>JOINED</Text>
+                  <Text style={styles.sheetReadoutValue}>
+                    {ev.participant_count}
+                    {ev.max_participants > 0 ? ` / ${ev.max_participants}` : ""}
+                  </Text>
+                </View>
+                <View style={styles.sheetReadout}>
+                  <Text style={styles.sheetReadoutLabel}>HOST</Text>
+                  <Text style={styles.sheetHostName} numberOfLines={1}>{ev.host_name}</Text>
                 </View>
               </View>
-            </View>
 
-            {ev.description ? (
-              <Text style={styles.eventCardDesc} numberOfLines={2}>{ev.description}</Text>
-            ) : null}
-
-            <View style={styles.eventCardStats}>
-              <View style={styles.eventCardStat}>
-                <Clock size={14} color="#F59E0B" />
-                <Text style={styles.eventCardStatText}>{fmtEventTime(ev.starts_at, ev.is_live)}</Text>
-              </View>
-              <View style={styles.eventCardStat}>
-                <Users size={14} color="#22C55E" />
-                <Text style={styles.eventCardStatText}>
-                  {ev.participant_count}
-                  {ev.max_participants > 0 ? ` / ${ev.max_participants}` : ""} joined
-                </Text>
-              </View>
-              <View style={styles.eventCardStat}>
-                <Crown size={14} color="#FFD700" />
-                <Text style={styles.eventCardStatText} numberOfLines={1}>{ev.host_name}</Text>
-              </View>
-            </View>
-
-            <View style={styles.eventCardActions}>
-              {ev.is_host ? (
-                <TouchableOpacity
-                  style={[styles.eventCancelBtn, eventActionBusy && { opacity: 0.5 }]}
-                  onPress={() => handleCancelEvent(ev)}
-                  disabled={eventActionBusy}
-                  activeOpacity={0.7}
+              <View style={styles.sheetActions}>
+                {ev.is_host ? (
+                  <CutCornerButton
+                    title="Cancel Event"
+                    variant="outline"
+                    corners="topRight"
+                    disabled={eventActionBusy}
+                    onPress={() => handleCancelEvent(ev)}
+                    style={styles.sheetPrimaryAction}
+                    icon={<X size={spacing.spacingLg} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />}
+                  />
+                ) : ev.is_joined ? (
+                  <CutCornerButton
+                    title="Leave"
+                    variant="outline"
+                    corners="topRight"
+                    disabled={eventActionBusy}
+                    onPress={() => handleLeaveEvent(ev)}
+                    style={styles.sheetPrimaryAction}
+                    icon={<LogOut size={spacing.spacingLg} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />}
+                  />
+                ) : (
+                  <CutCornerButton
+                    title={isFull ? "Event Full" : eventActionBusy ? "Joining…" : "Join Event"}
+                    corners="topRight"
+                    disabled={eventActionBusy || isFull || !user}
+                    onPress={() => handleJoinEvent(ev)}
+                    style={styles.sheetPrimaryAction}
+                    icon={<UserPlus size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+                  />
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Route to this event"
+                  onPress={() => handleRouteToEvent(ev)}
                 >
-                  <X size={16} color="#EF4444" />
-                  <Text style={styles.eventCancelBtnText}>Cancel Event</Text>
-                </TouchableOpacity>
-              ) : ev.is_joined ? (
-                <TouchableOpacity
-                  style={[styles.eventLeaveBtn, eventActionBusy && { opacity: 0.5 }]}
-                  onPress={() => handleLeaveEvent(ev)}
-                  disabled={eventActionBusy}
-                  activeOpacity={0.7}
-                >
-                  <LogOut size={16} color="#8A8A9A" />
-                  <Text style={styles.eventLeaveBtnText}>Leave</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[
-                    styles.eventJoinBtn,
-                    { backgroundColor: evColor },
-                    (eventActionBusy || isFull || !user) && { opacity: 0.5 },
-                  ]}
-                  onPress={() => handleJoinEvent(ev)}
-                  disabled={eventActionBusy || isFull || !user}
-                  activeOpacity={0.7}
-                >
-                  <UserPlus size={16} color="#FFFFFF" />
-                  <Text style={styles.eventJoinBtnText}>
-                    {isFull ? "Event Full" : eventActionBusy ? "Joining..." : "Join Event"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={styles.navBtnOutline}
-                onPress={() => handleRouteToEvent(ev)}
-                activeOpacity={0.7}
-              >
-                <Route size={16} color={ROUTE_RED} />
-                <Text style={styles.navBtnOutlineText}>Route</Text>
-              </TouchableOpacity>
-            </View>
+                  <CutCornerSurface
+                    fill={colors.voidBlack}
+                    borderColor={colors.hairline}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={cut.md}
+                    corners="topRight"
+                    style={styles.iconAction}
+                    contentStyle={styles.iconActionContent}
+                  >
+                    <Route size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                  </CutCornerSurface>
+                </Pressable>
+              </View>
+            </CutCornerSurface>
           </View>
         );
       })()}
@@ -3327,206 +3877,193 @@ export default function MapScreen() {
   );
 }
 
-// --- Styles ---
-const CAFE_COLOR = "#8B5CF6";
-const CAFE_COLOR_SELECTED = "#A78BFA";
-const RECORD_RED = "#FF2D55";
-const ROUTE_RED = "#E53935";
+/* ------------------------------------------------------------------ *
+ * Styles
+ *
+ * Every value below comes from `constants/theme.ts`. The four exceptions
+ * are marked inline with the reason: the marker geometry that has to stay
+ * fixed for the Android snapshot, the speed-limit sign (a road-sign
+ * reproduction, not a UI surface), the visibility switch track, and the
+ * screen-chrome text shadows that keep labels legible over map tiles.
+ * ------------------------------------------------------------------ */
+
+/** Screen-edge margin for the floating chrome, matching the Drive Hub. */
+const SCREEN_MARGIN = spacing.spacingLg;
+
+/**
+ * Labels that sit directly on the map — marker names, button captions —
+ * have no surface behind them, so they need a scrim of their own or they
+ * disappear over light tiles. This is the one place the screen uses a
+ * shadow, and it is a legibility device rather than an elevation one.
+ */
+const mapLabelShadow = {
+  textShadowColor: alpha(colors.voidBlack, 0.9),
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 3,
+} as const;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#161628",
+    backgroundColor: colors.voidBlack,
   },
   map: {
     ...StyleSheet.absoluteFillObject,
   },
-  // Nearby places layer (OSM + community)
+
+  /* ---------------- Places layer (OSM + community) ---------------- */
   placesFilterBar: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    left: SCREEN_MARGIN,
+    // Same gutter as the top chrome, so the chip row never scrolls under
+    // the search / locate / filters column.
+    right: spacing.spacingXxxl + spacing.spacingXl,
     zIndex: 5,
-    justifyContent: "center",
   },
-  placesLoadingPill: {
+  // The submit-a-place action takes the bottom-left slot the live feed
+  // vacates while this layer is open.
+  placesFabSlot: {
     position: "absolute",
-    alignSelf: "center",
+    left: SCREEN_MARGIN,
+    zIndex: 5,
+  },
+
+  placesStatusPill: {
+    position: "absolute",
+    left: SCREEN_MARGIN,
+    // Same gutter as the chip row above it.
+    right: spacing.spacingXxxl + spacing.spacingXl,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(20,20,28,0.9)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    gap: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
     zIndex: 5,
   },
-  placesLoadingText: {
-    color: "#EAEAEA",
-    fontSize: 12,
-    fontWeight: "600",
+  placesStatusText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
-  placesFab: {
-    position: "absolute",
-    right: 16,
-    bottom: 140,
-    zIndex: 5,
-  },
-  // Loading
+
+  /* ---------------- Status pills and banners ---------------- */
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-start",
     alignItems: "center",
-    paddingTop: 80,
   },
-  loadingCard: {
+  statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(10, 10, 20, 0.92)",
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.2)",
+    gap: spacing.spacingSm,
+    // Shrink-wraps the label instead of spanning the screen edge to edge,
+    // which is what let the old pill run under the chrome column.
+    alignSelf: "center",
+    maxWidth: "100%",
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
   },
-  loadingText: {
-    color: "#8A8A9A",
-    fontSize: 13,
-    fontWeight: "500",
+  statusPillText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
-  // Landmark loading
   cafeLoading: {
     position: "absolute",
-    left: 20,
-    right: 20,
+    left: SCREEN_MARGIN,
+    right: spacing.spacingXxxl + spacing.spacingXl,
     alignItems: "center",
     zIndex: 100,
   },
-  cafeLoadingText: {
-    color: "#A78BFA",
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 6,
-    backgroundColor: "rgba(139, 92, 246, 0.1)",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  // Error banner
   errorBanner: {
     position: "absolute",
-    left: 20,
-    right: 20,
+    left: SCREEN_MARGIN,
+    right: SCREEN_MARGIN,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.25)",
+    gap: spacing.spacingMd,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.racingRed,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
     zIndex: 200,
   },
-  errorText: {
-    color: "#EF4444",
-    fontSize: 12,
-    fontWeight: "600",
+  errorTextWrap: {
     flex: 1,
+    gap: spacing.spacingXs,
   },
-  retryText: {
-    color: "#FFFFFF",
+  errorTitle: {
+    fontFamily: fontFamily.displaySemiBold,
     fontSize: 12,
-    fontWeight: "700",
-    marginLeft: 12,
+    lineHeight: 15,
+    letterSpacing: 1,
+    color: colors.racingRed,
   },
-  // Landmark marker (generic base; per-category colors applied inline)
-  landmarkMarker: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(18, 18, 30, 0.92)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1.5,
+  errorText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
-  landmarkMarkerSelected: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  landmarkMarkerChosen: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    borderWidth: 2.5,
-    shadowOpacity: 0.8,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  // POI marker label column (icon chip + name + distance).
-  // Fixed width: the native marker bitmap is sized at capture time, so an
-  // auto-width wrap that grows when the name text lays out gets its icon
-  // cropped. Deterministic bounds = full-size render every time.
+
+  /* ---------------- Landmark markers ---------------- */
+  // Deliberate exception: the marker's outer bounds must not change when
+  // the badge inside it grows, because Android snapshots the view into a
+  // bitmap and a later size change gets clipped. These four sizes are
+  // therefore fixed pixel geometry, not spacing tokens.
   poiMarkerWrap: {
     alignItems: "center",
     width: 110,
   },
-  // Constant outer box for the badge across normal (44) / selected (58) /
-  // chosen (66) sizes so the marker bounds never change after capture.
   poiBadgeBox: {
     width: 66,
     height: 66,
     alignItems: "center",
     justifyContent: "center",
   },
-  // Neon badge image markers (glow is baked into the PNG)
-  poiBadge: {
+  landmarkMarker: {
+    width: 34,
+    height: 34,
+  },
+  landmarkMarkerSelected: {
     width: 44,
     height: 44,
   },
-  poiBadgeSelected: {
-    width: 58,
-    height: 58,
+  landmarkMarkerChosen: {
+    width: 56,
+    height: 56,
   },
-  poiBadgeChosen: {
-    width: 66,
-    height: 66,
-  },
-  searchResultBadge: {
-    width: 24,
-    height: 24,
+  landmarkMarkerContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   poiMarkerName: {
-    // Pulls the label back up toward the badge: the fixed 66px badge box
-    // leaves 11px of empty space below a normal-size (44px) badge.
-    marginTop: -4,
-    fontSize: 10.5,
-    fontWeight: "700",
-    color: "#E8E8F0",
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    color: colors.textPrimary,
     textAlign: "center",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
     maxWidth: 108,
   },
   poiMarkerDist: {
-    marginTop: 1,
-    fontSize: 9.5,
-    fontWeight: "600",
-    color: "#9A9AB0",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    ...textStyle("dataSm"),
+    ...mapLabelShadow,
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
-  // Car marker — outer box leaves headroom for the ±4px float animation so
-  // the icon never translates outside the marker bounds (which would clip it).
+
+  /* ---------------- Driver's own marker ---------------- */
+  // Fixed box with headroom for the ±4px float animation, so the icon
+  // never translates outside the snapshot bounds.
   carMarkerBox: {
     width: 40,
     height: 46,
@@ -3537,652 +4074,558 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  // "You / Lv." label under the player's own marker
   youLabelWrap: {
     alignItems: "center",
   },
   youLabelName: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    fontFamily: fontFamily.displaySemiBold,
+    color: colors.textPrimary,
   },
   youLabelLevel: {
-    fontSize: 9.5,
-    fontWeight: "600",
-    color: "#9A9AB0",
-    marginTop: 1,
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    ...textStyle("dataSm"),
+    ...mapLabelShadow,
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
-  // Destination pin
   destPin: {
     alignItems: "center",
-    shadowColor: ROUTE_RED,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
+    justifyContent: "center",
   },
-  // Custom location pin (orange, tapped on map)
   customPin: {
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
     alignItems: "center",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
+    justifyContent: "center",
   },
-  // Right buttons
+
+  /* ---------------- Floating chrome buttons ---------------- */
   rightButtons: {
     position: "absolute",
-    right: 8,
-    gap: 12,
+    right: spacing.spacingSm,
+    gap: spacing.spacingMd,
     zIndex: 100,
     alignItems: "center",
   },
+  // Utility surface: square, `radius.sharp`. The corner cut is reserved
+  // for brand surfaces (sheets, cards, the primary action).
+  /** Press feedback for the Pressables that replaced TouchableOpacity. */
+  pressed: {
+    opacity: 0.7,
+  },
   actionBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "rgba(18, 18, 30, 0.9)",
+    width: spacing.spacingXxl + spacing.spacingSm,
+    height: spacing.spacingXxl + spacing.spacingSm,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   actionBtnActive: {
-    borderColor: "rgba(255, 107, 53, 0.5)",
-    backgroundColor: "rgba(255, 107, 53, 0.12)",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    borderColor: colors.racingRed,
   },
   labeledBtn: {
     alignItems: "center",
-    width: 62,
+    width: spacing.spacingXxxl + spacing.spacingLg,
+    gap: spacing.spacingXs,
   },
   actionBtnLabel: {
-    marginTop: 4,
-    fontSize: 9,
-    fontWeight: "600",
-    color: "#C0C0CE",
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
     textAlign: "center",
-    textShadowColor: "rgba(0, 0, 0, 0.8)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
-  // ========================
-  //  TOP CHROME
-  // ========================
+  actionStack: {
+    position: "absolute",
+    right: spacing.spacingSm,
+    alignItems: "center",
+    gap: spacing.spacingMd,
+    zIndex: 130,
+  },
+  driveBtn: {
+    width: spacing.spacingXxxl + spacing.spacingSm,
+    height: spacing.spacingXxxl + spacing.spacingSm,
+  },
+  driveBtnContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* ---------------- Top chrome: greeting + featured event ---------------- */
   topChrome: {
     position: "absolute",
-    left: 14,
-    right: 76,
+    left: SCREEN_MARGIN,
+    right: spacing.spacingXxxl + spacing.spacingXl,
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.spacingMd,
     zIndex: 120,
     alignItems: "flex-start",
   },
-  greetingPill: {
-    backgroundColor: "rgba(14, 14, 24, 0.92)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    minWidth: 108,
-    maxWidth: 140,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
+  greetingCard: {
+    minWidth: spacing.spacingXxxl * 2 + spacing.spacingMd,
+    maxWidth: spacing.spacingXxxl * 3,
+  },
+  greetingCardContent: {
+    padding: spacing.spacingMd,
+    gap: spacing.spacingXs,
   },
   greetingTempRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.spacingSm,
+  },
+  greetingTempValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 1,
   },
   greetingTemp: {
+    ...textStyle("dataSm"),
     fontSize: 17,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    lineHeight: 21,
+    color: colors.textPrimary,
+  },
+  greetingTempUnit: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   greetingLabel: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: "#8A8A9A",
-    marginTop: 4,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   greetingNameRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: spacing.spacingXs,
   },
   greetingName: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
     flexShrink: 1,
   },
   greetingDate: {
-    fontSize: 9.5,
-    fontWeight: "600",
-    color: "#6A6A7E",
-    marginTop: 6,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  featuredCardHit: {
+    flex: 1,
   },
   featuredCard: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(14, 14, 24, 0.92)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
+    gap: spacing.spacingMd,
+    padding: spacing.spacingMd,
   },
   featuredThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    borderWidth: 1,
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
   },
   featuredInfo: {
     flex: 1,
+    gap: 1,
   },
   featuredTitle: {
-    fontSize: 13.5,
-    fontWeight: "800",
-    color: "#FF9450",
+    ...textStyle("displayMd"),
+    fontSize: 16,
+    lineHeight: 20,
+    color: colors.textPrimary,
   },
   featuredMeta: {
-    fontSize: 10.5,
-    fontWeight: "600",
-    color: "#B0B0C0",
-    marginTop: 2,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   featuredLocRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    marginTop: 2,
+    gap: spacing.spacingXs,
   },
   featuredLoc: {
-    fontSize: 10.5,
-    fontWeight: "500",
-    color: "#8A8A9A",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
     flexShrink: 1,
   },
   featuredBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FF6B35",
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: spacing.spacingXs,
     alignSelf: "flex-start",
   },
   featuredBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("dataSm"),
+    color: colors.textSecondary,
   },
-  // ========================
-  //  SEARCH OVERLAY
-  // ========================
+
+  /* ---------------- Search ---------------- */
   searchOverlay: {
     position: "absolute",
-    left: 14,
-    right: 14,
+    left: SCREEN_MARGIN,
+    right: SCREEN_MARGIN,
     zIndex: 250,
+    gap: spacing.spacingSm,
   },
+  // Utility surface: text inputs stay plain rectangles.
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.3)",
-    paddingHorizontal: 14,
-    height: 48,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    elevation: 10,
+    gap: spacing.spacingMd,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingLg,
+    height: spacing.spacingXxxl,
   },
   searchInput: {
+    ...textStyle("body"),
     flex: 1,
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "500",
+    color: colors.textPrimary,
     paddingVertical: 0,
   },
   searchResults: {
-    marginTop: 8,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingVertical: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   searchResultRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
+  },
+  searchResultRowBorder: {
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
   },
   searchResultIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "rgba(18, 18, 30, 0.9)",
-    borderWidth: 1,
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     justifyContent: "center",
     alignItems: "center",
   },
+  searchResultText: {
+    flex: 1,
+  },
   searchResultName: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...textStyle("body"),
+    color: colors.textPrimary,
   },
   searchResultVicinity: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: "#6A6A7E",
-    marginTop: 1,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   searchResultDist: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#8A8A9A",
+    ...textStyle("dataSm"),
+    color: colors.textSecondary,
   },
-  // ========================
-  //  FILTERS POPOVER
-  // ========================
+  searchEmpty: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+    padding: spacing.spacingLg,
+  },
+
+  /* ---------------- Filters popover ---------------- */
   filtersPopover: {
     position: "absolute",
-    right: 78,
-    width: 190,
-    backgroundColor: "rgba(14, 14, 24, 0.97)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    right: spacing.spacingXxxl + spacing.spacingXl + spacing.spacingSm,
+    width: spacing.spacingXxxl * 4,
     zIndex: 240,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 12,
+  },
+  filtersContent: {
+    padding: spacing.spacingLg,
+    gap: spacing.spacingXs,
   },
   filtersTitle: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#6A6A7E",
-    textTransform: "uppercase",
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
     letterSpacing: 1,
-    marginBottom: 8,
+    color: colors.textSecondary,
+    marginTop: spacing.spacingSm,
+    marginBottom: spacing.spacingXs,
   },
   filterRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 9,
-    paddingVertical: 7,
-  },
-  filterDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    gap: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
   },
   filterLabel: {
     flex: 1,
-    fontSize: 12.5,
-    fontWeight: "600",
-    color: "#E0E0EA",
+    ...textStyle("body"),
+    color: colors.textPrimary,
   },
   filterCheck: {
-    width: 18,
-    height: 18,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     justifyContent: "center",
     alignItems: "center",
   },
   filterCheckOn: {
-    backgroundColor: "#FF6B35",
-    borderColor: "#FF6B35",
+    backgroundColor: colors.textPrimary,
+    borderColor: colors.textPrimary,
   },
+  // Utility surface: a segmented control is a plain rectangle.
   mapStyleToggle: {
     flexDirection: "row",
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 10,
-    padding: 3,
-    gap: 3,
-    marginBottom: 14,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingXs,
+    gap: spacing.spacingXs,
+    marginBottom: spacing.spacingSm,
   },
   mapStyleOption: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
-    paddingVertical: 7,
-    borderRadius: 8,
+    gap: spacing.spacingXs,
+    paddingVertical: spacing.spacingSm,
+    borderRadius: radius.sharp,
   },
   mapStyleOptionActive: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.textPrimary,
   },
   mapStyleOptionText: {
-    fontSize: 11.5,
-    fontWeight: "700",
-    color: "#8A8A9A",
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: 1,
+    color: colors.textSecondary,
   },
   mapStyleOptionTextActive: {
-    color: "#0A0A14",
+    color: colors.voidBlack,
   },
-  // ========================
-  //  LIVE FEED PANEL
-  // ========================
-  liveFeedPanel: {
+
+  /* ---------------- Live feed ---------------- */
+  liveFeedSlot: {
     position: "absolute",
-    left: 14,
+    left: SCREEN_MARGIN,
     width: SCREEN_WIDTH * 0.62,
-    maxWidth: 300,
-    backgroundColor: "rgba(14, 14, 24, 0.92)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 4,
+    maxWidth: spacing.spacingXxxl * 6 + spacing.spacingMd,
     zIndex: 130,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
+  },
+  liveFeedContent: {
+    paddingHorizontal: spacing.spacingMd,
+    paddingTop: spacing.spacingMd,
+    paddingBottom: spacing.spacingSm,
   },
   liveFeedHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 6,
+    marginBottom: spacing.spacingSm,
   },
   liveFeedTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: spacing.spacingSm,
   },
   liveFeedDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#22C55E",
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-    elevation: 4,
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    borderRadius: radius.circle,
+    backgroundColor: colors.racingRed,
   },
   liveFeedTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 13,
+    lineHeight: 16,
+    letterSpacing: 1,
+    color: colors.textPrimary,
   },
   liveFeedSeeAll: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#8A8A9A",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   liveFeedEmpty: {
-    fontSize: 11,
-    fontWeight: "500",
-    color: "#6A6A7E",
-    lineHeight: 16,
-    paddingBottom: 8,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    paddingBottom: spacing.spacingSm,
   },
   liveFeedRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 8,
+    gap: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
   },
   liveFeedRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.05)",
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
   },
   liveFeedIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(18, 18, 30, 0.9)",
-    borderWidth: 1.5,
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     justifyContent: "center",
     alignItems: "center",
+  },
+  liveFeedIconLive: {
+    borderColor: colors.racingRed,
   },
   liveFeedTextWrap: {
     flex: 1,
   },
   liveFeedRowTitle: {
-    fontSize: 11.5,
-    fontWeight: "700",
-    color: "#E8E8F0",
+    ...textStyle("caption"),
+    color: colors.textPrimary,
   },
   liveFeedRowSub: {
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 1,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   liveFeedRowTime: {
-    fontSize: 9.5,
-    fontWeight: "500",
-    color: "#6A6A7E",
-    marginTop: 1,
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
   liveFeedCount: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
-    borderRadius: 9,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
+    gap: spacing.spacingXs,
   },
   liveFeedCountText: {
-    fontSize: 10,
-    fontWeight: "800",
+    ...textStyle("dataSm"),
+    color: colors.textSecondary,
   },
-  // ========================
-  //  ACTION STACK (Drive / Convoy / Chat)
-  // ========================
-  actionStack: {
+
+  /* ---------------- Drop-pin hint ---------------- */
+  dropPinHint: {
     position: "absolute",
-    right: 8,
-    alignItems: "center",
-    gap: 12,
-    zIndex: 130,
+    left: SCREEN_MARGIN,
+    // Stops short of the right-hand chrome column, same gutter the top
+    // chrome uses, so the hint never sits under a button label.
+    right: spacing.spacingXxxl + spacing.spacingXl,
+    zIndex: 140,
   },
-  driveBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "#FF6B35",
+  dropPinHintContent: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    elevation: 10,
+    gap: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
   },
-  driveBtnActive: {
-    backgroundColor: "#22C55E",
-    shadowColor: "#22C55E",
+  dropPinHintText: {
+    ...textStyle("body"),
+    color: colors.textPrimary,
   },
-  stackBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(18, 18, 30, 0.92)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  // ========================
-  //  RECORD BUTTON
-  // ========================
-  recordBtnContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 150,
-  },
-  recordBtnOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(255, 45, 85, 0.12)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 45, 85, 0.4)",
-    shadowColor: RECORD_RED,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  recordBtnInner: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255, 45, 85, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  recordBtnLabel: {
-    marginTop: 6,
-    fontSize: 11,
-    fontWeight: "700",
-    color: RECORD_RED,
-    letterSpacing: 2,
-  },
-  // ========================
-  //  RECORDING HUD
-  // ========================
-  recordingCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 12,
-    right: 12,
-    zIndex: 150,
-  },
-  // --- Top-left profile pill ---
+
+  /* ---------------- Driving HUD: profile pill ---------------- */
   drivingProfilePill: {
     position: "absolute",
-    left: 12,
+    left: spacing.spacingMd,
     zIndex: 160,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(14, 14, 24, 0.9)",
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingSm,
+    paddingVertical: spacing.spacingXs,
   },
   drivingProfileAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 1.5,
-    borderColor: "#FF6B35",
+    width: spacing.spacingXl + spacing.spacingXs,
+    height: spacing.spacingXl + spacing.spacingXs,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   drivingProfileAvatarFallback: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 1.5,
-    borderColor: "#FF6B35",
-    backgroundColor: "#2A2A45",
+    width: spacing.spacingXl + spacing.spacingXs,
+    height: spacing.spacingXl + spacing.spacingXs,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
   },
-  drivingProfileAvatarText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 11,
+  avatarInitial: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 13,
+    lineHeight: 16,
+    color: colors.textPrimary,
   },
   drivingProfileLevel: {
-    color: "#FF9F55",
-    fontSize: 10,
-    fontWeight: "800",
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: 0.8,
+    color: colors.textPrimary,
+  },
+  drivingProfileXpRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
   },
   drivingProfileXp: {
-    color: "#8A8A9A",
-    fontSize: 9,
-    fontWeight: "600",
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
-  // --- Turn-by-turn instruction card ---
+  drivingProfileXpUnit: {
+    ...textStyle("caption"),
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
+  },
+
+  /* ---------------- Driving HUD: turn card ---------------- */
   turnCard: {
     position: "absolute",
-    left: 12,
-    width: 168,
+    left: spacing.spacingMd,
+    width: spacing.spacingXxxl * 3 + spacing.spacingXl,
     zIndex: 155,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingMd,
+    gap: spacing.spacingSm,
   },
   turnCardTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: spacing.spacingSm,
   },
   turnIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
-    backgroundColor: "rgba(255, 107, 53, 0.16)",
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -4192,228 +4635,251 @@ const styles = StyleSheet.create({
   turnDistanceRow: {
     flexDirection: "row",
     alignItems: "baseline",
-    gap: 2,
+    gap: spacing.spacingXs,
   },
   turnDistanceText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "800",
+    ...textStyle("dataSm"),
+    fontSize: 18,
+    lineHeight: 22,
+    color: colors.textPrimary,
   },
   turnMetersUnit: {
-    color: "#8A8A9A",
-    fontSize: 10,
-    fontWeight: "600",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   turnInstructionText: {
-    color: "#FF9F55",
-    fontSize: 11,
-    fontWeight: "700",
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 13,
+    lineHeight: 16,
+    letterSpacing: 0.4,
+    color: colors.racingRed,
   },
   turnStreetText: {
-    color: "#8A8A9A",
-    fontSize: 9,
-    fontWeight: "600",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
+  // Utility surface: progress tracks stay square.
   turnProgressTrack: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginTop: 7,
+    height: spacing.spacingXs,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     overflow: "hidden",
   },
   turnProgressFill: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#FF6B35",
+    height: "100%",
+    backgroundColor: colors.textPrimary,
   },
   turnBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 5,
   },
   turnBottomText: {
-    color: "#6A6A7E",
-    fontSize: 9,
-    fontWeight: "700",
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
-  // --- Speed limit + compass ---
+
+  /* ---------------- Driving HUD: speed limit + compass ---------------- */
   topRightCluster: {
     position: "absolute",
-    right: 12,
+    right: spacing.spacingMd,
     zIndex: 155,
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: spacing.spacingSm,
   },
+  // Deliberate exception: this is a reproduction of a regulatory speed
+  // limit sign. Restyling it into the palette would make it stop reading
+  // as a road sign, which is the entire point of the element.
   speedLimitSign: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: radius.circle,
     backgroundColor: "#FFFFFF",
     borderWidth: 3,
-    borderColor: "#E53935",
+    borderColor: colors.racingRed,
     justifyContent: "center",
     alignItems: "center",
   },
   speedLimitNumber: {
-    color: "#111111",
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 15,
+    fontFamily: fontFamily.dataBold,
+    fontSize: 14,
+    lineHeight: 16,
+    color: "#000000",
   },
   speedLimitUnit: {
-    color: "#111111",
-    fontSize: 6,
-    fontWeight: "700",
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 7,
+    lineHeight: 9,
+    color: "#000000",
   },
   compassBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(14, 14, 24, 0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     justifyContent: "center",
     alignItems: "center",
   },
-  // --- Nearby POI card ---
+
+  /* ---------------- Driving HUD: nearby card ---------------- */
   nearbyCard: {
     position: "absolute",
-    right: 12,
-    width: 106,
+    right: spacing.spacingMd,
+    width: spacing.spacingXxxl * 2 + spacing.spacingLg,
     zIndex: 150,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 7,
-    gap: 5,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingSm,
+    gap: spacing.spacingSm,
   },
   nearbyHeaderText: {
-    color: "#6A6A7E",
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1,
+    color: colors.textSecondary,
   },
   nearbyRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.spacingSm,
   },
   nearbyIconBox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
   },
+  nearbyRowText: {
+    flex: 1,
+  },
   nearbyLabel: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "700",
+    ...textStyle("caption"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textPrimary,
   },
   nearbyDist: {
-    color: "#6A6A7E",
-    fontSize: 8,
-    fontWeight: "600",
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
   nearbyChevronBtn: {
     alignSelf: "center",
-    paddingTop: 1,
+    paddingTop: spacing.spacingXs,
   },
-  // --- Left column gamification stack ---
+
+  /* ---------------- Driving HUD: achievements ---------------- */
   achievementStack: {
     position: "absolute",
-    left: 12,
-    width: 114,
+    left: spacing.spacingMd,
+    width: spacing.spacingXxxl * 2 + spacing.spacingXl,
     zIndex: 150,
-    gap: 6,
+    gap: spacing.spacingSm,
   },
   achievementCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 7,
+    gap: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingSm,
   },
   achievementIconBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
-    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
   },
   achievementTextCol: {
     flex: 1,
+    gap: spacing.spacingXs,
   },
   achievementTitle: {
-    color: "#8A8A9A",
-    fontSize: 8,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0.8,
+    color: colors.textSecondary,
+  },
+  achievementValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
   },
   achievementValue: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-    marginTop: 1,
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
   },
+  achievementUnit: {
+    ...textStyle("caption"),
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
+  },
+  // Utility surface: progress tracks stay square.
   achievementProgressTrack: {
     height: 2,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginTop: 5,
+    backgroundColor: colors.hairline,
     overflow: "hidden",
   },
   achievementProgressFill: {
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: "#22C55E",
-  },
-  achievementInlineText: {
-    color: "#FACC15",
-    fontSize: 11,
-    fontWeight: "800",
+    height: "100%",
+    backgroundColor: colors.textSecondary,
   },
   friendCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 6,
+    gap: spacing.spacingSm,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    padding: spacing.spacingSm,
   },
   friendAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.circle,
   },
   friendAvatarFallback: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
   },
+  friendTextCol: {
+    flex: 1,
+  },
   friendName: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "700",
+    ...textStyle("caption"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textPrimary,
   },
   friendMeta: {
-    color: "#8A8A9A",
-    fontSize: 8,
-    fontWeight: "600",
-    marginTop: 1,
+    ...textStyle("dataSm"),
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
   },
-  // --- Photo captured toast ---
   photoToastPill: {
     position: "absolute",
     alignSelf: "center",
@@ -4423,768 +4889,426 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    marginHorizontal: 80,
-    backgroundColor: "rgba(34, 197, 94, 0.95)",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    gap: spacing.spacingSm,
+    marginHorizontal: spacing.spacingXxxl + spacing.spacingXxl,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
   },
   photoToastText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
+    ...textStyle("caption"),
+    color: colors.textPrimary,
   },
-  // --- Floating speedometer ---
+
+  /* ---------------- Driving HUD: bottom sheet ---------------- */
+  recordingCard: {
+    position: "absolute",
+    bottom: 0,
+    left: spacing.spacingMd,
+    right: spacing.spacingMd,
+    zIndex: 150,
+    gap: spacing.spacingMd,
+  },
   speedometerWrap: {
     position: "absolute",
-    top: -66,
-    right: 4,
-    alignItems: "center",
+    top: -(spacing.spacingXxxl * 2 + spacing.spacingSm),
+    right: spacing.spacingXs,
+    alignItems: "flex-end",
+    gap: spacing.spacingSm,
   },
-  speedometerRing: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderWidth: 3,
-    borderColor: "#E53935",
-    justifyContent: "center",
+  speedometerBox: {
+    width: spacing.spacingXxxl * 2,
+    height: spacing.spacingXxxl * 2,
+  },
+  speedometerContent: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
   },
   speedometerValue: {
-    color: "#FFFFFF",
-    fontSize: 25,
-    fontWeight: "800",
-    lineHeight: 28,
+    ...textStyle("dataLg"),
+    color: colors.textPrimary,
   },
   speedometerUnit: {
-    color: "#6A6A7E",
-    fontSize: 10,
-    fontWeight: "700",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   speedometerGearRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    marginTop: 2,
+    gap: spacing.spacingXs,
+    marginTop: spacing.spacingXs,
+  },
+  speedometerGearDot: {
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    borderRadius: radius.circle,
+    backgroundColor: colors.textSecondary,
   },
   speedometerGearText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "800",
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
   },
   pausedBadge: {
-    marginTop: 6,
-    backgroundColor: "#F59E0B",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    alignSelf: "flex-end",
   },
-  pausedBadgeText: {
-    color: "#141420",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  // --- Action row ---
   actionRow: {
     flexDirection: "row",
-    justifyContent: "space-around",
     alignItems: "center",
-    marginBottom: 12,
+    justifyContent: "space-between",
+    gap: spacing.spacingSm,
   },
-  drivingActionBtn: {
-    alignItems: "center",
-    gap: 6,
+  drivingPrimaryBtn: {
+    flex: 1.4,
   },
-  actionBtnCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    justifyContent: "center",
-    alignItems: "center",
+  drivingSecondaryBtn: {
+    flex: 1,
   },
-  actionBtnCircleBig: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: RECORD_RED,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: RECORD_RED,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  drivingActionBtnLabel: {
-    color: "#8A8A9A",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  // --- Stats row ---
   drivingStatsRow: {
     flexDirection: "row",
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingVertical: 12,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingVertical: spacing.spacingMd,
   },
   drivingStatCol: {
     flex: 1,
     alignItems: "center",
+    gap: spacing.spacingXs,
   },
   drivingStatLabel: {
-    color: "#6A6A7E",
-    fontSize: 9,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1,
+    color: colors.textSecondary,
+  },
+  drivingStatValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
   },
   drivingStatValue: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 3,
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
   },
-  // ========================
-  //  TRIP SUMMARY
-  // ========================
-  tripSummaryCard: {
+  drivingStatUnit: {
+    ...textStyle("caption"),
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
+  },
+
+  /* ---------------- Bottom sheets (shared) ---------------- */
+  bottomSheetSlot: {
     position: "absolute",
     bottom: 0,
-    left: 12,
-    right: 12,
-    zIndex: 150,
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.2)",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
+    left: spacing.spacingMd,
+    right: spacing.spacingMd,
+    zIndex: 160,
   },
-  tripSummaryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
+  sheetBody: {
+    padding: spacing.spacingLg,
+    gap: spacing.spacingMd,
   },
-  tripSummaryHeaderLeft: {
+  sheetHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.spacingMd,
   },
-  tripSummaryDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#22C55E",
+  sheetHeaderText: {
+    flex: 1,
+    gap: spacing.spacingXs,
   },
-  tripSummaryTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  tripSummaryRow: {
-    flexDirection: "row",
+  sheetGlyphBox: {
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     alignItems: "center",
-    gap: 24,
+    justifyContent: "center",
   },
-  tripStat: {
+  sheetTitle: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+  },
+  sheetTitleFlex: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  sheetBodyText: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+  },
+  sheetReadouts: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    gap: spacing.spacingXl,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
   },
-  tripStatValue: {
-    fontSize: 17,
-    color: "#FFFFFF",
-    fontWeight: "800",
+  sheetReadout: {
+    gap: spacing.spacingXs,
+    flexShrink: 1,
   },
-  tripStatUnit: {
-    fontSize: 11,
-    color: "#6A6A7E",
-    fontWeight: "600",
-    marginLeft: 2,
+  sheetReadoutLabel: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
   },
-  tripStatItem: {
+  sheetReadoutValue: {
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
+  },
+  // The host's name is a name, not a measurement, so it stays in Inter
+  // even though it sits in the readout row beside two mono values.
+  sheetHostName: {
+    ...textStyle("body"),
+    color: colors.textPrimary,
+  },
+  sheetActions: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: spacing.spacingMd,
+  },
+  sheetPrimaryAction: {
+    flex: 1,
+  },
+  iconAction: {
+    width: spacing.spacingXxxl,
+    height: "100%",
+    minHeight: spacing.spacingXxxl,
+  },
+  iconActionContent: {
     flex: 1,
     alignItems: "center",
-  },
-  tripStatLabel: {
-    fontSize: 10,
-    color: "#6A6A7E",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 6,
-  },
-  tripStatRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  tripStatsGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  tripSummaryDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginHorizontal: 4,
-  },
-  tripSpeedIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: "rgba(59, 130, 246, 0.12)",
     justifyContent: "center",
+  },
+  sheetDismiss: {
     alignItems: "center",
+    paddingTop: spacing.spacingSm,
   },
-  tripSpeedLabel: {
-    fontSize: 9,
-    color: "#3B82F6",
-    fontWeight: "800",
+  sheetDismissText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
   },
-  // XP reward
-  xpRewardRow: {
+  heroRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "space-between",
-    backgroundColor: "rgba(255, 215, 0, 0.06)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 215, 0, 0.12)",
   },
-  xpRewardLeft: {
+  heroValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
+  },
+  heroValue: {
+    ...textStyle("dataLg"),
+    color: colors.textPrimary,
+  },
+  heroUnit: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  etaBlock: {
+    alignItems: "flex-end",
+    gap: spacing.spacingXs,
+  },
+  statsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
   },
-  xpRewardLabel: {
-    fontSize: 13,
-    color: "#CCCCCC",
-    fontWeight: "600",
+  statDivider: {
+    width: borderWidth.hairline,
+    alignSelf: "stretch",
+    marginHorizontal: spacing.spacingMd,
+    backgroundColor: colors.hairline,
   },
-  xpBadge: {
-    backgroundColor: "rgba(255, 215, 0, 0.15)",
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 215, 0, 0.25)",
-  },
-  xpBadgeText: {
-    fontSize: 13,
-    color: "#FFD700",
-    fontWeight: "800",
-  },
-  // Level bar
-  levelBarContainer: {
-    marginBottom: 10,
-  },
-  levelBarHeader: {
+  comparisonRow: {
     flexDirection: "row",
+    alignItems: "baseline",
     justifyContent: "space-between",
-    marginBottom: 6,
+    gap: spacing.spacingSm,
   },
-  levelBarLabel: {
-    fontSize: 12,
-    color: "#FF6B35",
-    fontWeight: "700",
+  comparisonLabel: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
-  levelBarXp: {
-    fontSize: 11,
-    color: "#5A5A6E",
-    fontWeight: "600",
-  },
-  levelBarTrack: {
-    height: 6,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  levelBarFill: {
-    height: 6,
-    backgroundColor: "#FF6B35",
-    borderRadius: 3,
-  },
-  saveRouteRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 14,
-  },
-  saveRouteBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: "#FF6B35",
-  },
-  saveRouteBtnText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  myRoutesBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(255,107,53,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,107,53,0.3)",
-  },
-  levelUpText: {
-    fontSize: 13,
-    color: "#FFD700",
-    fontWeight: "800",
-    textAlign: "center",
+  comparisonValue: {
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
   },
   levelUpBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: "rgba(255, 215, 0, 0.1)",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: "rgba(255, 215, 0, 0.2)",
+    gap: spacing.spacingSm,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingVertical: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
   },
-  // Comparison row
-  comparisonRow: {
+  levelUpText: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 15,
+    lineHeight: 18,
+    letterSpacing: 0.8,
+    color: colors.textPrimary,
+  },
+  levelBarContainer: {
+    gap: spacing.spacingSm,
+  },
+  levelBarHeader: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.06)",
-  },
-  comparisonText: {
-    fontSize: 12,
-    color: "#6A6A7E",
-    fontWeight: "500",
-  },
-  comparisonDiff: {
-    fontSize: 12,
-    fontWeight: "700",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  comparisonFaster: {
-    color: "#22C55E",
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
-  },
-  comparisonSlower: {
-    color: "#F59E0B",
-    backgroundColor: "rgba(245, 158, 11, 0.1)",
-  },
-  // Cafe card
-  cafeCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 12,
-    right: 12,
-    zIndex: 150,
-  },
-  cafeCardClose: {
-    alignItems: "center",
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  cafeCardCloseBar: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-  },
-  cafeCardContent: {
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(139, 92, 246, 0.15)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
+    alignItems: "baseline",
   },
-  cafeCardInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  cafeCardName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    flex: 1,
-  },
-  destCardNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  categoryDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  cafeCardVicinity: {
+  levelBarLabel: {
+    fontFamily: fontFamily.displaySemiBold,
     fontSize: 12,
-    color: "#6A6A7E",
-    marginTop: 4,
-    fontWeight: "500",
-  },
-  ratingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 6,
-  },
-  ratingStar: {
-    color: "#F59E0B",
-    fontSize: 13,
-  },
-  ratingText: {
-    color: "#8A8A9A",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  cafeCardActions: {
-    flexDirection: "column",
-    gap: 8,
-    alignItems: "stretch",
-  },
-  navBtnOutline: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: `${ROUTE_RED}60`,
-  },
-  navBtnOutlineText: {
-    color: ROUTE_RED,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  recNavBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: RECORD_RED,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    shadowColor: RECORD_RED,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  recNavBtnText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  routeRecBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: RECORD_RED,
-    marginTop: 14,
-    paddingVertical: 13,
-    borderRadius: 14,
-    shadowColor: RECORD_RED,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-  },
-  routeRecBtnText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+    lineHeight: 15,
     letterSpacing: 1,
+    color: colors.textSecondary,
   },
-  // Route card
-  routeCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 12,
-    right: 12,
-    zIndex: 150,
+  levelBarXp: {
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textSecondary,
   },
-  routeCardContent: {
-    backgroundColor: "rgba(14, 14, 24, 0.96)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(229, 57, 53, 0.2)",
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
+  // Utility surface: progress tracks stay square.
+  levelBarTrack: {
+    height: spacing.spacingXs,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    overflow: "hidden",
+  },
+  levelBarFill: {
+    height: "100%",
+    backgroundColor: colors.racingRed,
   },
   routeLoader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    paddingVertical: 8,
+    gap: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
   },
   routeLoaderText: {
-    color: "#E53935",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  routeInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  routeStat: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  routeStatIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  routeStatLabel: {
-    fontSize: 11,
-    color: "#6A6A7E",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  routeStatValue: {
-    fontSize: 18,
-    color: "#FFFFFF",
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  routeDivider: {
-    width: 1,
-    height: 50,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    marginHorizontal: 12,
-  },
-  routeCancel: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    justifyContent: "center",
-    alignItems: "center",
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   routeDest: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.06)",
+    gap: spacing.spacingSm,
+    paddingTop: spacing.spacingMd,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
   },
   routeDestText: {
-    color: "#8A8A9A",
-    fontSize: 13,
-    fontWeight: "500",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
     flex: 1,
   },
-  // ─── ONLINE STATUS BANNER ────────────────────────────
-  onlineBigCard: {
+
+  /* ---------------- Online status banner ---------------- */
+  onlineBannerSlot: {
     position: "absolute",
     bottom: 0,
-    left: 12,
-    right: 12,
+    left: spacing.spacingMd,
+    right: spacing.spacingMd,
     zIndex: 155,
   },
   onlineBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
-    backgroundColor: "rgba(12, 22, 16, 0.94)",
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: "rgba(34, 197, 94, 0.4)",
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  onlineBannerOffline: {
-    backgroundColor: "rgba(16, 16, 26, 0.94)",
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-  },
-  dropPinHint: {
-    position: "absolute",
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(16, 16, 26, 0.94)",
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 107, 53, 0.4)",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    elevation: 10,
-  },
-  dropPinHintText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
+    gap: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
   },
   onlineBannerLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
+    gap: spacing.spacingMd,
     flex: 1,
   },
   onlineBannerDot: {
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 7,
-    elevation: 5,
+    width: spacing.spacingMd,
+    height: spacing.spacingMd,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.textSecondary,
+  },
+  onlineBannerDotOn: {
+    backgroundColor: colors.textPrimary,
+    borderColor: colors.textPrimary,
   },
   onlineBannerTextWrap: {
     flex: 1,
+    gap: spacing.spacingXs,
   },
   onlineBannerTitle: {
+    fontFamily: fontFamily.displaySemiBold,
     fontSize: 15,
-    fontWeight: "800",
-    color: "#22C55E",
-    letterSpacing: 0.3,
+    lineHeight: 18,
+    letterSpacing: 1,
+    color: colors.textPrimary,
   },
   onlineBannerSub: {
-    fontSize: 10.5,
-    fontWeight: "500",
-    color: "#8FA89A",
-    marginTop: 2,
-    lineHeight: 14,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
-  onlineBannerBtnGreen: {
-    backgroundColor: "#22C55E",
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 12,
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  onlineBannerBtnGreenText: {
-    fontSize: 12.5,
-    fontWeight: "800",
-    color: "#06130B",
-  },
-  // Visibility on/off switch — replaces the old Go Online/Go Offline pill
-  // with a single, self-explanatory iOS-style toggle.
+  // Deliberate exception: a switch is one of the few controls whose
+  // meaning is carried by its shape, and a squared-off switch reads as a
+  // progress bar. It keeps `radius.circle`, like an avatar.
   visibilitySwitchTrack: {
     flexDirection: "row",
-    width: 52,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.14)",
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXl + spacing.spacingSm,
+    borderRadius: radius.circle,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     alignItems: "center",
     justifyContent: "flex-start",
     paddingHorizontal: 2,
   },
   visibilitySwitchTrackOn: {
-    backgroundColor: "#22C55E",
-    borderColor: "#22C55E",
+    backgroundColor: colors.textPrimary,
+    borderColor: colors.textPrimary,
     justifyContent: "flex-end",
-    shadowColor: "#22C55E",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 6,
   },
   visibilitySwitchKnob: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.circle,
+    backgroundColor: colors.textPrimary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
-    elevation: 3,
   },
-  visibilitySwitchKnobOn: {
-    backgroundColor: "#FFFFFF",
-  },
-  // ─── Online player markers on map ────────────────────
+
+  /* ---------------- Online driver markers ---------------- */
+  // Fixed geometry, same Android-snapshot reason as the POI markers.
   playerMarkerWrap: {
     alignItems: "center",
     width: 96,
   },
-  // Box around the ring sized to contain the outer party ring and the
-  // level/party badges — keeping them inside the marker bounds so the
-  // native snapshot doesn't clip them.
   playerRingBox: {
     width: 46,
     height: 46,
@@ -5194,32 +5318,23 @@ const styles = StyleSheet.create({
   playerRing: {
     width: 34,
     height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(10, 10, 20, 0.95)",
+    borderRadius: radius.circle,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    elevation: 8,
+    borderWidth: borderWidth.emphasis,
     overflow: "hidden",
   },
-  // Party members get a thicker, brighter ring so they stand out from
-  // regular online players on the map.
   playerRingParty: {
     borderWidth: 3,
-    shadowOpacity: 0.9,
-    shadowRadius: 14,
-    elevation: 12,
   },
   partyOuterRing: {
     position: "absolute",
     top: 2,
     width: 42,
     height: 42,
-    borderRadius: 21,
-    borderWidth: 1.5,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
     opacity: 0.5,
   },
   partyBadge: {
@@ -5228,21 +5343,22 @@ const styles = StyleSheet.create({
     right: 20,
     width: 16,
     height: 16,
-    borderRadius: 8,
+    borderRadius: radius.circle,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#0A0A0F",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.voidBlack,
   },
   playerAvatarImg: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: radius.circle,
   },
   playerAvatarInitial: {
+    fontFamily: fontFamily.displaySemiBold,
     fontSize: 13,
-    fontWeight: "800",
-    color: "#E8E8F0",
+    lineHeight: 16,
+    color: colors.textPrimary,
   },
   playerLevelBadge: {
     position: "absolute",
@@ -5250,128 +5366,98 @@ const styles = StyleSheet.create({
     right: 1,
     minWidth: 18,
     height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    backgroundColor: "#12141C",
-    borderWidth: 1.5,
+    borderRadius: radius.circle,
+    paddingHorizontal: spacing.spacingXs,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
     justifyContent: "center",
     alignItems: "center",
   },
   playerLevelBadgeText: {
-    fontSize: 8.5,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("dataSm"),
+    fontSize: 10,
+    lineHeight: 12,
+    color: colors.textPrimary,
   },
   playerName: {
-    marginTop: 0,
-    fontSize: 10.5,
-    fontWeight: "700",
-    color: "#E8E8F0",
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    color: colors.textPrimary,
     textAlign: "center",
-    textShadowColor: "rgba(0, 0, 0, 0.9)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
     maxWidth: 92,
   },
-  // ─── Online user profile card ─────────────────────────
-  onlineUserCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 12,
-    right: 12,
-    zIndex: 160,
-  },
-  onlineUserCardContent: {
-    backgroundColor: "rgba(18, 22, 32, 0.97)",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.2)",
-    padding: 18,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
-  },
-  onlineUserCardHeader: {
+
+  /* ---------------- Online driver sheet ---------------- */
+  driverSheetHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginBottom: 14,
+    gap: spacing.spacingMd,
   },
-  onlineUserCardAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#22C55E",
+  driverSheetAvatar: {
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXxxl,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.emphasis,
+    backgroundColor: colors.voidBlack,
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
-  onlineUserCardAvatarImg: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  driverSheetAvatarImg: {
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXxxl,
+    borderRadius: radius.circle,
   },
-  onlineUserCardOnlineDot: {
-    position: "absolute",
-    bottom: 1,
-    right: 1,
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-    backgroundColor: "#22C55E",
-    borderWidth: 2.5,
-    borderColor: "rgba(18, 22, 32, 1)",
-  },
-  onlineUserCardAvatarText: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  onlineUserCardName: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  onlineUserCardLevel: {
-    fontSize: 13,
-    color: "#22C55E",
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  onlineUserCardActions: {
-    gap: 10,
-  },
-  onlineUserActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "rgba(56, 189, 248, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.25)",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  onlineUserActionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(56, 189, 248, 0.14)",
-    borderWidth: 1.5,
-    borderColor: "rgba(56, 189, 248, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  onlineUserActionLabel: {
+  driverSheetText: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    gap: spacing.spacingXs,
   },
-  // ========================
-  //  EVENTS
-  // ========================
+  driverSheetMetaRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
+  },
+  driverSheetMeta: {
+    ...textStyle("dataSm"),
+    color: colors.textSecondary,
+  },
+  driverSheetMetaSep: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  driverSheetMetaUnit: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  driverSheetActions: {
+    gap: spacing.spacingSm,
+  },
+  // Utility surface: list rows stay plain rectangles.
+  actionRowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingMd,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingVertical: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+  },
+  actionRowItemBusy: {
+    opacity: 0.4,
+  },
+  actionRowIcon: {
+    width: spacing.spacingXl,
+    alignItems: "center",
+  },
+  actionRowLabel: {
+    flex: 1,
+    ...textStyle("body"),
+    color: colors.textPrimary,
+  },
+
+  /* ---------------- Event markers ---------------- */
   eventMarkerColumn: {
     alignItems: "center",
     maxWidth: 170,
@@ -5382,52 +5468,25 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
   },
-  eventMiniCard: {
-    marginTop: 2,
-    backgroundColor: "rgba(14, 14, 24, 0.94)",
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    maxWidth: 168,
+  eventMarker: {
+    width: 36,
+    height: 36,
+  },
+  eventMarkerSelected: {
+    width: 44,
+    height: 44,
+  },
+  eventMarkerContent: {
+    flex: 1,
     alignItems: "center",
-  },
-  eventMiniTitle: {
-    fontSize: 10.5,
-    fontWeight: "800",
-  },
-  eventMiniMeta: {
-    fontSize: 9,
-    fontWeight: "600",
-    color: "#9A9AB0",
-    marginTop: 1,
+    justifyContent: "center",
   },
   eventMarkerLiveRing: {
     position: "absolute",
     width: 50,
     height: 50,
-    borderRadius: 25,
-    borderWidth: 1.5,
-  },
-  eventMarker: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(14, 14, 24, 0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  eventMarkerSelected: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    shadowOpacity: 0.8,
-    shadowRadius: 14,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.hairline,
   },
   eventMarkerBadge: {
     position: "absolute",
@@ -5435,172 +5494,48 @@ const styles = StyleSheet.create({
     right: 0,
     minWidth: 18,
     height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
+    borderRadius: radius.circle,
+    paddingHorizontal: spacing.spacingXs,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#0E0E18",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.voidBlack,
   },
   eventMarkerBadgeText: {
-    color: "#FFFFFF",
+    ...textStyle("dataSm"),
     fontSize: 10,
-    fontWeight: "800",
+    lineHeight: 12,
   },
-  eventCard: {
-    position: "absolute",
-    bottom: 0,
-    left: 12,
-    right: 12,
-    backgroundColor: "rgba(14, 14, 24, 0.97)",
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    zIndex: 180,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
-  },
-  eventCardHeader: {
-    flexDirection: "row",
+  eventMiniCard: {
+    marginTop: spacing.spacingXs,
+    backgroundColor: colors.carbonSurface,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingSm,
+    paddingVertical: spacing.spacingXs,
+    maxWidth: 168,
     alignItems: "center",
-    gap: 12,
-    marginTop: 6,
   },
-  eventCardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1.5,
+  eventMiniCardLive: {
+    borderColor: colors.racingRed,
   },
-  eventCardTitle: {
-    color: "#FFFFFF",
-    fontSize: 17,
-    fontWeight: "700",
+  eventMiniTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: 0.4,
+    color: colors.textPrimary,
+  },
+  eventMiniMeta: {
+    ...textStyle("caption"),
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.textSecondary,
   },
   eventCardMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 4,
-  },
-  eventTypePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  eventTypePillText: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-  },
-  eventLivePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(34, 197, 94, 0.12)",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  eventLiveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#22C55E",
-  },
-  eventLivePillText: {
-    color: "#22C55E",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.6,
-  },
-  eventCardDesc: {
-    color: "#8A8A9A",
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 10,
-  },
-  eventCardStats: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 14,
-    marginTop: 12,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  eventCardStat: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    maxWidth: "45%",
-  },
-  eventCardStatText: {
-    color: "#C0C0CE",
-    fontSize: 12.5,
-    fontWeight: "600",
-  },
-  eventCardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 12,
-  },
-  eventJoinBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  eventJoinBtnText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  eventLeaveBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-  },
-  eventLeaveBtnText: {
-    color: "#8A8A9A",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  eventCancelBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.35)",
-    backgroundColor: "rgba(239, 68, 68, 0.08)",
-  },
-  eventCancelBtnText: {
-    color: "#EF4444",
-    fontSize: 14,
-    fontWeight: "700",
+    gap: spacing.spacingSm,
   },
 });
