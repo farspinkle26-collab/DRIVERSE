@@ -369,6 +369,12 @@ export interface CutCornerBadgeProps {
   label: string;
   /** Accent colour for text and outline. Defaults to `racingRed`. */
   color?: string;
+  /**
+   * Overrides the label colour when the outline should be quieter than the
+   * text — a neutral hairline badge around a primary-text value, say. Only
+   * applies to outlined badges; a solid badge always takes dark text.
+   */
+  textColor?: string;
   /** Solid fill in `color`, with dark text. Defaults to outlined. */
   solid?: boolean;
   /** Render the label in JetBrains Mono — for counts, times, distances. */
@@ -384,6 +390,7 @@ export interface CutCornerBadgeProps {
 export function CutCornerBadge({
   label,
   color = colors.racingRed,
+  textColor,
   solid = false,
   numeric = false,
   corners,
@@ -402,7 +409,7 @@ export function CutCornerBadge({
       <Text
         style={[
           numeric ? styles.badgeLabelNumeric : styles.badgeLabel,
-          { color: solid ? colors.voidBlack : color },
+          { color: solid ? colors.voidBlack : (textColor ?? color) },
         ]}
         numberOfLines={1}
       >
