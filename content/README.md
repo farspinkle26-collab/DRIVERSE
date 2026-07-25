@@ -21,10 +21,11 @@ from the raw counters on read/write, so you can't get a stale rate.
 
 ```yaml
 ---
+status: scheduled | published   # scheduled = queued, no metrics yet
 platform: instagram | tiktok
 post_id: string
 permalink: string
-date: YYYY-MM-DD
+date: YYYY-MM-DD          # scheduled: future post date. published: when it went live.
 time: "HH:MM"
 weekday: string
 pillar: garagey | pov_daily | fake_scripted_pov | ai_supercars | tips_tricks
@@ -46,6 +47,13 @@ engagement_rate: number   # computed: (likes+comments+saves+shares) / views
 hold_rate: number         # computed: avg_watch_time / duration_seconds
 ---
 ```
+
+`status: scheduled` posts omit every metrics field entirely (nothing to report
+yet) — only `status`/`platform`/`post_id`/`permalink`/`date`/`time`/`weekday`/
+`pillar`/`format`/`feature_shown` are written. The dashboard never counts a
+Scheduled post into views/saves/engagement aggregates; it only shows up in the
+Overview "Upcoming" list until it's edited to `status: published` (via the
+Edit Post form or `/content/ingest`), at which point real metrics can be added.
 
 Optional extension keys (not required):
 

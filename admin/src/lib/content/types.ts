@@ -36,6 +36,15 @@ export const PILLAR_JOB: Record<Pillar, "growth" | "reach"> = {
 export const PLATFORMS = ["instagram", "tiktok"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+/** Scheduled = queued for a future post date, no metrics yet. Published =
+ *  actually went live; the date/time is when it posted. */
+export const POST_STATUSES = ["scheduled", "published"] as const;
+export type PostStatus = (typeof POST_STATUSES)[number];
+export const POST_STATUS_LABELS: Record<PostStatus, string> = {
+  scheduled: "Scheduled",
+  published: "Published",
+};
+
 /** Indexed by JS getUTCDay() (0 = Sunday). Used to derive `weekday` from date. */
 export const WEEKDAY_NAMES = [
   "Sunday",
@@ -50,6 +59,7 @@ export const WEEKDAY_NAMES = [
 /** A parseable frontmatter object. Computed rate fields are recomputed on read
  *  from the raw counters, never trusted from the file. */
 export interface PostFrontmatter {
+  status: PostStatus;
   platform: Platform;
   post_id: string;
   permalink: string;
@@ -132,3 +142,29 @@ export interface AccountData {
 
 /** Minimum views a post needs before it can appear in any "top posts" ranking. */
 export const MIN_VIEWS_FLOOR = 500;
+
+/** Shape submitted by the Add/Edit Post form. Metrics are only meaningful
+ *  (and only shown in the UI) when status === "published"; for "scheduled"
+ *  they're ignored on write. */
+export interface PostFormInput {
+  status: PostStatus;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+  pillar: Pillar | null;
+  platform: Platform;
+  format: string;
+  feature_shown: string;
+  caption: string;
+  permalink: string;
+  views?: number;
+  reach?: number;
+  likes?: number;
+  comments_total?: number;
+  comments_seeded?: number;
+  comments_organic_pickup?: number;
+  saves?: number;
+  shares?: number;
+  avg_watch_time?: number;
+  duration_seconds?: number;
+  new_follows?: number;
+}

@@ -20,12 +20,16 @@ import { DataTable, type Column } from "@/components/DataTable";
 import { DateCell } from "@/components/DateCell";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
-import { SERIES, AXIS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
+import { AddPostButton } from "@/components/AddPostButton";
+import { EditPostButton } from "@/components/EditPostButton";
+import { SERIES, AXIS, STATUS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
 import { fmtInt, fmtDate } from "@/lib/format";
+import { fmtAbsoluteWIB } from "@/lib/dates";
 import { resolveDateRange, type DateRangeValue } from "@/lib/dates";
 import {
   PILLARS,
   PILLAR_LABELS,
+  POST_STATUS_LABELS,
   type AccountData,
   type Pillar,
   type Post,
@@ -35,6 +39,8 @@ import {
   weekdayDaypartHeat,
   platformLabel,
   periodTotals,
+  publishedPosts,
+  scheduledPosts,
   inLastDays,
   inPrevDays,
   DAYPARTS,
@@ -74,6 +80,7 @@ interface Props {
 }
 
 const pct = (r: number, d = 1) => `${(r * 100).toFixed(d)}%`;
+const metricOrDash = (p: Post, formatted: string) => (p.frontmatter.status === "scheduled" ? "—" : formatted);
 const PERIODS = [7, 14, 30] as const;
 type PeriodDays = (typeof PERIODS)[number];
 
@@ -104,6 +111,7 @@ export function ContentClient(props: Props) {
         description="Organic short-form (Instagram + TikTok). Tracks post performance, learns what's working, and generates forward recommendations."
         right={
           <div className="flex items-center gap-2">
+            <AddPostButton />
             <Link
               href="/content/ingest"
               className="rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:text-ink-primary"
@@ -143,8 +151,7 @@ export function ContentClient(props: Props) {
 
       {props.posts.length === 0 && (
         <Banner tone="warning">
-          No posts in the content store yet. Add one via <strong>Ingest metrics</strong>, or drop a
-          Markdown file into <code>content/posts/</code>.
+          No posts yet — add your first one with <strong>+ Add post</strong> above.
         </Banner>
       )}
 
@@ -167,13 +174,16 @@ function OverviewTab({ posts }: Props) {
   const [gridRange, setGridRange] = useState<DateRangeValue>({ preset: "all" });
   const now = useMemo(() => new Date(), []);
 
-  const stats = useMemo(() => {
-    const cur = periodTotals(posts.filter((p) => inLastDays(p.frontmatter.date, days, now)));
-    const prev = periodTotals(posts.filter((p) => inPrevDays(p.frontmatter.date, days, now)));
-    return { cur, prev };
-  }, [posts, days, now]);
+  const published = useMemo(() => publishedPosts(posts), [posts]);
+  const upcoming = useMemo(() => scheduledPosts(posts), [posts]);
 
-  const series = useMemo(() => buildDaySeries(posts, days, now), [posts, days, now]);
+  const stats = useMemo(() => {
+    const cur = periodTotals(published.filter((p) => inLastDays(p.frontmatter.date, days, now)));
+    const prev = periodTotals(published.filter((p) => inPrevDays(p.frontmatter.date, days, now)));
+    return { cur, prev };
+  }, [published, days, now]);
+
+  const series = useMemo(() => buildDaySeries(published, days, now), [published, days, now]);
 
   const gridRows = useMemo(() => {
     const { start, end } = resolveDateRange(gridRange, now);
@@ -219,6 +229,8 @@ function OverviewTab({ posts }: Props) {
         />
       </div>
 
+      <UpcomingCard posts={upcoming} />
+
       <ChartCard
         title="Views & saves over time"
         subtitle={`Daily totals across the last ${days} days (posted date). Bars = views, line = saves.`}
@@ -245,9 +257,10 @@ function OverviewTab({ posts }: Props) {
         title="All posts"
         subtitle="Every metric as a sortable column. Filter by pillar / platform / date, search by feature or format."
         right={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Select value={pillarFilter} onChange={setPillarFilter} options={[["all", "All pillars"], ...PILLARS.map((p) => [p, PILLAR_LABELS[p]] as [string, string])]} />
             <Select value={platformFilter} onChange={setPlatformFilter} options={[["all", "All platforms"], ["instagram", "Instagram"], ["tiktok", "TikTok"]]} />
+            <AddPostButton />
           </div>
         }
       >
@@ -449,6 +462,39 @@ function InsightsTab({ posts, whatWorks, strategy: initial }: Props) {
   );
 }
 
+// ── Overview: Upcoming (scheduled) posts ────────────────────────────────────
+function UpcomingCard({ posts }: { posts: Post[] }) {
+  return (
+    <ChartCard title="Upcoming" subtitle="Scheduled posts, next one first.">
+      {posts.length ? (
+        <div className="space-y-2">
+          {posts.map((p) => (
+            <Link
+              key={p.slug}
+              href={`/content/posts/${p.slug}`}
+              className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm transition hover:bg-surface-2/70"
+            >
+              <div className="flex items-center gap-2">
+                {p.frontmatter.pillar ? (
+                  <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
+                ) : (
+                  <span className="text-ink-muted">—</span>
+                )}
+                <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />
+              </div>
+              <span className="tabular text-xs text-ink-secondary" title={fmtAbsoluteWIB(`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`)}>
+                {fmtDate(p.frontmatter.date)} · {p.frontmatter.time}
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyState message="Nothing scheduled — add your next post." />
+      )}
+    </ChartCard>
+  );
+}
+
 // ── Shared building blocks ──────────────────────────────────────────────────
 function usePostColumns(): Column<Post>[] {
   return useMemo(
@@ -459,6 +505,18 @@ function usePostColumns(): Column<Post>[] {
         sortValue: (p) => `${p.frontmatter.date}T${p.frontmatter.time || "00:00"}`,
         csvValue: (p) => p.frontmatter.date,
         render: (p) => <DateCell value={`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`} showWeekday />,
+      },
+      {
+        key: "status",
+        header: "Status",
+        sortValue: (p) => p.frontmatter.status,
+        csvValue: (p) => POST_STATUS_LABELS[p.frontmatter.status],
+        render: (p) => (
+          <Badge
+            label={POST_STATUS_LABELS[p.frontmatter.status]}
+            color={p.frontmatter.status === "published" ? STATUS.good : AXIS}
+          />
+        ),
       },
       {
         key: "pillar",
@@ -481,15 +539,20 @@ function usePostColumns(): Column<Post>[] {
       },
       { key: "format", header: "Format", sortValue: (p) => p.frontmatter.format, render: (p) => p.frontmatter.format || "—" },
       { key: "feature", header: "Feature", sortValue: (p) => p.frontmatter.feature_shown, render: (p) => p.frontmatter.feature_shown },
-      { key: "views", header: "Views", align: "right", sortValue: (p) => p.frontmatter.views, render: (p) => fmtInt(p.frontmatter.views) },
-      { key: "reach", header: "Reach", align: "right", sortValue: (p) => p.frontmatter.reach, render: (p) => fmtInt(p.frontmatter.reach) },
-      { key: "saves", header: "Saves", align: "right", sortValue: (p) => p.frontmatter.saves, render: (p) => fmtInt(p.frontmatter.saves) },
-      { key: "save_rate", header: "Save %", align: "right", sortValue: (p) => p.frontmatter.save_rate, render: (p) => pct(p.frontmatter.save_rate, 2) },
-      { key: "eng", header: "Eng %", align: "right", sortValue: (p) => p.frontmatter.engagement_rate, render: (p) => pct(p.frontmatter.engagement_rate, 1) },
-      { key: "hold", header: "Hold %", align: "right", sortValue: (p) => p.frontmatter.hold_rate, render: (p) => pct(p.frontmatter.hold_rate, 0) },
-      { key: "organic", header: "Org/Seed", align: "right", sortValue: (p) => p.frontmatter.comments_organic_pickup, render: (p) => `${p.frontmatter.comments_organic_pickup}/${p.frontmatter.comments_seeded}` },
-      { key: "shares", header: "Shares", align: "right", sortValue: (p) => p.frontmatter.shares, render: (p) => fmtInt(p.frontmatter.shares) },
-      { key: "follows", header: "Follows", align: "right", sortValue: (p) => p.frontmatter.new_follows, render: (p) => fmtInt(p.frontmatter.new_follows) },
+      { key: "views", header: "Views", align: "right", sortValue: (p) => p.frontmatter.views, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.views)) },
+      { key: "reach", header: "Reach", align: "right", sortValue: (p) => p.frontmatter.reach, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.reach)) },
+      { key: "saves", header: "Saves", align: "right", sortValue: (p) => p.frontmatter.saves, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.saves)) },
+      { key: "save_rate", header: "Save %", align: "right", sortValue: (p) => p.frontmatter.save_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.save_rate, 2)) },
+      { key: "eng", header: "Eng %", align: "right", sortValue: (p) => p.frontmatter.engagement_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.engagement_rate, 1)) },
+      { key: "hold", header: "Hold %", align: "right", sortValue: (p) => p.frontmatter.hold_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.hold_rate, 0)) },
+      { key: "organic", header: "Org/Seed", align: "right", sortValue: (p) => p.frontmatter.comments_organic_pickup, render: (p) => metricOrDash(p, `${p.frontmatter.comments_organic_pickup}/${p.frontmatter.comments_seeded}`) },
+      { key: "shares", header: "Shares", align: "right", sortValue: (p) => p.frontmatter.shares, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.shares)) },
+      { key: "follows", header: "Follows", align: "right", sortValue: (p) => p.frontmatter.new_follows, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.new_follows)) },
+      {
+        key: "edit",
+        header: "",
+        render: (p) => <EditPostButton post={p} />,
+      },
     ],
     [],
   );
