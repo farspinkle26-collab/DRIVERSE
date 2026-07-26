@@ -33,11 +33,18 @@ including `jsonb` sub-structures):
 - `chat_messages` — in-app chat system (see `expo/chat_system_tables.sql` and
   `expo/CHAT_SYSTEM_SETUP.md`).
 - `tow_requests` — roadside assistance requests.
+- `platinum_subscribers` — Platinum entitlement **mirror**, written only by
+  RevenueCat's webhook. Not the client's gate; the app reads entitlement from
+  the RevenueCat SDK. The mirror backs the tier-cap triggers and the
+  AI-showcase cost gate. See `expo/database_migration_platinum.sql` and
+  `expo/PLATINUM_REFERENCE.md`.
+- `saved_places`, `ai_showcases` — Platinum-era tables (bookmarked places with
+  a Regular cap; the AI-showcase generation ledger that bounds monthly spend).
 
 Other schema areas, one migration file per feature (self-descriptive names):
 community v2, daily quests, realtime events, garage + public profiles, online
-users presence, OSM places, parties/convoys, profile v2, saved routes, trip
-names, trip privacy. `expo/database_setup_complete.sql` is a consolidated
+users presence, OSM places, parties/convoys, platinum, profile v2, saved
+routes, trip names, trip privacy. `expo/database_setup_complete.sql` is a consolidated
 setup script. `expo/supabase/functions` holds Supabase Edge Functions.
 
 When asked about the schema, prefer reading `expo/database_schema.json` and

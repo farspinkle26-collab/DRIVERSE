@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   Modal,
   View,
@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X, Globe, Lock, Users, Flag } from "lucide-react-native";
 import { useParty } from "@/hooks/usePartyStore";
 import { CutCornerButton } from "@/components/CutCorner";
+import TierLimitNotice from "@/components/platinum/TierLimitNotice";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
 
@@ -24,21 +25,44 @@ interface CreateConvoyModalProps {
   onCreated: () => void;
 }
 
-const CAPACITY_OPTIONS: { label: string; value: number }[] = [
-  { label: "Unlimited", value: 0 },
-  { label: "5", value: 5 },
-  { label: "10", value: 10 },
-  { label: "25", value: 25 },
-];
+/**
+ * Capacity choices, filtered by the organiser's tier at render time.
+ *
+ * The old list offered up to "Unlimited", which is no longer true for anyone:
+ * Regular convoys hold 2 and Platinum 8. Offering a number the store will
+ * then clamp would be a menu that lies, so the options are derived from the
+ * cap rather than fixed — and the ceiling itself is always the last option,
+ * labelled "Max".
+ */
+function capacityOptions(cap: number | null): { label: string; value: number }[] {
+  // `null` would mean a genuinely uncapped tier; kept so the function stays
+  // correct if convoy capacity is ever lifted entirely.
+  if (cap === null) {
+    return [
+      { label: "Unlimited", value: 0 },
+      { label: "5", value: 5 },
+      { label: "10", value: 10 },
+      { label: "25", value: 25 },
+    ];
+  }
+  const steps = [2, 4, 6, 8].filter((n) => n < cap);
+  return [...steps.map((n) => ({ label: String(n), value: n })), { label: `${cap} · Max`, value: cap }];
+}
 
 export default function CreateConvoyModal({ visible, onClose, onCreated }: CreateConvoyModalProps) {
   const insets = useSafeAreaInsets();
-  const { createParty } = useParty();
+  const { createParty, convoyMemberLimit } = useParty();
+  const options = useMemo(
+    () => capacityOptions(convoyMemberLimit),
+    [convoyMemberLimit]
+  );
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"public" | "invite_only">("public");
-  const [maxMembers, setMaxMembers] = useState(0);
+  // Default to the organiser's ceiling rather than "unlimited", which no
+  // tier offers any more.
+  const [maxMembers, setMaxMembers] = useState(convoyMemberLimit ?? 0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,10 +72,10 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
     setName("");
     setDescription("");
     setVisibility("public");
-    setMaxMembers(0);
+    setMaxMembers(convoyMemberLimit ?? 0);
     setError(null);
     setSubmitting(false);
-  }, []);
+  }, [convoyMemberLimit]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -131,7 +155,7 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
 
               <Text style={styles.label}>Max members</Text>
               <View style={styles.chipRow}>
-                {CAPACITY_OPTIONS.map((o) => {
+                {options.map((o) => {
                   const active = maxMembers === o.value;
                   return (
                     <Pressable
@@ -145,6 +169,20 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
                   );
                 })}
               </View>
+
+              {/* Says the ceiling out loud, and offers the way past it, rather
+                  than letting a Regular organiser find out when the third
+                  driver can't get in. */}
+              {convoyMemberLimit !== null && (
+                <TierLimitNotice
+                  current={convoyMemberLimit}
+                  cap={convoyMemberLimit}
+                  noun="drivers"
+                  benefit="convoy"
+                  atCapMessage={`Regular convoys hold ${convoyMemberLimit}. Go Platinum to roll 8 deep.`}
+                  style={styles.limitNotice}
+                />
+              )}
 
               {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -236,6 +274,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   chipTextActive: { color: colors.textPrimary },
+  limitNotice: { marginTop: spacing.spacingLg },
   errorText: { ...textStyle("caption"), color: colors.racingRed, marginTop: spacing.spacingMd },
   submitBtn: { marginTop: spacing.spacingXl, width: "100%" },
 });

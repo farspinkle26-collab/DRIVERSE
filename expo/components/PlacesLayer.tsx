@@ -33,7 +33,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { Marker } from "react-native-maps";
-import { Camera, Plus, X } from "lucide-react-native";
+import { Bookmark, Camera, Plus, X } from "lucide-react-native";
 import * as ImagePickerExpo from "expo-image-picker";
 import {
   chipContentColor,
@@ -56,6 +56,8 @@ import {
   textStyle,
 } from "@/constants/theme";
 import { useXP } from "@/hooks/useXPStore";
+import { useSavedPlaces } from "@/hooks/useSavedPlacesStore";
+import { platinum } from "@/constants/platinum";
 import { uploadPlacePhoto } from "@/lib/uploadPlacePhoto";
 import { supabase } from "@/lib/supabase";
 import type { NormalizedPlace } from "@/lib/placesApi";
@@ -287,7 +289,70 @@ export function PlaceDetailSheet({
             {notes ? <Text style={styles.sheetLine}>{notes}</Text> : null}
           </>
         ) : null}
+
+        <SavePlaceAction place={place} />
       </CutCornerSurface>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Save a place
+ * ------------------------------------------------------------------ */
+
+/**
+ * The bookmark toggle on a place callout, plus the usage line beneath it.
+ *
+ * Regular drivers keep 10 saved places, Platinum is uncapped. The count is
+ * on screen BEFORE the cap is hit ("7 of 10 saved") so the eleventh tap is
+ * the expected outcome rather than a surprise; at the cap the store raises
+ * the paywall on the Saved Places benefit.
+ */
+function SavePlaceAction({ place }: { place: NormalizedPlace }) {
+  const { isSaved, togglePlace, count, cap } = useSavedPlaces();
+  const [busy, setBusy] = useState(false);
+  const saved = isSaved(place.id);
+
+  const onPress = async () => {
+    if (busy) return;
+    setBusy(true);
+    await togglePlace({
+      place_id: place.id,
+      source: place.source,
+      name: place.name,
+      category: place.category,
+      lat: place.lat,
+      lng: place.lng,
+    });
+    setBusy(false);
+  };
+
+  return (
+    <View style={styles.saveRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: saved }}
+        accessibilityLabel={saved ? `Remove ${place.name} from saved places` : `Save ${place.name}`}
+        onPress={onPress}
+        disabled={busy}
+        hitSlop={spacing.spacingSm}
+        style={({ pressed }) => [styles.saveButton, pressed && styles.savePressed]}
+      >
+        <Bookmark
+          size={spacing.spacingLg}
+          color={saved ? platinum.chrome : colors.textSecondary}
+          fill={saved ? platinum.chrome : "none"}
+          strokeWidth={CHROME_ICON_STROKE}
+        />
+        <Text style={[styles.saveLabel, saved && styles.saveLabelActive]}>
+          {saved ? "SAVED" : "SAVE"}
+        </Text>
+      </Pressable>
+      {cap !== null ? (
+        <Text style={styles.saveUsage}>
+          {count} of {cap} saved
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -725,6 +790,36 @@ const styles = StyleSheet.create({
   },
   sheetLine: {
     ...textStyle("body"),
+    color: colors.textSecondary,
+  },
+  /* Save place */
+  saveRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing.spacingMd,
+    paddingTop: spacing.spacingMd,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+  },
+  saveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+  },
+  savePressed: {
+    opacity: 0.7,
+  },
+  saveLabel: {
+    ...textStyle("caption"),
+    letterSpacing: 1,
+    color: colors.textSecondary,
+  },
+  saveLabelActive: {
+    color: platinum.chrome,
+  },
+  saveUsage: {
+    ...textStyle("dataSm"),
     color: colors.textSecondary,
   },
   /* Submit FAB */

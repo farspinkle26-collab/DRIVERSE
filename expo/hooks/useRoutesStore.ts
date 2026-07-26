@@ -1,6 +1,8 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { parseLimitRejection } from "@/lib/platinumLimits";
+import { usePlatinum } from "@/hooks/usePlatinumStore";
 
 // ─── Types ─────────────────────────────────────────────────
 export type RouteVisibility = "public" | "friends" | "private";
@@ -94,6 +96,7 @@ interface RouteRow {
 
 // ─── Context Hook ──────────────────────────────────────────
 export const [RoutesProvider, useRoutes] = createContextHook(() => {
+  const { limit, openPaywall } = usePlatinum();
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -194,10 +197,27 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
   }, [userId, fetchRoutes]);
 
   // ─── Save a recorded route ───────────────────────────────
+  //
+  // "Unlimited Route Discovery" is enforced here, on the driver's own route
+  // library, because that is the countable thing a driver owns — the
+  // discovery FEED itself is other people's public routes and capping how
+  // many of those you may look at would be a worse product, not a premium
+  // one. See PLATINUM_REFERENCE.md §"Route Discovery" for the reasoning and
+  // the open product question.
   const saveRoute = useCallback(
-    async (input: SaveRouteInput): Promise<{ id?: string; error?: string }> => {
+    async (input: SaveRouteInput): Promise<{ id?: string; error?: string; limitReached?: boolean }> => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in to save a route" };
+
+      const routeLimit = limit("savedRoutes");
+      const mine = routes.filter((r) => r.is_mine).length;
+      if (routeLimit !== null && mine >= routeLimit) {
+        openPaywall("routes");
+        return {
+          error: `Regular drivers keep ${routeLimit} routes. Delete one, or go Platinum for an unlimited library.`,
+          limitReached: true,
+        };
+      }
 
       const { data, error } = await supabase
         .from("saved_routes")
@@ -225,11 +245,19 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
         .select("id")
         .single();
 
-      if (error) return { error: error.message };
+      if (error) {
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          openPaywall(rejection.benefit);
+          await fetchRoutes();
+          return { error: rejection.message, limitReached: true };
+        }
+        return { error: error.message };
+      }
       await fetchRoutes();
       return { id: (data as { id: string } | null)?.id };
     },
-    [fetchRoutes]
+    [fetchRoutes, routes, limit, openPaywall]
   );
 
   // ─── Update visibility / title / description ─────────────
@@ -380,11 +408,17 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
 
   const feed = routes; // all visible (own + public + friends)
   const myRoutes = routes.filter((r) => r.is_mine);
+  const savedRouteLimit = limit("savedRoutes");
 
   return {
     routes,
     feed,
     myRoutes,
+    /** `null` when unlimited (Platinum). */
+    savedRouteLimit,
+    /** True when saving another route would raise the paywall. */
+    atRouteLimit:
+      savedRouteLimit !== null && myRoutes.length >= savedRouteLimit,
     loadingRoutes,
     fetchRoutes,
     saveRoute,

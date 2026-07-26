@@ -45,6 +45,7 @@ import * as ImagePickerExpo from "expo-image-picker";
 import {
   ArrowLeft,
   Bell,
+  Bookmark,
   Car,
   Check,
   CheckCircle2,
@@ -86,6 +87,19 @@ import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
 import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
+import { PlatinumNameBadge, PlatinumWordmark } from "@/components/platinum/PlatinumBadge";
+import PlatinumAura from "@/components/platinum/PlatinumAura";
+import ProfileFrame from "@/components/platinum/ProfileFrame";
+import PremiumVehicleIcon from "@/components/platinum/PremiumVehicleIcon";
+import ShowcaseModal from "@/components/platinum/ShowcaseModal";
+import CosmeticsPicker from "@/components/platinum/CosmeticsPicker";
+import TierLimitNotice, {
+  PlatinumLockedRow,
+} from "@/components/platinum/TierLimitNotice";
+import { platinum } from "@/constants/platinum";
+import { usePlatinum } from "@/hooks/usePlatinumStore";
+import { useIsDriverPlatinum } from "@/hooks/usePlatinumDirectory";
+import { useCosmetics } from "@/hooks/useCosmeticsStore";
 import {
   chipContentColor,
   CutCornerButton,
@@ -104,6 +118,7 @@ import {
 import { tripCode } from "@/lib/tripStats";
 import { supabase } from "@/lib/supabase";
 import { generateCarImage } from "@/lib/generateCarImage";
+import { parseLimitRejection } from "@/lib/platinumLimits";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -347,6 +362,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const targetId = isSelf ? user?.id : userId;
   const { statsByCarId } = useCarDriveStats(targetId);
 
+  // ─── Platinum ──────────────────────────────────────────────
+  // The signed-in driver's own status comes from the RevenueCat SDK (the one
+  // gate); another driver's comes from the narrow display lookup. Two sources
+  // because only one of them is answerable on the client — see
+  // `hooks/usePlatinumDirectory.ts`.
+  const { isPlatinum: selfIsPlatinum, limit: platinumLimit, openPaywall } = usePlatinum();
+  const otherIsPlatinum = useIsDriverPlatinum(isSelf ? null : targetId);
+  const viewedIsPlatinum = isSelf ? selfIsPlatinum : otherIsPlatinum;
+  const cosmetics = useCosmetics();
+  const [showcaseCar, setShowcaseCar] = useState<CarItem | null>(null);
+  const [cosmeticsOpen, setCosmeticsOpen] = useState(false);
+
   // ─── Target profile + stats ────────────────────────────────
   const [profileName, setProfileName] = useState<string>(user?.name ?? "Driver");
   const [profileAvatar, setProfileAvatar] = useState<string | undefined>(user?.profilePicture);
@@ -354,6 +381,8 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [otherXp, setOtherXp] = useState(0);
   const [otherTotalXp, setOtherTotalXp] = useState(0);
   const [otherStreak, setOtherStreak] = useState(0);
+  const [otherVehicleIcon, setOtherVehicleIcon] = useState<string | null>(null);
+  const [otherProfileFrame, setOtherProfileFrame] = useState<string | null>(null);
 
   const [cars, setCars] = useState<CarItem[]>([]);
   const [trips, setTrips] = useState<TripItem[]>([]);
@@ -404,12 +433,16 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     }
     const { data } = await supabase
       .from("profiles")
-      .select("id, name, avatar")
+      .select("id, name, avatar, vehicle_icon, profile_frame")
       .eq("id", targetId)
       .single();
     if (data) {
       setProfileName(data.name ?? "Driver");
       setProfileAvatar(data.avatar ?? undefined);
+      // Another driver's cosmetics come off their profile row; the store only
+      // holds the signed-in driver's own.
+      setOtherVehicleIcon(data.vehicle_icon ?? null);
+      setOtherProfileFrame(data.profile_frame ?? null);
     }
     const { data: xp } = await supabase
       .from("user_xp")
@@ -633,8 +666,30 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }, [countryDraft, user, updateCountry]);
 
   // ─── Actions: garage ───────────────────────────────────────
+  //
+  // Regular garages hold 2 cars, Platinum is uncapped. The cap is checked in
+  // two places on purpose: here, so the driver sees the paywall at the moment
+  // they reach for a third slot, and in `enforce_garage_limit()`, so the cap
+  // survives a client that skips this.
+  const garageLimit = platinumLimit("garageCars");
+  const atGarageLimit = garageLimit !== null && cars.length >= garageLimit;
+
+  /** Opens the add-car form, or the paywall when the garage is full. */
+  const handleOpenAddCar = useCallback(() => {
+    if (atGarageLimit) {
+      openPaywall("garage");
+      return;
+    }
+    setShowAddCar(true);
+  }, [atGarageLimit, openPaywall]);
+
   const handleAddCar = useCallback(async () => {
     if (!user || !newCarName.trim()) return;
+    if (atGarageLimit) {
+      setShowAddCar(false);
+      openPaywall("garage");
+      return;
+    }
     const { error } = await supabase.from("car_collections").insert({
       user_id: user.id,
       name: newCarName.trim(),
@@ -647,13 +702,22 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       mileage_km: 0,
       is_primary: cars.length === 0,
     });
-    if (!error) {
-      setNewCarName("");
-      setNewCarMake("");
-      setShowAddCar(false);
-      loadCars();
+    if (error) {
+      // The trigger caught a race the local count missed (a car added on
+      // another device). Still the paywall, not a raw Postgres message.
+      const rejection = parseLimitRejection(error);
+      if (rejection) {
+        setShowAddCar(false);
+        loadCars();
+        openPaywall(rejection.benefit);
+      }
+      return;
     }
-  }, [user, newCarName, newCarMake, newCarYear, newCarHP, cars.length, loadCars]);
+    setNewCarName("");
+    setNewCarMake("");
+    setShowAddCar(false);
+    loadCars();
+  }, [user, newCarName, newCarMake, newCarYear, newCarHP, cars.length, loadCars, atGarageLimit, openPaywall]);
 
   const handleDeleteCar = useCallback((carId: string) => {
     Alert.alert("Remove Car", "Are you sure you want to remove this car?", [
@@ -903,17 +967,34 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             disabled={!isSelf || uploadingAvatar}
             style={({ pressed }) => [styles.avatarWrap, pressed && isSelf && styles.pressed]}
           >
-            <View style={styles.avatarRing}>
-              <View style={styles.avatarInner}>
-                {uploadingAvatar ? (
-                  <ActivityIndicator color={colors.racingRed} />
-                ) : profileAvatar ? (
-                  <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
-                ) : (
-                  <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
-                )}
-              </View>
-            </View>
+            {/* Aura outside, frame inside, avatar innermost. Both render as
+                nothing for a Regular driver, and both draw past the avatar
+                box without moving the level badge — `avatarWrap` is pinned to
+                AVATAR_SIZE and the overlay is centred inside it. */}
+            <PlatinumAura
+              show={viewedIsPlatinum}
+              size={AVATAR_SIZE}
+              emphasis
+              style={styles.avatarAura}
+            >
+              <ProfileFrame
+                frame={isSelf ? cosmetics.selectedProfileFrame : otherProfileFrame}
+                isPlatinum={viewedIsPlatinum}
+                size={AVATAR_SIZE}
+              >
+                <View style={styles.avatarRing}>
+                  <View style={styles.avatarInner}>
+                    {uploadingAvatar ? (
+                      <ActivityIndicator color={colors.racingRed} />
+                    ) : profileAvatar ? (
+                      <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
+                    ) : (
+                      <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
+                    )}
+                  </View>
+                </View>
+              </ProfileFrame>
+            </PlatinumAura>
             <View style={styles.levelBadge}>
               <Text style={styles.levelBadgeText}>{level}</Text>
             </View>
@@ -934,6 +1015,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               ) : (
                 <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
               )}
+              {/* Subscription status, next to the name. Distinct from the
+                  rank badge below it, which is progression. */}
+              <PlatinumNameBadge
+                show={viewedIsPlatinum && !editingName}
+                name={profileName}
+              />
               {isSelf && !editingName && (
                 <Pressable
                   accessibilityRole="button"
@@ -1182,10 +1269,88 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 car={car}
                 isSelf={isSelf}
                 stats={statsByCarId[car.id]}
+                vehicleIcon={isSelf ? cosmetics.selectedVehicleIcon : otherVehicleIcon}
+                isPlatinum={viewedIsPlatinum}
                 onSetPrimary={() => handleSetPrimary(car.id)}
                 onDelete={() => handleDeleteCar(car.id)}
               />
             ))}
+
+            {/* Garage usage. Shows "1 of 2 cars" under the cap and the
+                upgrade prompt at it, so the limit is never a surprise the
+                first time the add button refuses. */}
+            {isSelf && (
+              <TierLimitNotice
+                current={cars.length}
+                cap={garageLimit}
+                noun="cars"
+                benefit="garage"
+                atCapMessage="Go Platinum for unlimited garage slots."
+                style={styles.blockCard}
+              />
+            )}
+
+            {/* AI Showcase — Platinum only. Locked drivers get the same
+                chrome row every other Platinum gate uses, not a hidden
+                feature: a perk nobody can see is a perk nobody buys. */}
+            {isSelf && primaryCar && (
+              selfIsPlatinum ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Generate an AI showcase of ${primaryCar.name}`}
+                  onPress={() => setShowcaseCar(primaryCar)}
+                  style={({ pressed }) => [styles.blockCard, pressed && styles.pressed]}
+                >
+                  <CutCornerSurface
+                    fill={colors.voidBlack}
+                    borderColor={platinum.chromeDeep}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={cut.md}
+                    corners="topRight"
+                    contentStyle={styles.addCarPrompt}
+                  >
+                    <Sparkles size={ICON_MD} color={platinum.chrome} strokeWidth={ICON_STROKE} />
+                    <Text style={styles.showcasePromptText}>Generate Showcase</Text>
+                  </CutCornerSurface>
+                </Pressable>
+              ) : (
+                <PlatinumLockedRow
+                  label="AI Car Showcase"
+                  detail="Turn a phone photo into a studio render."
+                  benefit="showcase"
+                  style={styles.blockCard}
+                />
+              )
+            )}
+
+            {/* Cosmetics — icon + frame picker. Everyone can open it; the
+                locked options raise the paywall when tapped. */}
+            {isSelf && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Vehicle icons and profile frames"
+                onPress={() => setCosmeticsOpen(true)}
+                style={({ pressed }) => [styles.blockCard, pressed && styles.pressed]}
+              >
+                <CutCornerSurface
+                  fill={colors.voidBlack}
+                  borderColor={colors.hairline}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.md}
+                  corners="topRight"
+                  contentStyle={styles.addCarPrompt}
+                >
+                  <PremiumVehicleIcon
+                    icon={cosmetics.selectedVehicleIcon}
+                    isPlatinum={selfIsPlatinum}
+                    size={ICON_MD}
+                    color={colors.textSecondary}
+                    strokeWidth={ICON_STROKE}
+                  />
+                  <Text style={styles.addCarPromptText}>Icons & frames</Text>
+                </CutCornerSurface>
+              </Pressable>
+            )}
 
             {/* Add a car (self only) */}
             {isSelf && (showAddCar ? (
@@ -1252,8 +1417,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             ) : (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Add a car to your garage"
-                onPress={() => setShowAddCar(true)}
+                accessibilityLabel={
+                  atGarageLimit
+                    ? "Garage full. Upgrade to Platinum for unlimited slots."
+                    : "Add a car to your garage"
+                }
+                onPress={handleOpenAddCar}
                 style={({ pressed }) => [styles.blockCard, pressed && styles.pressed]}
               >
                 <CutCornerSurface
@@ -1555,6 +1724,28 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {isSelf && (
           <View style={styles.settings}>
             <Text style={styles.settingsTitle}>SETTINGS</Text>
+            {/* The dedicated upgrade entry point. Chrome, not racingRed —
+                it is a status row, not the screen's primary action. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                selfIsPlatinum
+                  ? "Driveverse Platinum, subscription active"
+                  : "Upgrade to Driveverse Platinum"
+              }
+              onPress={() => openPaywall()}
+              style={({ pressed }) => [styles.settingRow, pressed && styles.pressed]}
+            >
+              <View style={styles.settingLeft}>
+                <PlatinumWordmark size={ICON_MD} label="DRIVEVERSE PLATINUM" />
+              </View>
+              <View style={styles.settingRight}>
+                <Text style={styles.platinumStatus}>
+                  {selfIsPlatinum ? "ACTIVE" : "UPGRADE"}
+                </Text>
+                <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+              </View>
+            </Pressable>
             <SettingRow
               icon={<MessageCircle size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Messages"
@@ -1565,6 +1756,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               icon={<Crown size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Convoy"
               onPress={() => router.push("/convoy" as any)}
+            />
+            <SettingRow
+              icon={<Bookmark size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
+              label="Saved Places"
+              onPress={() => router.push("/saved-places" as any)}
             />
             <SettingRow
               icon={<Trophy size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
@@ -1631,6 +1827,29 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           </ScrollView>
         </Sheet>
       </Modal>
+
+      {/* ═══ AI SHOWCASE (Platinum) ═══ */}
+      <ShowcaseModal
+        visible={showcaseCar !== null}
+        onClose={() => setShowcaseCar(null)}
+        car={
+          showcaseCar
+            ? {
+                id: showcaseCar.id,
+                name: showcaseCar.name,
+                make: showcaseCar.make,
+                year: showcaseCar.year,
+                hp: showcaseCar.hp,
+              }
+            : null
+        }
+      />
+
+      {/* ═══ COSMETICS PICKER ═══ */}
+      <CosmeticsPicker
+        visible={cosmeticsOpen}
+        onClose={() => setCosmeticsOpen(false)}
+      />
 
       {/* ═══ AI CAR GENERATION (Gemini Lite) ═══ */}
       <Modal visible={premiumOpen} transparent animationType="slide" onRequestClose={() => setPremiumOpen(false)}>
@@ -1919,12 +2138,17 @@ function GarageCard({
   car,
   isSelf,
   stats,
+  vehicleIcon,
+  isPlatinum,
   onSetPrimary,
   onDelete,
 }: {
   car: CarItem;
   isSelf: boolean;
   stats?: CarDriveStats;
+  /** The driver's selected vehicle icon; falls back for non-Platinum. */
+  vehicleIcon?: string | null;
+  isPlatinum: boolean;
   onSetPrimary: () => void;
   onDelete: () => void;
 }) {
@@ -1940,7 +2164,18 @@ function GarageCard({
       >
         <View style={styles.edgeAccent} />
         <View style={styles.garageCardText}>
-          <Text style={styles.carName} numberOfLines={1}>{car.name}</Text>
+          <View style={styles.carNameRow}>
+            {/* The compact car mark. Regular drivers get the default lucide
+                glyph; Platinum drivers get whichever silhouette they picked. */}
+            <PremiumVehicleIcon
+              icon={vehicleIcon}
+              isPlatinum={isPlatinum}
+              size={ICON_MD}
+              color={colors.textSecondary}
+              strokeWidth={ICON_STROKE}
+            />
+            <Text style={styles.carName} numberOfLines={1}>{car.name}</Text>
+          </View>
           <CarSpecLine car={car} />
           <CarDriveDataRow stats={stats} />
         </View>
@@ -2154,7 +2389,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: SCREEN_MARGIN,
     gap: spacing.spacingMd,
   },
-  avatarWrap: { position: "relative" },
+  /**
+   * Pinned to the avatar's own size so the Platinum frame and aura — which
+   * are deliberately larger than the avatar — overflow visually without
+   * pushing the level badge outward. The badge's absolute anchor stays the
+   * 72pt box it has always been.
+   */
+  avatarWrap: {
+    position: "relative",
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarAura: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   avatarRing: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
@@ -2414,9 +2666,15 @@ const styles = StyleSheet.create({
   },
   garageCardText: { flex: 1, gap: spacing.spacingXs },
   garageCardActions: { flexDirection: "row", alignItems: "center", gap: spacing.spacingMd },
+  carNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+  },
   carName: {
     ...textStyle("displayMd"),
     color: colors.textPrimary,
+    flexShrink: 1,
   },
   specLine: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
   specText: {
@@ -2463,6 +2721,11 @@ const styles = StyleSheet.create({
   addCarPromptText: {
     ...textStyle("body"),
     color: colors.textSecondary,
+  },
+  /** Same row shape as the add-car prompt, chrome label. */
+  showcasePromptText: {
+    ...textStyle("body"),
+    color: platinum.chrome,
   },
   addCarForm: { padding: spacing.spacingLg, gap: spacing.spacingMd },
   addCarFormRow: { flexDirection: "row", gap: spacing.spacingSm },
@@ -2644,6 +2907,13 @@ const styles = StyleSheet.create({
   settingCount: {
     ...CAPTION_MONO,
     color: colors.racingRed,
+  },
+  platinumStatus: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1,
+    color: platinum.chrome,
   },
 
   // Sheets

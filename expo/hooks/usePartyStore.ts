@@ -1,7 +1,9 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { parseLimitRejection } from "@/lib/platinumLimits";
 import { useAuth } from "./useAuthStore";
+import { usePlatinum } from "./usePlatinumStore";
 
 // ─── Types ─────────────────────────────────────────────────
 export interface PartyMember {
@@ -63,6 +65,7 @@ export const PARTY_COLORS = ["#FFD700", "#FF3B6F", "#22D3EE", "#A78BFA", "#34D39
 
 export const [PartyProvider, useParty] = createContextHook(() => {
   const { user } = useAuth();
+  const { limit, openPaywall } = usePlatinum();
   const [state, setState] = useState<PartyState>({
     party: null,
     members: [],
@@ -172,11 +175,39 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     }
   }, [user, hydrateMembers, hydrateInvites]);
 
+  // ─── Tier cap ────────────────────────────────────────────
+  //
+  // Convoy size is capped by the ORGANISER's tier, not each joiner's:
+  // Regular convoys hold 2 drivers, Platinum 8. That is what makes the perk
+  // coherent — a Platinum organiser can gather 8 Regular drivers, and a
+  // Regular organiser's convoy doesn't grow just because a Platinum driver
+  // joined it. The same rule is enforced in `enforce_convoy_limit()`.
+  //
+  // Consequence worth stating: a driver who is BLOCKED FROM JOINING someone
+  // else's full convoy is never shown the paywall. Upgrading would not let
+  // them in, so offering it would be a straight-up misleading upsell.
+  const convoyMemberLimit = limit("convoyMembers");
+
+  /** Seats taken in my convoy: accepted members plus outstanding invites. */
+  const seatsTaken = useMemo(() => state.members.length, [state.members]);
+
   // ─── Create a party (I become leader) ────────────────────
   const createParty = useCallback(async (name: string, options?: CreatePartyOptions): Promise<boolean> => {
     if (!user) return false;
     try {
       const color = PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)];
+      // A requested capacity above the organiser's tier cap is clamped rather
+      // than rejected: the driver picked "25" from a menu that predates
+      // Platinum, and silently honouring the real ceiling beats failing the
+      // create. The upgrade prompt comes when they try to fill those seats.
+      const requested = options?.maxMembers ?? 0;
+      const maxMembers =
+        convoyMemberLimit === null
+          ? requested
+          : requested === 0
+            ? convoyMemberLimit
+            : Math.min(requested, convoyMemberLimit);
+
       const { error } = await supabase
         .from("parties")
         .insert({
@@ -185,7 +216,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
           color,
           visibility: options?.visibility ?? "invite_only",
           description: options?.description?.trim() ?? "",
-          max_members: options?.maxMembers ?? 0,
+          max_members: maxMembers,
         })
         .select()
         .single();
@@ -199,7 +230,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       console.error("Error creating party:", error);
       return false;
     }
-  }, [user, loadParty]);
+  }, [user, loadParty, convoyMemberLimit]);
 
   // ─── Browse public convoys (for anyone not already in one) ──
   const [publicParties, setPublicParties] = useState<PublicPartySummary[]>([]);
@@ -286,6 +317,12 @@ export const [PartyProvider, useParty] = createContextHook(() => {
         .insert({ party_id: partyId, user_id: user.id, role: "member", status: "accepted" });
       if (error) {
         if (error.code === "23505") return { ok: false, message: "Leave your current convoy first." };
+        // Capacity is the ORGANISER's, so no paywall here — see the tier-cap
+        // note above. The joiner just gets told the convoy is full.
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          return { ok: false, message: `This convoy is full at ${rejection.cap} drivers.` };
+        }
         if (error.message.includes("full")) return { ok: false, message: "This convoy is full." };
         return { ok: false, message: error.message };
       }
@@ -298,8 +335,26 @@ export const [PartyProvider, useParty] = createContextHook(() => {
   }, [user, loadParty]);
 
   // ─── Invite an accepted friend into my current party ─────
-  const inviteFriend = useCallback(async (friendId: string): Promise<{ ok: boolean; message?: string }> => {
+  const inviteFriend = useCallback(async (friendId: string): Promise<{ ok: boolean; message?: string; limitReached?: boolean }> => {
     if (!user || !state.party) return { ok: false, message: "You need a convoy first." };
+
+    // The organiser IS the one who can lift this cap, so this is the friction
+    // point that earns a paywall. Outstanding invites count as taken seats —
+    // otherwise a leader can invite ten drivers and only discover the ceiling
+    // when the third one accepts.
+    if (
+      state.party.leader_id === user.id &&
+      convoyMemberLimit !== null &&
+      seatsTaken >= convoyMemberLimit
+    ) {
+      openPaywall("convoy");
+      return {
+        ok: false,
+        limitReached: true,
+        message: `Regular convoys cap at ${convoyMemberLimit} drivers. Go Platinum to roll deeper.`,
+      };
+    }
+
     try {
       const { error } = await supabase.from("party_members").insert({
         party_id: state.party.id,
@@ -309,6 +364,11 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       });
       if (error) {
         if (error.code === "23505") return { ok: false, message: "Already invited or in a convoy." };
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          openPaywall(rejection.benefit);
+          return { ok: false, limitReached: true, message: rejection.message };
+        }
         return { ok: false, message: error.message };
       }
       await loadParty();
@@ -317,7 +377,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       console.error("Error inviting to party:", error);
       return { ok: false, message: "Something went wrong." };
     }
-  }, [user, state.party, loadParty]);
+  }, [user, state.party, loadParty, convoyMemberLimit, seatsTaken, openPaywall]);
 
   // ─── Accept / decline an invite ──────────────────────────
   const acceptInvite = useCallback(async (partyId: string): Promise<{ ok: boolean; message?: string }> => {
@@ -330,6 +390,12 @@ export const [PartyProvider, useParty] = createContextHook(() => {
         .eq("user_id", user.id);
       if (error) {
         if (error.code === "23505") return { ok: false, message: "Leave your current convoy first." };
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          // Someone else took the last seat between the invite and the
+          // accept. Again the organiser's cap, so no paywall for the invitee.
+          return { ok: false, message: `That convoy filled up at ${rejection.cap} drivers.` };
+        }
         return { ok: false, message: error.message };
       }
       await loadParty();
@@ -420,5 +486,10 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     browsePublicParties,
     joinParty,
     getPartyDetail,
-  }), [state, partyMemberIds, isLeader, loadParty, createParty, inviteFriend, acceptInvite, declineInvite, leaveParty, kickMember, publicParties, loadingPublicParties, browsePublicParties, joinParty, getPartyDetail]);
+    /** My cap as an organiser. `null` would mean unlimited; Platinum is 8. */
+    convoyMemberLimit,
+    seatsTaken,
+    /** True when inviting another driver would raise the paywall. */
+    atConvoyLimit: convoyMemberLimit !== null && seatsTaken >= convoyMemberLimit,
+  }), [state, partyMemberIds, isLeader, loadParty, createParty, inviteFriend, acceptInvite, declineInvite, leaveParty, kickMember, publicParties, loadingPublicParties, browsePublicParties, joinParty, getPartyDetail, convoyMemberLimit, seatsTaken]);
 });

@@ -18,6 +18,8 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useGroupChat } from "@/hooks/useGroupChatStore";
 import { supabase } from "@/lib/supabase";
 import { CutCornerBadge, CutCornerButton } from "@/components/CutCorner";
+import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
+import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
 
@@ -193,6 +195,12 @@ export default function MessagesScreen() {
     return list.filter((c) => c.name.toLowerCase().includes(q));
   }, [rows, profiles, user, query, groupConversations]);
 
+  // Badge lookup for the drivers in the list. One batched call for the whole
+  // screen — see `hooks/usePlatinumDirectory.ts`.
+  const platinumPartners = usePlatinumDirectory(
+    conversations.filter((c) => c.kind === "dm").map((c) => c.targetId)
+  );
+
   const openCompose = useCallback(async () => {
     setComposeOpen(true);
     if (!user || friends.length > 0) return;
@@ -301,7 +309,15 @@ export default function MessagesScreen() {
                 )}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
+                <View style={styles.rowNameLine}>
+                  <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
+                  {/* Direct conversations only: a group's "name" is the
+                      convoy title, not a driver, so there is nobody to badge. */}
+                  <PlatinumNameBadge
+                    show={item.kind === "dm" && platinumPartners.has(item.targetId)}
+                    name={item.name}
+                  />
+                </View>
                 <Text
                   style={[styles.rowPreview, item.unread > 0 && styles.rowPreviewUnread]}
                   numberOfLines={1}
@@ -419,7 +435,8 @@ const styles = StyleSheet.create({
   },
   avatarImg: { width: 50, height: 50, borderRadius: radius.circle },
   avatarText: { ...textStyle("displayMd", { fontSize: 18, lineHeight: 22 }), color: colors.textPrimary },
-  rowName: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }), color: colors.textPrimary },
+  rowNameLine: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
+  rowName: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }), color: colors.textPrimary, flexShrink: 1 },
   rowPreview: { ...textStyle("caption"), color: colors.textSecondary, marginTop: spacing.spacingXs },
   rowPreviewUnread: { color: colors.textPrimary, fontFamily: fontFamily.bodyMedium },
   rowMeta: { alignItems: "flex-end", gap: spacing.spacingXs },

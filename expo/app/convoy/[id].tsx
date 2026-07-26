@@ -15,6 +15,9 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useParty, Party, PartyMember } from "@/hooks/usePartyStore";
 import { supabase } from "@/lib/supabase";
 import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
+import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
+import PlatinumAura from "@/components/platinum/PlatinumAura";
+import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, cut, fontFamily, onRacingRed, radius, spacing, textStyle } from "@/constants/theme";
 
@@ -34,6 +37,7 @@ export default function ConvoyDetailScreen() {
 
   const isMine = myParty?.id === id;
   const isMember = isMine || roster.some((m) => m.user_id === user?.id);
+  const platinumMembers = usePlatinumDirectory(roster.map((m) => m.user_id));
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -131,15 +135,22 @@ export default function ConvoyDetailScreen() {
           <Text style={styles.sectionLabel}>Who's inside</Text>
           {roster.map((m) => (
             <View key={m.id} style={styles.memberRow}>
-              <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
-                {m.avatar ? (
-                  <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
-                ) : (
-                  <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
-                )}
-              </View>
+              {/* The aura marks a Platinum member's avatar here the same way
+                  it does on their profile — one signal, one place it can be. */}
+              <PlatinumAura show={platinumMembers.has(m.user_id)} size={40}>
+                <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
+                  {m.avatar ? (
+                    <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
+                  ) : (
+                    <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
+                  )}
+                </View>
+              </PlatinumAura>
               <View style={{ flex: 1 }}>
-                <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
+                <View style={styles.rowNameLine}>
+                  <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
+                  <PlatinumNameBadge show={platinumMembers.has(m.user_id)} name={m.name} />
+                </View>
                 <Text style={styles.rowSub}>Level {m.level}</Text>
               </View>
               {m.role === "leader" ? (
@@ -235,6 +246,7 @@ const styles = StyleSheet.create({
   },
   avatarImg: { width: 40, height: 40, borderRadius: radius.circle },
   avatarText: { ...textStyle("displayMd", { fontSize: 15, lineHeight: 18 }), color: colors.textPrimary },
+  rowNameLine: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
   rowName: { ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }), color: colors.textPrimary },
   rowSub: { ...textStyle("caption"), color: colors.textSecondary },
 

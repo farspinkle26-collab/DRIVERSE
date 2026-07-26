@@ -32,6 +32,7 @@ import {
 import { useRoutes, SavedRoute, ActivityType, RouteVisibility } from "@/hooks/useRoutesStore";
 import { useAuth } from "@/hooks/useAuthStore";
 import RoutePreview from "@/components/RoutePreview";
+import TierLimitNotice from "@/components/platinum/TierLimitNotice";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -151,7 +152,7 @@ export default function RoutesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isAuthenticated } = useAuth();
-  const { feed, myRoutes, loadingRoutes, fetchRoutes, toggleKudos } = useRoutes();
+  const { feed, myRoutes, loadingRoutes, fetchRoutes, toggleKudos, savedRouteLimit } = useRoutes();
   const [tab, setTab] = useState<"feed" | "mine">("feed");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -210,6 +211,21 @@ export default function RoutesScreen() {
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
         >
+          {/* The route library cap applies to routes you SAVE, so it belongs
+              on the "My Routes" tab. The community feed is other people's
+              public routes and is not capped for anyone — see
+              PLATINUM_REFERENCE.md §"Route Discovery". */}
+          {tab === "mine" && (
+            <TierLimitNotice
+              current={myRoutes.length}
+              cap={savedRouteLimit}
+              noun="routes"
+              benefit="routes"
+              atCapMessage="Go Platinum for an unlimited route library."
+              style={styles.limitNotice}
+            />
+          )}
+
           {list.length === 0 ? (
             <View style={styles.empty}>
               <RouteIcon size={44} color="#3A3A4E" />
@@ -259,6 +275,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   topTitle: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
+  limitNotice: { marginBottom: 16 },
   tabs: {
     flexDirection: "row",
     marginHorizontal: 20,
