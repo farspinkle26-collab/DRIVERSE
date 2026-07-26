@@ -3348,7 +3348,7 @@ export default function MapScreen() {
                   title="Sign In"
                   size="sm"
                   corners="topRight"
-                  onPress={() => router.push("/login" as any)}
+                  onPress={() => router.replace("/sign-in" as any)}
                 />
               </CutCornerSurface>
             ) : !isUserOnline ? (

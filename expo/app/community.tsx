@@ -183,7 +183,7 @@ export default function CommunityScreen() {
             icon={<Users size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
             heading="SIGN IN TO JOIN THE COMMUNITY"
             body="Convoys and events live on your account."
-            action={{ label: "Sign In", onPress: () => router.push("/login" as any) }}
+            action={{ label: "Sign In", onPress: () => router.replace("/sign-in" as any) }}
           />
         ) : (joinError || locationError) ? (
           <View style={styles.errorBanner}>

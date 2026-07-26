@@ -204,12 +204,17 @@ CREATE POLICY "Public XP is viewable"
 - ✅ Profile picture upload (camera / library → Supabase Storage)
 - ✅ Viewing other drivers' public profiles with their rank shown large
 
+## Social Sign-In
+
+Google and Apple sign-in run through Supabase Auth and need provider
+credentials plus a redirect-URL allow list in the dashboard. Setup, the
+callback URLs and a test checklist are in `OAUTH_SETUP.md`.
+
 ## Next Steps
 
 After setting up Supabase, you can:
 1. Add password reset functionality
-2. Add social login (Google, Apple, etc.)
-3. Add email verification
+2. Add email verification
 4. Create additional tables for towing requests, drivers, etc.
 5. Add real-time subscriptions for live updates
 

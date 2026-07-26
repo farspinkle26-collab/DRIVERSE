@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, useRootNavigationState, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { AuthContext } from "@/hooks/useAuthStore";
+import { AuthContext, useAuth } from "@/hooks/useAuthStore";
 import { ThemeContext } from "@/hooks/useThemeStore";
 import { ChatContext } from "@/hooks/useChatStore";
 import { NotificationContext } from "@/hooks/useNotificationStore";
@@ -30,15 +30,60 @@ const darkScreenOptions = {
   contentStyle: { backgroundColor: "#0A0A0F" },
 };
 
+/**
+ * Routes a signed-out user is allowed to be on. Everything else in the app
+ * assumes a session (profile, garage, trips, chat all key off `user.id`),
+ * so the gate bounces them back to sign-in rather than letting screens
+ * render their own half-empty guest states.
+ */
+const PUBLIC_ROUTES = new Set(["sign-in", "signup", "auth-callback", "terms-and-conditions"]);
+
+/** Routes that stop making sense once you *are* signed in. */
+const SIGNED_OUT_ONLY_ROUTES = new Set(["sign-in", "signup", "auth-callback"]);
+
+/**
+ * The auth gate.
+ *
+ * Deliberately only redirects — it never blocks rendering on `loading`,
+ * because that flag also goes true during sign-in and profile refreshes,
+ * and unmounting the navigator mid-flow tears down the screen the user is
+ * looking at. Screens that need it (`index`) show their own spinner.
+ */
+function AuthGate() {
+  const { isAuthenticated, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+  const navigationState = useRootNavigationState();
+
+  const route = segments[0];
+
+  useEffect(() => {
+    // Navigating before the root navigator has mounted is a no-op that
+    // silently drops the redirect.
+    if (!navigationState?.key || loading) return;
+
+    const onPublicRoute = route !== undefined && PUBLIC_ROUTES.has(route);
+
+    if (!isAuthenticated && !onPublicRoute && route !== undefined) {
+      router.replace("/sign-in" as any);
+    } else if (isAuthenticated && route !== undefined && SIGNED_OUT_ONLY_ROUTES.has(route)) {
+      router.replace("/select-car" as any);
+    }
+  }, [navigationState?.key, loading, isAuthenticated, route, router]);
+
+  return null;
+}
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={darkScreenOptions}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="sign-in" options={{ headerShown: false, gestureEnabled: false }} />
+      <Stack.Screen name="auth-callback" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="select-car" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="terms-and-conditions" />
       <Stack.Screen name="chat" options={{ headerShown: false }} />
-      <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="routes" options={{ headerShown: false }} />
       <Stack.Screen name="nearby-places" options={{ headerShown: false }} />
@@ -99,6 +144,7 @@ export default function RootLayout() {
                               <RoutesProvider>
                                 <ActiveCarProvider>
                                   <RootLayoutNav />
+                                  <AuthGate />
                                   <NotificationBanner />
                                 </ActiveCarProvider>
                               </RoutesProvider>

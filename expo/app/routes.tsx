@@ -198,7 +198,7 @@ export default function RoutesScreen() {
           <RouteIcon size={44} color="#3A3A4E" />
           <Text style={styles.emptyTitle}>Sign in to see routes</Text>
           <Text style={styles.emptySub}>Record a drive and share it with the community</Text>
-          <TouchableOpacity style={styles.signInBtn} onPress={() => router.push("/login" as any)}>
+          <TouchableOpacity style={styles.signInBtn} onPress={() => router.replace("/sign-in" as any)}>
             <Text style={styles.signInText}>Sign In</Text>
           </TouchableOpacity>
         </View>

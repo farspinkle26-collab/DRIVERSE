@@ -57,6 +57,7 @@ import {
   HelpCircle,
   Info,
   Lock,
+  LogOut,
   MailOpen,
   MapPin,
   MessageCircle,
@@ -339,7 +340,7 @@ function Sheet({
 export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, updateProfilePicture, updateCountry } = useAuth();
+  const { user, isAuthenticated, updateProfilePicture, updateCountry, logout } = useAuth();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -632,6 +633,26 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     await updateCountry(next);
   }, [countryDraft, user, updateCountry]);
 
+  // Signing out drops the session; the gate in `app/_layout.tsx` sees that
+  // and sends the user back to the sign-in screen, so there is no explicit
+  // navigation here.
+  const handleSignOut = useCallback(() => {
+    // Alert.alert is a no-op on react-native-web, which would make the row
+    // look broken there — sign straight out instead.
+    if (Platform.OS === "web") {
+      logout();
+      return;
+    }
+    Alert.alert(
+      "Sign out",
+      "You will need to sign in again to get back into your garage.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Sign Out", style: "destructive", onPress: () => { logout(); } },
+      ]
+    );
+  }, [logout]);
+
   // ─── Actions: garage ───────────────────────────────────────
   const handleAddCar = useCallback(async () => {
     if (!user || !newCarName.trim()) return;
@@ -827,7 +848,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             icon={Car}
             heading="Join the drive"
             body="A profile holds your garage, your trip log and your XP, so it needs an account. Tap Sign In below, or create one from the sign-in screen."
-            action={{ label: "Sign In", onPress: () => router.push("/login" as any) }}
+            action={{ label: "Sign In", onPress: () => router.replace("/sign-in" as any) }}
           />
           <CutCornerButton
             title="Create Account"
@@ -1567,6 +1588,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               icon={<HelpCircle size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Help & Support"
             />
+            <SettingRow
+              icon={<LogOut size={ICON_MD} color={colors.racingRed} strokeWidth={ICON_STROKE} />}
+              label="Sign Out"
+              destructive
+              onPress={handleSignOut}
+            />
           </View>
         )}
       </ScrollView>
@@ -1728,11 +1755,14 @@ function SettingRow({
   icon,
   label,
   count,
+  destructive,
   onPress,
 }: {
   icon: React.ReactNode;
   label: string;
   count?: number;
+  /** Sign Out: red label, and no chevron — it does not go anywhere. */
+  destructive?: boolean;
   onPress?: () => void;
 }) {
   return (
@@ -1744,11 +1774,15 @@ function SettingRow({
     >
       <View style={styles.settingLeft}>
         {icon}
-        <Text style={styles.settingLabel}>{label}</Text>
+        <Text style={[styles.settingLabel, destructive && styles.settingLabelDestructive]}>
+          {label}
+        </Text>
       </View>
       <View style={styles.settingRight}>
         {count ? <Text style={styles.settingCount}>{count}</Text> : null}
-        <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+        {destructive ? null : (
+          <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+        )}
       </View>
     </Pressable>
   );
@@ -2613,6 +2647,7 @@ const styles = StyleSheet.create({
     ...textStyle("body"),
     color: colors.textPrimary,
   },
+  settingLabelDestructive: { color: colors.racingRed },
   settingCount: {
     ...CAPTION_MONO,
     color: colors.racingRed,

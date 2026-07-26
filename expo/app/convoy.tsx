@@ -195,7 +195,7 @@ export default function ConvoyScreen() {
             icon={<Radio size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
             heading="SIGN IN TO JOIN A CONVOY"
             body="A convoy marks your friends with a matching ring on the map so you can track each other live."
-            action={{ label: "Sign In", onPress: () => router.push("/login" as any) }}
+            action={{ label: "Sign In", onPress: () => router.replace("/sign-in" as any) }}
           />
         </View>
       </View>

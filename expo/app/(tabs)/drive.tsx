@@ -366,7 +366,7 @@ export default function DriveHubScreen() {
             <HubMessage
               heading="SIGN IN TO SEE YOUR DRIVES"
               body="Your trips, cars and streak live on your account."
-              action={{ label: "Sign In", onPress: () => router.push("/login" as any) }}
+              action={{ label: "Sign In", onPress: () => router.replace("/sign-in" as any) }}
             />
           ) : loading && trips.length === 0 ? (
             <ActivityIndicator color={colors.racingRed} style={styles.loader} />

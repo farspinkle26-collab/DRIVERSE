@@ -8,7 +8,10 @@ Supabase schema and the content repo without re-reading every file.
 
 ## Apps
 
-- `expo/` — React Native (Expo) app. Supabase is the backend.
+- `expo/` — React Native (Expo) app. Supabase is the backend. The app opens
+  on a sign-in gate (`expo/app/sign-in.tsx`, enforced by `AuthGate` in
+  `expo/app/_layout.tsx`): Google/Apple OAuth or email+password, no guest
+  mode. Provider setup and callback URLs are in `expo/OAUTH_SETUP.md`.
 - `admin/` — Next.js internal admin app, including `/content` (content
   performance dashboard) and `/admin` (analytics, tables built on TanStack
   Table).

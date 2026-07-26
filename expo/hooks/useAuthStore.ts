@@ -93,14 +93,24 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         .single();
 
       if (profileErr || !profile) {
-        // Try to create a default profile
+        // First sign-in (or an OAuth account that has never had a row):
+        // build the profile out of whatever the provider gave us. Google
+        // sends `full_name`/`picture`, Apple sends `name` and — only on the
+        // very first authorisation — nothing else, so every key is optional.
         const { data: sessionData } = await supabase.auth.getSession();
-        const meta = sessionData?.session?.user?.user_metadata;
+        const authUser = sessionData?.session?.user;
+        const meta = authUser?.user_metadata ?? {};
+        const email = authUser?.email ?? "";
+        const providerName =
+          meta.full_name ?? meta.name ?? meta.user_name ?? (email ? email.split("@")[0] : null);
+        const providerAvatar = meta.avatar_url ?? meta.picture ?? null;
+
         const defaultProfile = {
           id: userId,
-          email: sessionData?.session?.user?.email ?? "",
-          name: meta?.name ?? "Driver",
-          phone: meta?.phone ?? null,
+          email,
+          name: providerName ?? "Driver",
+          phone: meta.phone ?? null,
+          avatar: providerAvatar,
           role: "customer" as UserRole,
           account_status: "active",
           verification_status: "verified",
@@ -114,7 +124,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           email: defaultProfile.email,
           phone: defaultProfile.phone ?? "",
           role: "customer",
-          profilePicture: undefined,
+          profilePicture: providerAvatar ?? undefined,
           accountStatus: "active",
           verificationStatus: "verified",
           canSwitchRoles: false,

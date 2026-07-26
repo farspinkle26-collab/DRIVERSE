@@ -128,8 +128,9 @@ export default function SignUpScreen() {
 
     if (success) {
       // The starter car is auto-created by the DB trigger, but we can also
-      // upsert with the user's chosen car via Supabase directly
-      router.back();
+      // upsert with the user's chosen car via Supabase directly.
+      // "/" re-runs the gate: signed in now, so it lands on the garage.
+      router.replace("/" as any);
     }
   };
 
@@ -137,7 +138,7 @@ export default function SignUpScreen() {
     setSocialLoading("google");
     try {
       const success = await signInWithGoogle();
-      if (success) router.back();
+      if (success) router.replace("/" as any);
     } finally {
       setSocialLoading(null);
     }
@@ -147,7 +148,7 @@ export default function SignUpScreen() {
     setSocialLoading("apple");
     try {
       const success = await signInWithApple();
-      if (success) router.back();
+      if (success) router.replace("/" as any);
     } finally {
       setSocialLoading(null);
     }
@@ -170,7 +171,13 @@ export default function SignUpScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => (stepIndex === 0 ? router.back() : prevStep())}
+            onPress={() =>
+              stepIndex === 0
+                ? router.canGoBack()
+                  ? router.back()
+                  : router.replace("/sign-in" as any)
+                : prevStep()
+            }
             activeOpacity={0.7}
           >
             <ArrowLeft size={22} color="#FFFFFF" />
@@ -471,7 +478,7 @@ export default function SignUpScreen() {
           {/* Sign In link */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account? </Text>
-            <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity onPress={() => router.replace("/sign-in" as any)} activeOpacity={0.7}>
               <Text style={styles.footerLink}>Sign In</Text>
             </TouchableOpacity>
           </View>
