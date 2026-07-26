@@ -1289,7 +1289,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     <View style={styles.rankNext}>
                       <Text style={styles.overline}>NEXT RANK</Text>
                       <RankBadge rank={rankProg.next} size={30} />
-                      <Text style={styles.rankNextName} numberOfLines={1}>
+                      {/* Two lines, not one: "Street Explorer" truncates
+                          in this column, and a truncated rank name is the
+                          one thing the card exists to show. */}
+                      <Text style={styles.rankNextName} numberOfLines={2}>
                         {rankProg.next.name}
                       </Text>
                       <Text style={styles.rankNextLevel}>Lv {rankProg.next.minLevel}</Text>
@@ -1461,9 +1464,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                       </Pressable>
                     )}
                   </View>
+                  {/* `ghost`, not `primary`: the active FRIENDS chip is
+                      already the viewport's one red control, and two red
+                      slabs side by side stop either reading as the accent. */}
                   <CutCornerButton
                     title="Find"
-                    variant="primary"
+                    variant="ghost"
                     size="sm"
                     corners="topRight"
                     onPress={handleSearchFriends}
@@ -2353,7 +2359,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
-  featuredSilhouette: { position: "absolute", opacity: 0.6 },
+  // No extra opacity: the silhouette already draws in `hairline`, and
+  // dimming it further left it invisible against `voidBlack`.
+  featuredSilhouette: { position: "absolute" },
   featuredLockedInner: { alignItems: "center", gap: spacing.spacingMd },
   premiumTag: {
     flexDirection: "row",
@@ -2461,7 +2469,7 @@ const styles = StyleSheet.create({
     ...textStyle("caption"),
     color: colors.textSecondary,
   },
-  rankNext: { width: 80, alignItems: "center", gap: spacing.spacingXs },
+  rankNext: { width: 88, alignItems: "center", gap: spacing.spacingXs },
   rankNextName: {
     ...textStyle("caption"),
     color: colors.textPrimary,
