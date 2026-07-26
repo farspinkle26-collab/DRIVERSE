@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
+import { signInWithSocialProvider, SocialProvider } from "@/lib/socialAuth";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 const GUEST_USER: User = {
@@ -248,6 +249,35 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   }, [loadUserProfile]);
 
   // ================================================================
+  // SOCIAL SIGN-IN (Google / Apple)
+  // ================================================================
+  const signInWithSocial = useCallback(async (provider: SocialProvider) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const newSession = await signInWithSocialProvider(provider);
+
+      if (newSession?.user) {
+        setSession(newSession);
+        await loadUserProfile(newSession.user.id);
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error(`${provider} sign-in error:`, err);
+      setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [loadUserProfile]);
+
+  const signInWithGoogle = useCallback(() => signInWithSocial("google"), [signInWithSocial]);
+  const signInWithApple = useCallback(() => signInWithSocial("apple"), [signInWithSocial]);
+
+  // ================================================================
   // LOGOUT
   // ================================================================
   const logout = useCallback(async () => {
@@ -424,6 +454,8 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     login,
     signup,
     signUp,
+    signInWithGoogle,
+    signInWithApple,
     logout,
     setRole,
     setCustomerRole,
@@ -441,5 +473,5 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     isAccountActive: user?.accountStatus === "active",
     requiresDocuments: user?.verificationStatus === "requires_documents",
     isVerifiedCustomer: user?.role === "customer",
-  }), [user, session, loading, error, needsRoleSelection, login, signup, signUp, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, loadUserProfile]);
+  }), [user, session, loading, error, needsRoleSelection, login, signup, signUp, signInWithGoogle, signInWithApple, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, loadUserProfile]);
 });
