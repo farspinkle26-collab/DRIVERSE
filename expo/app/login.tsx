@@ -32,7 +32,7 @@ export default function LoginScreen() {
     if (!email.trim() || !password.trim()) return;
     const success = await login(email.trim(), password);
     if (success) {
-      router.back();
+      router.replace("/select-car" as any);
     }
   };
 
@@ -40,7 +40,7 @@ export default function LoginScreen() {
     setSocialLoading("google");
     try {
       const success = await signInWithGoogle();
-      if (success) router.back();
+      if (success) router.replace("/select-car" as any);
     } finally {
       setSocialLoading(null);
     }
@@ -50,7 +50,7 @@ export default function LoginScreen() {
     setSocialLoading("apple");
     try {
       const success = await signInWithApple();
-      if (success) router.back();
+      if (success) router.replace("/select-car" as any);
     } finally {
       setSocialLoading(null);
     }
