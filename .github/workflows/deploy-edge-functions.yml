@@ -37,3 +37,21 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      - name: Deploy generate-car-image
+        working-directory: expo
+        run: supabase functions deploy generate-car-image --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+      # generate-car-image needs its own OpenRouter key at runtime (billed
+      # per image). `secrets set` is idempotent, so re-running this on every
+      # deploy just keeps it in sync if the GitHub secret ever rotates.
+      - name: Sync OPENROUTER_API_KEY to Supabase
+        working-directory: expo
+        run: supabase secrets set OPENROUTER_API_KEY="$OPENROUTER_API_KEY" --project-ref "$SUPABASE_PROJECT_REF"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
