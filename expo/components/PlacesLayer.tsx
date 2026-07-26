@@ -36,7 +36,9 @@ import { Marker } from "react-native-maps";
 import { Camera, Plus, X } from "lucide-react-native";
 import * as ImagePickerExpo from "expo-image-picker";
 import {
+  chipContentColor,
   CutCornerButton,
+  CutCornerChip,
   CutCornerSurface,
 } from "@/components/CutCorner";
 import {
@@ -48,7 +50,6 @@ import {
   borderWidth,
   colors,
   cut,
-  fontFamily,
   onRacingRed,
   radius,
   spacing,
@@ -75,13 +76,9 @@ const MARKER_GLYPH_SIZE = spacing.spacingLg;
  * ------------------------------------------------------------------ */
 
 /**
- * One chip per category. Active is a solid racingRed slab with black
- * text; inactive is a carbon slab with a hairline outline — the same
- * primary/outline pair `CutCornerButton` uses, so the chips read as part
- * of the same control family as the screen's buttons.
- *
- * The label is Rajdhani, uppercase, tracked: a control sizing its own
- * label (DRIVE_HUB_REFERENCE D-1), not body copy.
+ * One chip per category, drawn by the shared `CutCornerChip` — the same
+ * component the profile's Garage / Trips / Friends selector uses, so a
+ * single-select control looks identical wherever it appears.
  */
 export function PlacesFilterBar({
   active,
@@ -107,36 +104,19 @@ export function PlacesFilterBar({
         const Glyph = PLACE_CATEGORY_ICONS[cat];
         const isActive = active === cat;
         return (
-          <Pressable
+          <CutCornerChip
             key={cat}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive }}
+            label={PLACE_CATEGORY_LABELS[cat]}
+            active={isActive}
             accessibilityLabel={`Show ${PLACE_CATEGORY_LABELS[cat]} places`}
             onPress={() => onChange(cat)}
-            style={({ pressed }) => [styles.filterChipHit, pressed && styles.pressed]}
-          >
-            <CutCornerSurface
-              fill={isActive ? colors.racingRed : colors.carbonSurface}
-              borderColor={isActive ? colors.racingRed : colors.hairline}
-              borderWidth={borderWidth.hairline}
-              cutSize={cut.sm}
-              corners="topRight"
-              contentStyle={styles.filterChip}
-            >
+            icon={
               <Glyph
                 size={spacing.spacingMd}
-                color={isActive ? onRacingRed : colors.textSecondary}
+                color={chipContentColor(isActive)}
               />
-              <Text
-                style={[
-                  styles.filterChipText,
-                  { color: isActive ? onRacingRed : colors.textSecondary },
-                ]}
-              >
-                {PLACE_CATEGORY_LABELS[cat].toUpperCase()}
-              </Text>
-            </CutCornerSurface>
-          </Pressable>
+            }
+          />
         );
       })}
     </ScrollView>
@@ -343,9 +323,9 @@ export function SubmitPlaceFab({ onPress, style }: { onPress: () => void; style?
 }
 
 /**
- * Category picker for the submit form — the same chip visual language as
- * `PlacesFilterBar` above (CutCornerSurface, cut.sm, active=racingRed),
- * just laid out inline in a form rather than as a scrolling map filter.
+ * Category picker for the submit form — the same `CutCornerChip` as
+ * `PlacesFilterBar` above, just laid out inline in a form rather than as a
+ * scrolling map filter.
  */
 function CategoryPicker({
   value,
@@ -360,36 +340,19 @@ function CategoryPicker({
         const Glyph = PLACE_CATEGORY_ICONS[cat];
         const isActive = value === cat;
         return (
-          <Pressable
+          <CutCornerChip
             key={cat}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive }}
+            label={PLACE_CATEGORY_LABELS[cat]}
+            active={isActive}
             accessibilityLabel={`Category: ${PLACE_CATEGORY_LABELS[cat]}`}
             onPress={() => onChange(cat)}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <CutCornerSurface
-              fill={isActive ? colors.racingRed : colors.carbonSurface}
-              borderColor={isActive ? colors.racingRed : colors.hairline}
-              borderWidth={borderWidth.hairline}
-              cutSize={cut.sm}
-              corners="topRight"
-              contentStyle={styles.filterChip}
-            >
+            icon={
               <Glyph
                 size={spacing.spacingMd}
-                color={isActive ? onRacingRed : colors.textSecondary}
+                color={chipContentColor(isActive)}
               />
-              <Text
-                style={[
-                  styles.filterChipText,
-                  { color: isActive ? onRacingRed : colors.textSecondary },
-                ]}
-              >
-                {PLACE_CATEGORY_LABELS[cat].toUpperCase()}
-              </Text>
-            </CutCornerSurface>
-          </Pressable>
+            }
+          />
         );
       })}
     </View>
@@ -672,31 +635,10 @@ export function SubmitPlaceModal({
 }
 
 const styles = StyleSheet.create({
-  /* Filter chips */
+  /* Filter chips — the chip itself is `CutCornerChip`; this is its row. */
   filterBar: {
     flexDirection: "row",
     gap: spacing.spacingSm,
-  },
-  /** Press feedback, since Pressable has none by default. */
-  pressed: {
-    opacity: 0.7,
-  },
-  filterChipHit: {
-    // Keeps the tap target on the chip itself; the surface draws inside it.
-    minHeight: spacing.spacingXxl,
-  },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.spacingXs,
-    paddingHorizontal: spacing.spacingSm,
-    paddingVertical: spacing.spacingSm,
-  },
-  filterChipText: {
-    fontFamily: fontFamily.displaySemiBold,
-    fontSize: 12,
-    lineHeight: 15,
-    letterSpacing: 1,
   },
   /* Markers */
   // Fixed outer box: the native Android marker bitmap is sized at capture

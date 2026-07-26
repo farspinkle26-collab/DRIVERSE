@@ -1,34 +1,62 @@
+/**
+ * Driveverse — the floating tab bar.
+ *
+ * Rendered as the navigator's custom `tabBar` so taps go through React
+ * Navigation and reliably switch screens. Rebuilt on the Phase 1 tokens:
+ * it was the last surface in the app carrying `expo-blur`, an orange glow
+ * `shadowColor`, an `elevation` stack and three gradient icon fills, and it
+ * draws over the map, the Drive Hub and the profile alike — which is why
+ * both DRIVE_HUB_REFERENCE §5 and MAP_SCREEN_REFERENCE §7 flagged it.
+ *
+ * Shape: the bar is a brand surface, so it takes the cut rather than a
+ * fully-rounded pill (`theme.ts` — "there is no pill token on purpose").
+ * The active indicator keeps `radius.circle`: it is a disc behind a glyph,
+ * one of the genuinely circular things the token file allows, and it is the
+ * screen's only piece of chrome red.
+ */
+
 import React from "react";
-import { StyleSheet, View, TouchableOpacity, Platform } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { MapIcon, DriveIcon, ProfileIcon } from "../../components/TabIcons";
+import { CutCornerSurface } from "@/components/CutCorner";
+import { DriveIcon, MapIcon, ProfileIcon } from "@/components/TabIcons";
+import {
+  borderWidth,
+  colors,
+  cut,
+  onRacingRed,
+  radius,
+  spacing,
+} from "@/constants/theme";
 
 type TabKey = "map" | "drive" | "profile";
 
-const TABS: { key: TabKey; Icon: typeof MapIcon }[] = [
-  { key: "map", Icon: MapIcon },
-  { key: "drive", Icon: DriveIcon },
-  { key: "profile", Icon: ProfileIcon },
+const TABS: { key: TabKey; label: string; Icon: typeof MapIcon }[] = [
+  { key: "map", label: "Map", Icon: MapIcon },
+  { key: "drive", label: "Drive", Icon: DriveIcon },
+  { key: "profile", label: "Profile", Icon: ProfileIcon },
 ];
 
-// Floating pill navigation bar. Rendered as the tab navigator's custom
-// tabBar so taps go through React Navigation and reliably switch screens.
+/** Glyph size and the disc that sits behind an active one. Multiples of 4. */
+const TAB_ICON_SIZE = spacing.spacingXl; // 24
+const TAB_SLOT = 44;
+
 function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const activeRouteName = state.routes[state.index]?.name;
 
-  const TabBarBg = Platform.OS === "ios" ? BlurView : View;
-  const tabBarBgProps =
-    Platform.OS === "ios"
-      ? { intensity: 25, tint: "dark" as const, style: [styles.tabBar, { paddingBottom: insets.bottom + 6 }] }
-      : { style: [styles.tabBar, styles.tabBarAndroid, { paddingBottom: insets.bottom + 6 }] };
-
   return (
-    <TabBarBg {...tabBarBgProps}>
-      <View style={styles.tabPill}>
+    <View style={[styles.bar, { paddingBottom: insets.bottom + spacing.spacingSm }]}>
+      <CutCornerSurface
+        fill={colors.carbonSurface}
+        borderColor={colors.hairline}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.md}
+        corners="topRight"
+        contentStyle={styles.barContent}
+      >
         {TABS.map((tab) => {
           const isActive = activeRouteName === tab.key;
           const IconComponent = tab.Icon;
@@ -47,22 +75,29 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
           };
 
           return (
-            <TouchableOpacity
+            <Pressable
               key={tab.key}
-              style={[styles.tabItem, isActive && styles.tabItemActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={tab.label}
               onPress={onPress}
-              activeOpacity={0.7}
+              // Pressable has no built-in feedback; losing the press
+              // response on the nav bar would be a real regression.
+              style={({ pressed }) => [
+                styles.slot,
+                isActive && styles.slotActive,
+                pressed && !isActive && styles.pressed,
+              ]}
             >
               <IconComponent
-                size={22}
-                color={isActive ? "#FF6B35" : "#5A5A6E"}
-                filled={isActive}
+                size={TAB_ICON_SIZE}
+                color={isActive ? onRacingRed : colors.textSecondary}
               />
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
-      </View>
-    </TabBarBg>
+      </CutCornerSurface>
+    </View>
   );
 }
 
@@ -72,10 +107,10 @@ export default function TabLayout() {
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: "#161628" },
+        sceneStyle: { backgroundColor: colors.voidBlack },
       }}
     >
-      {/* Primary tabs shown in the floating pill */}
+      {/* Primary tabs shown in the floating bar */}
       <Tabs.Screen name="map" />
       <Tabs.Screen name="drive" />
       <Tabs.Screen name="profile" />
@@ -84,45 +119,37 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
+  bar: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 100,
     alignItems: "center",
-    paddingTop: 10,
+    paddingTop: spacing.spacingMd,
+    // The bar floats over map tiles and long scrolls, so the strip behind
+    // it has to stop content showing through. A surface step, not a blur —
+    // `expo-blur` was the old answer and it only ever ran on iOS, so the
+    // two platforms did not match.
+    backgroundColor: colors.voidBlack,
   },
-  tabBarAndroid: {
-    backgroundColor: "rgba(22, 22, 40, 0.9)",
-  },
-  tabPill: {
+  barContent: {
     flexDirection: "row",
-    backgroundColor: "rgba(20, 20, 36, 0.92)",
-    borderRadius: 30,
-    padding: 5,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
-    elevation: 14,
-  },
-  tabItem: {
-    width: 52,
-    height: 44,
-    borderRadius: 24,
-    justifyContent: "center",
     alignItems: "center",
+    gap: spacing.spacingSm,
+    padding: spacing.spacingXs,
   },
-  tabItemActive: {
-    backgroundColor: "rgba(255, 107, 53, 0.16)",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    elevation: 8,
+  slot: {
+    width: TAB_SLOT,
+    height: TAB_SLOT,
+    borderRadius: radius.circle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  slotActive: {
+    backgroundColor: colors.racingRed,
+  },
+  pressed: {
+    opacity: 0.7,
   },
 });
