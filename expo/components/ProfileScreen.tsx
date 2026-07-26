@@ -103,7 +103,7 @@ import {
 } from "@/constants/theme";
 import { tripCode } from "@/lib/tripStats";
 import { supabase } from "@/lib/supabase";
-import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
+import { generateCarImage } from "@/lib/generateCarImage";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -128,9 +128,6 @@ const AVATAR_RING = borderWidth.emphasis;
  * product on a driver's phone uses for it. See PROFILE_SCREEN_REFERENCE D-3.
  */
 const LIVE_GREEN = "#22C55E";
-
-/** Price for the premium car render, in IDR. */
-const PREMIUM_CAR_PRICE = 49000;
 
 // XP curve mirror of useXPStore so we can render other users' level bars.
 function xpForLevel(level: number): number {
@@ -377,7 +374,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [premiumOpen, setPremiumOpen] = useState(false);
   const [premiumTargetCar, setPremiumTargetCar] = useState<CarItem | null>(null);
-  const [purchasing, setPurchasing] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [editingCountry, setEditingCountry] = useState(false);
@@ -691,53 +688,49 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     loadCars();
   }, [user, loadCars]);
 
-  // ─── Premium car generation (paywalled) ────────────────────
+  // ─── AI car render (Gemini Lite) ────────────────────────────
   const openPremium = useCallback((car: CarItem) => {
     setPremiumTargetCar(car);
     setPremiumOpen(true);
   }, []);
 
-  // After a successful (simulated) payment, let the driver attach the
-  // generated render. Storing a photo_url marks the car as premium.
-  const runGeneration = useCallback(async (car: CarItem) => {
-    if (!user) return;
+  // Picks the driver's own car photo, sends it to the generate-car-image
+  // edge function (Gemini 3.1 Flash Lite Image), and refreshes the garage
+  // once the restyled render is saved. Storing a photo_url is what marks
+  // the car as generated/featured everywhere else in this file.
+  const handleGenerate = useCallback(async () => {
+    if (!user || !premiumTargetCar) return;
+    const car = premiumTargetCar;
     try {
       if (Platform.OS !== "web") {
         const perm = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
         if (perm.status !== "granted") {
-          Alert.alert("Permission needed", "We need photo access to save your generated car.");
+          Alert.alert("Permission needed", "We need photo access to generate your car.");
           return;
         }
       }
-      const result = await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect: [16, 10], quality: 0.9 });
-      if (result.canceled || !result.assets?.[0]) return;
-      const localUri = result.assets[0].uri;
-      // The picker returns a device-local URI that doesn't survive app
-      // restarts, so upload it to Supabase Storage and persist the public URL.
-      const publicUrl = await uploadCarPhoto(user.id, car.id, localUri);
-      const { error } = await supabase.from("car_collections").update({ photo_url: publicUrl }).eq("id", car.id);
-      if (error) Alert.alert("Error", error.message);
-      else {
-        await loadCars();
-        Alert.alert("Unlocked!", `${car.name} has been generated and added to your garage.`);
-      }
-    } catch {
-      Alert.alert("Error", "Could not save your generated car.");
-    }
-  }, [user, loadCars]);
+      const result = await ImagePickerExpo.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [16, 10],
+        quality: 0.9,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+      const asset = result.assets[0];
+      const mimeType = asset.mimeType ?? (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
 
-  const handlePayPremium = useCallback(async () => {
-    if (!premiumTargetCar) return;
-    setPurchasing(true);
-    // Simulate the payment authorization round-trip.
-    setTimeout(async () => {
-      setPurchasing(false);
+      setGenerating(true);
+      await generateCarImage(car.id, asset.base64, mimeType);
+      setGenerating(false);
       setPremiumOpen(false);
-      const car = premiumTargetCar;
       setPremiumTargetCar(null);
-      await runGeneration(car);
-    }, 1400);
-  }, [premiumTargetCar, runGeneration]);
+      await loadCars();
+      Alert.alert("Ready!", `${car.name} has been generated and added to your garage.`);
+    } catch (err) {
+      setGenerating(false);
+      Alert.alert("Error", err instanceof Error ? err.message : "Could not generate your car.");
+    }
+  }, [user, premiumTargetCar, loadCars]);
 
   // ─── Actions: friends ──────────────────────────────────────
   const handleAddFriendById = useCallback(async () => {
@@ -1639,50 +1632,53 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         </Sheet>
       </Modal>
 
-      {/* ═══ PREMIUM PAYWALL ═══ */}
+      {/* ═══ AI CAR GENERATION (Gemini Lite) ═══ */}
       <Modal visible={premiumOpen} transparent animationType="slide" onRequestClose={() => setPremiumOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => !purchasing && setPremiumOpen(false)} />
+        <Pressable style={styles.modalBackdrop} onPress={() => !generating && setPremiumOpen(false)} />
         <Sheet bottomInset={insets.bottom}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>GENERATE YOUR CAR</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Close"
-              onPress={() => !purchasing && setPremiumOpen(false)}
+              onPress={() => !generating && setPremiumOpen(false)}
               hitSlop={spacing.spacingSm}
             >
               <X size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
             </Pressable>
           </View>
           <Text style={styles.premiumBody}>
-            Turn {premiumTargetCar?.name ?? "your car"} into a photorealistic render for your garage
-            and profile — visible to every driver who views your page.
+            Upload a photo of {premiumTargetCar?.name ?? "your car"} and Gemini will re-light it into a
+            studio-grade showcase render for your garage and profile — visible to every driver who
+            views your page.
           </Text>
           <View style={styles.premiumPerks}>
-            {["Photorealistic AI car render", "Featured on your public profile", "Premium showcase card"].map((perk) => (
+            {["AI-generated studio car render", "Featured on your public profile", "Free, powered by Gemini Lite"].map((perk) => (
               <View key={perk} style={styles.premiumPerkRow}>
                 <Check size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 <Text style={styles.premiumPerkText}>{perk}</Text>
               </View>
             ))}
           </View>
-          <View style={styles.premiumPriceRow}>
-            <Text style={styles.premiumPriceLabel}>One-time</Text>
-            <Text style={styles.premiumPrice}>Rp {PREMIUM_CAR_PRICE.toLocaleString("id-ID")}</Text>
-          </View>
           <CutCornerButton
-            title={purchasing ? "Authorizing…" : "Pay & Generate"}
+            title={generating ? "Generating…" : "Choose Photo & Generate"}
             variant="primary"
             size="lg"
             corners="topRight"
-            disabled={purchasing}
-            onPress={handlePayPremium}
-            icon={<Lock size={ICON_MD} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
+            disabled={generating}
+            onPress={handleGenerate}
+            icon={
+              generating ? (
+                <ActivityIndicator size="small" color={colors.voidBlack} />
+              ) : (
+                <Sparkles size={ICON_MD} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+              )
+            }
           />
           <Pressable
             accessibilityRole="button"
-            onPress={() => !purchasing && setPremiumOpen(false)}
-            disabled={purchasing}
+            onPress={() => !generating && setPremiumOpen(false)}
+            disabled={generating}
           >
             <Text style={styles.premiumCancel}>Maybe later</Text>
           </Pressable>
@@ -2038,7 +2034,7 @@ function FeaturedCar({
             <View style={styles.featuredLockedInner}>
               <View style={styles.premiumTag}>
                 <Sparkles size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                <Text style={styles.premiumTagText}>PREMIUM</Text>
+                <Text style={styles.premiumTagText}>AI RENDER</Text>
               </View>
               {isSelf ? (
                 <CutCornerButton
@@ -2688,22 +2684,6 @@ const styles = StyleSheet.create({
   premiumPerkRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingMd },
   premiumPerkText: {
     ...textStyle("body"),
-    color: colors.textPrimary,
-  },
-  premiumPriceRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    paddingTop: spacing.spacingLg,
-    borderTopWidth: borderWidth.hairline,
-    borderTopColor: colors.hairline,
-  },
-  premiumPriceLabel: {
-    ...textStyle("body"),
-    color: colors.textSecondary,
-  },
-  premiumPrice: {
-    ...textStyle("dataLg"),
     color: colors.textPrimary,
   },
   premiumCancel: {
