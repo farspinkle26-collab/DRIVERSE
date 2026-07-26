@@ -45,6 +45,8 @@ import {
   formatSpeed,
 } from "@/lib/tripStats";
 import { decodePolyline } from "@/lib/polyline";
+import { PlatinumBadge } from "@/components/platinum/PlatinumBadge";
+import { platinum } from "@/constants/platinum";
 import {
   alpha,
   borderWidth,
@@ -86,12 +88,32 @@ export interface QuestSharePayload {
   coinReward?: number;
 }
 
-export type ShareCardType = "trip" | "rank" | "quest";
+/**
+ * A Platinum AI showcase render, framed for sharing.
+ *
+ * The image is the whole point here, so this variant is the one that gives
+ * its art the full canvas — everything else on the card is a caption. The
+ * Platinum badge is the only status mark; the card does not also stamp a rank
+ * on it, because two badges on one image is where a share card starts to look
+ * like an ad.
+ */
+export interface ShowcaseSharePayload {
+  /** Remote URL of the generated render. */
+  imageUrl: string;
+  carName: string;
+  /** "Studio" / "Night" / "Track" — the look that was generated. */
+  styleLabel: string;
+  /** Optional spec line under the name, e.g. "BMW · 2019 · 340 HP". */
+  specLine?: string;
+}
+
+export type ShareCardType = "trip" | "rank" | "quest" | "showcase";
 
 export type ShareableCardProps =
   | { type: "trip"; payload: TripSharePayload }
   | { type: "rank"; payload: RankSharePayload }
-  | { type: "quest"; payload: QuestSharePayload };
+  | { type: "quest"; payload: QuestSharePayload }
+  | { type: "showcase"; payload: ShowcaseSharePayload };
 
 /* ------------------------------------------------------------------ *
  * Shared frame pieces
@@ -321,6 +343,56 @@ function QuestVariant({ title, difficulty, xpReward, coinReward }: QuestSharePay
 }
 
 /* ------------------------------------------------------------------ *
+ * Variant: Showcase (Platinum)
+ * ------------------------------------------------------------------ */
+
+function ShowcaseVariant({
+  imageUrl,
+  carName,
+  styleLabel,
+  specLine,
+}: ShowcaseSharePayload) {
+  return (
+    <View style={styles.variant}>
+      <View style={styles.showcaseHeader}>
+        <Overline label="AI SHOWCASE" color={platinum.chrome} />
+        <PlatinumBadge size={spacing.spacingXl} />
+      </View>
+
+      {/* The render gets the canvas. Cut corner on the frame so the art
+          carries the brand shape without a border competing with it. */}
+      <CutCornerSurface
+        fill={colors.carbonSurface}
+        borderColor={alpha(platinum.chrome, 0.35)}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.lg}
+        corners="topRight"
+        style={styles.showcaseFrame}
+        contentStyle={styles.showcaseFrameContent}
+      >
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.showcaseImage}
+          resizeMode="cover"
+        />
+      </CutCornerSurface>
+
+      <View style={styles.showcaseCaption}>
+        <Text style={styles.showcaseCarName} numberOfLines={1}>
+          {carName}
+        </Text>
+        {specLine ? (
+          <Text style={styles.showcaseSpec} numberOfLines={1}>
+            {specLine}
+          </Text>
+        ) : null}
+        <Text style={styles.showcaseStyle}>{styleLabel.toUpperCase()}</Text>
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * ShareableCard
  * ------------------------------------------------------------------ */
 
@@ -336,6 +408,7 @@ export const ShareableCard = React.forwardRef<View, ShareableCardProps>(
           {props.type === "trip" ? <TripVariant {...props.payload} /> : null}
           {props.type === "rank" ? <RankVariant {...props.payload} /> : null}
           {props.type === "quest" ? <QuestVariant {...props.payload} /> : null}
+          {props.type === "showcase" ? <ShowcaseVariant {...props.payload} /> : null}
         </View>
 
         <BrandCorner />
@@ -421,6 +494,48 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 3,
     color: colors.textSecondary,
+  },
+
+  // Showcase (Platinum)
+  showcaseHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  showcaseFrame: {
+    width: "100%",
+    // 4:3, the aspect the generator returns. Fixed so the caption below it
+    // lands in the same place on every card.
+    aspectRatio: 4 / 3,
+  },
+  showcaseFrameContent: {
+    flex: 1,
+  },
+  showcaseImage: {
+    flex: 1,
+    width: "100%",
+  },
+  showcaseCaption: {
+    gap: spacing.spacingXs,
+  },
+  showcaseCarName: {
+    fontFamily: fontFamily.displayBold,
+    fontSize: 30,
+    lineHeight: 34,
+    letterSpacing: 0.4,
+    color: colors.textPrimary,
+  },
+  showcaseSpec: {
+    fontFamily: fontFamily.dataMedium,
+    fontSize: 13,
+    letterSpacing: 0,
+    color: colors.textSecondary,
+  },
+  showcaseStyle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    letterSpacing: 2,
+    color: platinum.chrome,
   },
 
   // Trip

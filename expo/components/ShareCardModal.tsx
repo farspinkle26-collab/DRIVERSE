@@ -18,7 +18,7 @@
  *      beat on slow devices) rather than freezing the UI, and a cancelled
  *      share just closes the modal — never an error.
  *
- * The same modal serves all three card types; callers pass `type` + `payload`
+ * The same modal serves every card type; callers pass `type` + `payload`
  * exactly as `<ShareableCard>` takes them.
  */
 

@@ -17,6 +17,9 @@ import { PartyProvider } from "@/hooks/usePartyStore";
 import { GroupChatProvider } from "@/hooks/useGroupChatStore";
 import { ActiveCarProvider } from "@/hooks/useActiveCarStore";
 import { RoutesProvider } from "@/hooks/useRoutesStore";
+import { PlatinumProvider } from "@/hooks/usePlatinumStore";
+import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
+import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 import { useAppFonts } from "@/hooks/useAppFonts";
@@ -54,6 +57,13 @@ function RootLayoutNav() {
       <Stack.Screen name="convoy/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="event/[id]/manage" options={{ headerShown: false }} />
+      {/* Presented as a modal: the paywall is always raised on top of
+          something the driver was in the middle of doing. */}
+      <Stack.Screen
+        name="platinum"
+        options={{ headerShown: false, presentation: "modal" }}
+      />
+      <Stack.Screen name="saved-places" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -88,28 +98,37 @@ export default function RootLayout() {
           />
           <ThemeContext>
             <AuthContext>
-              <NotificationContext>
-                <ChatContext>
-                  <XPProvider>
-                    <QuestsProvider>
-                      <OnlineUsersProvider>
-                        <PartyProvider>
-                          <EventsProvider>
-                            <GroupChatProvider>
-                              <RoutesProvider>
-                                <ActiveCarProvider>
-                                  <RootLayoutNav />
-                                  <NotificationBanner />
-                                </ActiveCarProvider>
-                              </RoutesProvider>
-                            </GroupChatProvider>
-                          </EventsProvider>
-                        </PartyProvider>
-                      </OnlineUsersProvider>
-                    </QuestsProvider>
-                  </XPProvider>
-                </ChatContext>
-              </NotificationContext>
+              {/* Platinum wraps every store that enforces a tier cap
+                  (events, party, routes, garage, saved places), so it has
+                  to sit above all of them. */}
+              <PlatinumProvider>
+                <NotificationContext>
+                  <ChatContext>
+                    <XPProvider>
+                      <QuestsProvider>
+                        <OnlineUsersProvider>
+                          <PartyProvider>
+                            <EventsProvider>
+                              <GroupChatProvider>
+                                <RoutesProvider>
+                                  <ActiveCarProvider>
+                                    <SavedPlacesProvider>
+                                      <CosmeticsProvider>
+                                        <RootLayoutNav />
+                                        <NotificationBanner />
+                                      </CosmeticsProvider>
+                                    </SavedPlacesProvider>
+                                  </ActiveCarProvider>
+                                </RoutesProvider>
+                              </GroupChatProvider>
+                            </EventsProvider>
+                          </PartyProvider>
+                        </OnlineUsersProvider>
+                      </QuestsProvider>
+                    </XPProvider>
+                  </ChatContext>
+                </NotificationContext>
+              </PlatinumProvider>
             </AuthContext>
           </ThemeContext>
         </GestureHandlerRootView>

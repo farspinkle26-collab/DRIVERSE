@@ -1,6 +1,8 @@
 import createContextHook from "@nkzw/create-context-hook";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { parseLimitRejection } from "@/lib/platinumLimits";
+import { usePlatinum } from "@/hooks/usePlatinumStore";
 
 // ─── Types ─────────────────────────────────────────────────
 export type EventType = "meetup" | "convoy" | "cruise" | "race";
@@ -73,6 +75,7 @@ function isLiveNow(e: EventRow): boolean {
 
 // ─── Context Hook ──────────────────────────────────────────
 export const [EventsProvider, useEvents] = createContextHook(() => {
+  const { limit, openPaywall } = usePlatinum();
   const [events, setEvents] = useState<DriveEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -193,11 +196,54 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
     };
   }, [userId, fetchEvents]);
 
+  // ─── Tier cap ────────────────────────────────────────────
+  // Regular drivers may have ONE event of their own upcoming or active at a
+  // time; Platinum is uncapped. Completed and cancelled events don't count —
+  // a driver who ran a meetup last month shouldn't still be holding their
+  // own slot. `constants/platinum.ts` owns the number.
+  const activeEventLimit = limit("activeEvents");
+
+  /** Events *this driver created* that are still upcoming or active. */
+  const myActiveEventCount = useMemo(
+    () => events.filter((e) => e.is_host).length,
+    [events]
+  );
+
+  /**
+   * Authoritative count, straight from the database. The local list is
+   * realtime but can be a beat behind on a cold start, and the cap decides
+   * whether a driver sees a paywall — worth one cheap count query.
+   */
+  const countMyActiveEvents = useCallback(async (uid: string): Promise<number> => {
+    const { count, error } = await supabase
+      .from("events")
+      .select("id", { count: "exact", head: true })
+      .eq("creator_id", uid)
+      .in("status", ["upcoming", "active"]);
+    // On a failed count, fall back to the local list rather than blocking a
+    // legitimate create or waving through an over-cap one.
+    if (error || count === null) return myActiveEventCount;
+    return count;
+  }, [myActiveEventCount]);
+
   // ─── Create event ────────────────────────────────────────
   const createEvent = useCallback(
-    async (input: CreateEventInput): Promise<{ error?: string }> => {
+    async (input: CreateEventInput): Promise<{ error?: string; limitReached?: boolean }> => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in to create an event" };
+
+      // Point of friction: a Regular driver at the cap gets the paywall,
+      // pinned to the Events benefit — never a silent failure.
+      if (activeEventLimit !== null) {
+        const current = await countMyActiveEvents(uid);
+        if (current >= activeEventLimit) {
+          openPaywall("events");
+          return {
+            error: `Regular drivers can host ${activeEventLimit} event at a time. Finish or cancel it, or go Platinum for unlimited events.`,
+            limitReached: true,
+          };
+        }
+      }
 
       const { data: profile } = await supabase
         .from("profiles")
@@ -222,11 +268,22 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
         status: input.starts_at.getTime() <= Date.now() ? "active" : "upcoming",
       });
 
-      if (error) return { error: error.message };
+      if (error) {
+        // The database trigger caught what the local count missed (another
+        // device created an event in between). Still a paywall, not a raw
+        // Postgres message.
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          openPaywall(rejection.benefit);
+          await fetchEvents();
+          return { error: rejection.message, limitReached: true };
+        }
+        return { error: error.message };
+      }
       await fetchEvents();
       return {};
     },
-    [fetchEvents]
+    [fetchEvents, activeEventLimit, countMyActiveEvents, openPaywall]
   );
 
   // ─── Join / leave ────────────────────────────────────────
@@ -297,5 +354,11 @@ export const [EventsProvider, useEvents] = createContextHook(() => {
     joinEvent,
     leaveEvent,
     cancelEvent,
+    /** `null` when unlimited (Platinum). */
+    activeEventLimit,
+    myActiveEventCount,
+    /** True when creating another event would raise the paywall. */
+    atEventLimit:
+      activeEventLimit !== null && myActiveEventCount >= activeEventLimit,
   };
 });

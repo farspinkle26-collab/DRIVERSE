@@ -15,6 +15,8 @@ import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { ArrowLeft, MessageCircle, Send, Users } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { supabase } from "@/lib/supabase";
+import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
+import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, radius, spacing, textStyle } from "@/constants/theme";
 
@@ -40,6 +42,9 @@ export default function GroupChatScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList>(null);
+
+  // Badge lookup for everyone who has spoken in this thread.
+  const platinumSenders = usePlatinumDirectory(messages.map((m) => m.sender_id));
 
   const load = useCallback(async () => {
     if (!conversationId) return;
@@ -171,7 +176,16 @@ export default function GroupChatScreen() {
             return (
               <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
                 <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-                  {!mine && <Text style={styles.senderName}>{senderNames[item.sender_id] ?? "Driver"}</Text>}
+                  {!mine && (
+                    <View style={styles.senderLine}>
+                      <Text style={styles.senderName}>{senderNames[item.sender_id] ?? "Driver"}</Text>
+                      <PlatinumNameBadge
+                        show={platinumSenders.has(item.sender_id)}
+                        size={spacing.spacingMd}
+                        name={senderNames[item.sender_id]}
+                      />
+                    </View>
+                  )}
                   <Text style={styles.bubbleText}>{item.content}</Text>
                   <Text style={styles.bubbleTime}>
                     {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -250,6 +264,11 @@ const styles = StyleSheet.create({
   },
   bubbleMine: { borderColor: colors.racingRed },
   bubbleTheirs: { borderColor: colors.hairline },
+  senderLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+  },
   senderName: {
     ...textStyle("displayMd", { fontSize: 12, lineHeight: 15 }),
     color: colors.textSecondary,

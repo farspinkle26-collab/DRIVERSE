@@ -18,6 +18,10 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useParty } from "@/hooks/usePartyStore";
 import { supabase } from "@/lib/supabase";
 import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
+import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
+import PlatinumAura from "@/components/platinum/PlatinumAura";
+import TierLimitNotice from "@/components/platinum/TierLimitNotice";
+import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import {
   borderWidth,
@@ -101,7 +105,10 @@ export default function ConvoyScreen() {
     loadingPublicParties,
     browsePublicParties,
     joinParty,
+    convoyMemberLimit,
+    seatsTaken,
   } = useParty();
+  const platinumMembers = usePlatinumDirectory(members.map((m) => m.user_id));
 
   const [nameDraft, setNameDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -356,11 +363,16 @@ export default function ConvoyScreen() {
                     style={styles.memberIdentity}
                     onPress={() => router.push(`/user/${m.user_id}` as any)}
                   >
-                    <View style={styles.avatar}>
-                      {m.avatar ? <Image source={{ uri: m.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>}
-                    </View>
+                    <PlatinumAura show={platinumMembers.has(m.user_id)} size={40}>
+                      <View style={styles.avatar}>
+                        {m.avatar ? <Image source={{ uri: m.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>}
+                      </View>
+                    </PlatinumAura>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
+                      <View style={styles.rowNameLine}>
+                        <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>
+                        <PlatinumNameBadge show={platinumMembers.has(m.user_id)} name={m.name} />
+                      </View>
                       <Text style={styles.rowSub}>Level {m.level}{m.status === "invited" ? " · Invited" : ""}</Text>
                     </View>
                   </Pressable>
@@ -376,6 +388,19 @@ export default function ConvoyScreen() {
 
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Invite Friends</Text>
+              {/* Convoy size follows the ORGANISER's tier, so this notice is
+                  only shown to the leader — a member cannot lift it and
+                  offering them an upgrade would be a misleading upsell. */}
+              {isLeader && (
+                <TierLimitNotice
+                  current={seatsTaken}
+                  cap={convoyMemberLimit}
+                  noun="drivers"
+                  benefit="convoy"
+                  atCapMessage="Go Platinum to roll 8 deep."
+                  style={styles.convoyLimitNotice}
+                />
+              )}
               {friends.filter((f) => !memberIds.has(f.id)).length === 0 ? (
                 <Text style={styles.rowSub}>All your friends are already in this convoy.</Text>
               ) : (
@@ -486,9 +511,17 @@ const styles = StyleSheet.create({
     borderRadius: radius.circle,
   },
   colorDotLg: { width: 40, height: 40 },
+  rowNameLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+  },
   rowName: {
     ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
     color: colors.textPrimary,
+  },
+  convoyLimitNotice: {
+    marginBottom: spacing.spacingMd,
   },
   rowSub: {
     ...textStyle("caption"),

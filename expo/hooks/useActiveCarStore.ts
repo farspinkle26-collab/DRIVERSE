@@ -2,6 +2,8 @@ import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { parseLimitRejection } from "@/lib/platinumLimits";
+import { usePlatinum } from "@/hooks/usePlatinumStore";
 
 const ACTIVE_CAR_KEY = "driveverse_active_car";
 
@@ -33,6 +35,7 @@ export interface GarageCar {
  * promotes it to the primary car in the database.
  */
 export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
+  const { limit, openPaywall } = usePlatinum();
   const [cars, setCars] = useState<GarageCar[]>([]);
   const [loadingCars, setLoadingCars] = useState(true);
   const [activeCarId, setActiveCarId] = useState<string | null>(null);
@@ -139,9 +142,22 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
       category?: CarCategory;
       drivetrain?: string;
       accel_0_100?: string;
-    }): Promise<{ id?: string; error?: string }> => {
+    }): Promise<{ id?: string; error?: string; limitReached?: boolean }> => {
       const uid = userIdRef.current;
       if (!uid) return { error: "You must be signed in" };
+
+      // Regular garages hold 2 cars; Platinum is uncapped. The paywall opens
+      // on the Garage benefit at the moment the third car is attempted,
+      // rather than the add button silently doing nothing.
+      const garageLimit = limit("garageCars");
+      if (garageLimit !== null && cars.length >= garageLimit) {
+        openPaywall("garage");
+        return {
+          error: `Regular garages hold ${garageLimit} cars. Go Platinum for unlimited slots.`,
+          limitReached: true,
+        };
+      }
+
       const { data, error } = await supabase
         .from("car_collections")
         .insert({
@@ -160,14 +176,24 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
         })
         .select("id")
         .single();
-      if (error) return { error: error.message };
+      if (error) {
+        // Database trigger caught what the local count missed.
+        const rejection = parseLimitRejection(error);
+        if (rejection) {
+          openPaywall(rejection.benefit);
+          await refreshCars();
+          return { error: rejection.message, limitReached: true };
+        }
+        return { error: error.message };
+      }
       await refreshCars();
       return { id: (data as { id: string } | null)?.id };
     },
-    [refreshCars]
+    [refreshCars, cars.length, limit, openPaywall]
   );
 
   const activeCar = cars.find((c) => c.id === activeCarId) ?? null;
+  const garageLimit = limit("garageCars");
 
   return {
     cars,
@@ -177,5 +203,9 @@ export const [ActiveCarProvider, useActiveCar] = createContextHook(() => {
     refreshCars,
     selectCar,
     addCar,
+    /** `null` when unlimited (Platinum). */
+    garageLimit,
+    /** True when adding another car would raise the paywall. */
+    atGarageLimit: garageLimit !== null && cars.length >= garageLimit,
   };
 });
