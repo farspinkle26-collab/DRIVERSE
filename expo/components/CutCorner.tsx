@@ -294,6 +294,12 @@ export interface CutCornerButtonProps
   corners?: CutCornerName | CutCornerName[];
   /** Rendered before the label. */
   icon?: React.ReactNode;
+  /**
+   * Rendered after the label. For the directional mark on a button that
+   * moves the user forward (a chevron on "enter the app"), which reads
+   * wrong on the leading edge.
+   */
+  trailingIcon?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }
@@ -312,6 +318,7 @@ export function CutCornerButton({
   size = "md",
   corners,
   icon,
+  trailingIcon,
   style,
   textStyle,
   disabled,
@@ -375,6 +382,7 @@ export function CutCornerButton({
         >
           {title.toUpperCase()}
         </Text>
+        {trailingIcon}
       </CutCornerSurface>
     </Pressable>
   );

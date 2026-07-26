@@ -1,32 +1,54 @@
+/**
+ * Driveverse — the garage gate ("Choose your ride").
+ *
+ * The screen that stands between opening the app and driving: a swipeable
+ * carousel of the driver's cars, a spec readout for the focused one, and a
+ * single primary action that promotes it and enters the app.
+ *
+ * Rebuilt on the Phase 1 token system (`constants/theme.ts`,
+ * `components/CutCorner.tsx`, Rajdhani / Inter / JetBrains Mono), following
+ * DRIVE_HUB_REFERENCE.md, MAP_SCREEN_REFERENCE.md and
+ * PROFILE_SCREEN_REFERENCE.md. Deviations are recorded in
+ * GARAGE_GATE_REFERENCE.md.
+ *
+ * This is a re-skin: `refreshCars` / `selectCar` / `addCar`, the garage-wide
+ * stats query, the snap-scroll maths and the four render states below the
+ * styling layer are the original.
+ *
+ * Anatomy, top to bottom:
+ *   header     YOUR GARAGE overline + Garage Stats link, title, welcome line
+ *   carousel   one cut-corner car card per ride — the screen's showcase
+ *   dots       one mark per card, active in racingRed
+ *   filter     All / Sport / JDM / Daily / EV, the shared `CutCornerChip`
+ *   stats      garage-wide readout strip
+ *   footer     DRIVE THE <car> (the single primary action) + Manage garage
+ */
+
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   StyleSheet,
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   Animated,
   Dimensions,
   ActivityIndicator,
   TextInput,
-  Platform,
   Image,
   Alert,
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import {
   Car,
   Gauge,
   Rocket,
   Grid2x2,
-  Crown,
   ChevronRight,
   Plus,
   LogIn,
   Sparkles,
-  TrendingUp,
   Trophy,
   Flag,
   Zap,
@@ -39,23 +61,64 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar, GarageCar, CarCategory } from "@/hooks/useActiveCarStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
+import {
+  CutCornerBadge,
+  CutCornerButton,
+  CutCornerChip,
+  CutCornerSurface,
+  chipContentColor,
+} from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import {
+  borderWidth,
+  colors,
+  cut,
+  fontFamily,
+  onRacingRed,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+/** Screen-edge gutter. The same 16 the Drive Hub, Map and profile use. */
+const SCREEN_MARGIN = spacing.spacingLg;
+
+/** Icon sizes. Three steps, per DRIVE_HUB_REFERENCE §6.5. */
+const ICON_SM = spacing.spacingMd; // 12 — overline rows and inline metadata
+const ICON_MD = spacing.spacingLg; // 16 — spec cells, chrome, list rows
+const ICON_LG = spacing.spacingXl; // 24 — empty-state marks
+
+/**
+ * The showcase glyph inside the photo circle, at the profile's featured-car
+ * size (PROFILE_SCREEN_REFERENCE §7). Not an icon in the 12/16/24 sense —
+ * it is standing in for a photograph.
+ */
+const CAR_GLYPH = 64;
+
+/** Carousel geometry. Unchanged from the original screen. */
 const CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.76);
-const SPACING = 16;
-const SNAP = CARD_WIDTH + SPACING;
+const CARD_GAP = spacing.spacingLg;
+const SNAP = CARD_WIDTH + CARD_GAP;
 const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 
-function hexToRgba(hex: string, alpha: number): string {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  if ([r, g, b].some(Number.isNaN)) return `rgba(255,107,53,${alpha})`;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
+/**
+ * A floor, not a fixed height: every card is at least this tall so the
+ * carousel keeps one baseline, and a card with drive data grows past it
+ * rather than clipping its own name. 400 = 4 × 100.
+ */
+const CARD_MIN_HEIGHT = 400;
+
+/** Circular photo mask. Round because it frames a photo, not by shape policy. */
+const PHOTO_SIZE = 140;
+
+/** Pagination marks: 4pt bars, not pills. Active is wider as well as red. */
+const DOT_HEIGHT = spacing.spacingXs;
+const DOT_WIDTH = spacing.spacingSm;
+const DOT_WIDTH_ACTIVE = spacing.spacingXl;
 
 // ─── One car hero card ─────────────────────────────────────
 function CarCard({
@@ -64,137 +127,175 @@ function CarCard({
   scrollX,
   onMenu,
   driveStats,
+  reducedMotion,
 }: {
   car: GarageCar;
   index: number;
   scrollX: Animated.Value;
   onMenu: (car: GarageCar) => void;
   driveStats?: CarDriveStats;
+  reducedMotion: boolean;
 }) {
   const inputRange = [(index - 1) * SNAP, index * SNAP, (index + 1) * SNAP];
+  // Scroll-linked, not timed: the card tracks the finger. Reduced motion
+  // switches it off entirely rather than shortening it.
   const scale = scrollX.interpolate({
     inputRange,
-    outputRange: [0.88, 1, 0.88],
+    outputRange: [0.92, 1, 0.92],
     extrapolate: "clamp",
   });
   const opacity = scrollX.interpolate({
     inputRange,
-    outputRange: [0.45, 1, 0.45],
-    extrapolate: "clamp",
-  });
-  const translateY = scrollX.interpolate({
-    inputRange,
-    outputRange: [24, 0, 24],
+    outputRange: [0.4, 1, 0.4],
     extrapolate: "clamp",
   });
 
   return (
     <Animated.View
-      style={[
-        styles.card,
-        { transform: [{ scale }, { translateY }], opacity },
-      ]}
+      style={
+        reducedMotion ? undefined : { transform: [{ scale }], opacity }
+      }
     >
-      <LinearGradient
-        colors={[hexToRgba(car.color, 0.28), "#12121C", "#0C0C14"]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.cardGradient}
+      <CutCornerSurface
+        fill={colors.carbonSurface}
+        borderColor={colors.hairline}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.md}
+        corners="topRight"
+        style={styles.card}
+        contentStyle={styles.cardContent}
       >
-        {/* Primary ribbon */}
-        {car.is_primary && (
-          <View style={[styles.ribbon, { backgroundColor: hexToRgba(car.color, 0.9) }]}>
-            <Crown size={12} color="#0A0A0F" />
-            <Text style={styles.ribbonText}>PRIMARY</Text>
-          </View>
-        )}
-
-        {/* Per-car quick menu */}
-        <TouchableOpacity
-          style={styles.menuBtn}
-          onPress={() => onMenu(car)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <MoreHorizontal size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-
-        {/* Car visual */}
-        <View style={styles.carVisual}>
-          <View style={[styles.carGlow, { backgroundColor: hexToRgba(car.color, 0.35) }]} />
-          {car.photo_url ? (
-            <Image source={{ uri: car.photo_url }} style={styles.carPhoto} resizeMode="cover" />
+        <View style={styles.cardChrome}>
+          {car.is_primary ? (
+            <CutCornerBadge label="Primary" solid corners="topRight" />
           ) : (
-            <Car size={132} color={car.color} strokeWidth={1.4} />
+            <View />
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Options for ${car.name}`}
+            onPress={() => onMenu(car)}
+            hitSlop={spacing.spacingSm}
+            style={({ pressed }) => [styles.menuBtn, pressed && styles.pressed]}
+          >
+            <MoreHorizontal
+              size={ICON_MD}
+              color={colors.textSecondary}
+              strokeWidth={ICON_STROKE}
+            />
+          </Pressable>
+        </View>
+
+        {/* Photo mask — circular because it frames a photograph. */}
+        <View style={styles.photo}>
+          {car.photo_url ? (
+            <Image
+              source={{ uri: car.photo_url }}
+              style={styles.photoImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <Car
+              size={CAR_GLYPH}
+              color={colors.textSecondary}
+              strokeWidth={ICON_STROKE}
+            />
           )}
         </View>
 
-        {/* Name + make */}
-        <Text style={styles.carName} numberOfLines={1}>{car.name}</Text>
-        <View style={styles.carMakeRow}>
-          <Text style={styles.carMake}>{car.make || "Custom"}</Text>
+        {/* Identity. The name is display type; make · year · plate is one
+            readout line, so the year and the plate are mono. */}
+        <Text style={styles.carName} numberOfLines={1}>
+          {car.name}
+        </Text>
+        <View style={styles.carMetaRow}>
+          <Text style={styles.carMake} numberOfLines={1}>
+            {car.make || "Custom"}
+          </Text>
           {car.year ? (
             <>
-              <View style={styles.dot} />
-              <Text style={styles.carMake}>{car.year}</Text>
+              <Text style={styles.carMetaSep}>·</Text>
+              <Text style={styles.carMono}>{car.year}</Text>
+            </>
+          ) : null}
+          {car.license_plate ? (
+            <>
+              <Text style={styles.carMetaSep}>·</Text>
+              <Text style={styles.carMono} numberOfLines={1}>
+                {car.license_plate}
+              </Text>
             </>
           ) : null}
         </View>
 
-        {/* Spec bar */}
+        {/* Spec readout. A utility surface inside a brand surface: the card
+            already spends the corner cut, so the strip is a plain rect. */}
         <View style={styles.specBar}>
-          <View style={styles.spec}>
-            <Gauge size={16} color={car.color} />
-            <Text style={styles.specValue}>{car.hp}</Text>
-            <Text style={styles.specLabel}>HP</Text>
-          </View>
+          <SpecCell icon={Gauge} value={String(car.hp)} label="HP" />
           <View style={styles.specDivider} />
-          <View style={styles.spec}>
-            <Rocket size={16} color={car.color} />
-            <Text style={styles.specValue}>{car.accel_0_100 || "—"}</Text>
-            <Text style={styles.specLabel}>0-100 km/h</Text>
-          </View>
+          <SpecCell icon={Rocket} value={car.accel_0_100 || "—"} label="0-100 km/h" />
           <View style={styles.specDivider} />
-          <View style={styles.spec}>
-            <Grid2x2 size={16} color={car.color} />
-            <Text style={styles.specValue}>{car.drivetrain || "—"}</Text>
-            <Text style={styles.specLabel}>Drivetrain</Text>
-          </View>
+          <SpecCell icon={Grid2x2} value={car.drivetrain || "—"} label="Drivetrain" />
         </View>
 
-        {/* Drive data — accumulated from every recorded trip in this car */}
-        {driveStats && driveStats.tripCount > 0 && (
-          <View style={styles.driveDataBar}>
-            <View style={styles.spec}>
-              <RouteIcon size={14} color={car.color} />
-              <Text style={styles.driveDataValue}>{formatDistance(driveStats.totalDistanceKm)}</Text>
-              <Text style={styles.specLabel}>km driven</Text>
-            </View>
-            <View style={styles.specDivider} />
-            <View style={styles.spec}>
-              <Hexagon size={14} color={car.color} />
-              <Text style={styles.driveDataValue}>{driveStats.totalXp.toLocaleString("en-US")}</Text>
-              <Text style={styles.specLabel}>XP gained</Text>
-            </View>
-            <View style={styles.specDivider} />
-            <View style={styles.spec}>
-              <Gauge size={14} color={car.color} />
-              <Text style={styles.driveDataValue}>{driveStats.avgSpeedKmh.toFixed(0)}</Text>
-              <Text style={styles.specLabel}>km/h avg</Text>
-            </View>
-          </View>
-        )}
-
-        {car.license_plate ? (
-          <View style={styles.plate}>
-            <Text style={styles.plateText}>{car.license_plate}</Text>
+        {/* Drive data — accumulated from every recorded trip in this car.
+            One caption line rather than a second strip: the spec bar is what
+            the card is for, and two strips made the card taller than the
+            viewport it has to share with the carousel and the CTA. */}
+        {driveStats && driveStats.tripCount > 0 ? (
+          <View style={styles.driveLine}>
+            <RouteIcon size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+            <Text style={styles.driveLineText} numberOfLines={1}>
+              <Text style={styles.driveLineValue}>
+                {formatDistance(driveStats.totalDistanceKm)}
+              </Text>
+              {" km · "}
+              <Text style={styles.driveLineValue}>
+                {driveStats.totalXp.toLocaleString("en-US")}
+              </Text>
+              {" XP · "}
+              <Text style={styles.driveLineValue}>
+                {driveStats.avgSpeedKmh.toFixed(0)}
+              </Text>
+              {" km/h avg"}
+            </Text>
           </View>
         ) : null}
-      </LinearGradient>
+      </CutCornerSurface>
     </Animated.View>
   );
 }
 
-const CATEGORY_FILTERS: { key: "all" | CarCategory; label: string; icon: React.FC<{ size: number; color: string }> }[] = [
+type IconCmp = React.ComponentType<{
+  size?: number;
+  color?: string;
+  strokeWidth?: number;
+}>;
+
+/** One column of a readout strip: icon label, mono value, caption label. */
+function SpecCell({
+  icon: Icon,
+  value,
+  label,
+}: {
+  icon: IconCmp;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.specCell}>
+      <Icon size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+      <Text style={styles.specValue} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.specLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+const CATEGORY_FILTERS: { key: "all" | CarCategory; label: string; icon: IconCmp }[] = [
   { key: "all", label: "All Cars", icon: Car },
   { key: "sport", label: "Sport", icon: Trophy },
   { key: "jdm", label: "JDM", icon: Flag },
@@ -209,6 +310,7 @@ function formatDistance(km: number): string {
 export default function SelectCarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
   const { isAuthenticated, loading: authLoading, user } = useAuth();
   const { cars, loadingCars, selectCar, addCar, activeCarId } = useActiveCar();
   const { totalXp } = useXP();
@@ -274,16 +376,6 @@ export default function SelectCarScreen() {
   const [newHp, setNewHp] = useState("300");
   const [addBusy, setAddBusy] = useState(false);
 
-  const heroGlow = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(heroGlow, { toValue: 1, duration: 2200, useNativeDriver: true }),
-        Animated.timing(heroGlow, { toValue: 0, duration: 2200, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [heroGlow]);
-
   // Scroll to the remembered / primary car once cars arrive
   useEffect(() => {
     if (!didInitialScroll.current && cars.length > 0) {
@@ -339,15 +431,12 @@ export default function SelectCarScreen() {
     }
   }, [newName, newMake, newHp, addCar]);
 
-  const activeColor = filteredCars[activeIndex]?.color ?? "#FF6B35";
-
   // ─── Loading ─────────────────────────────────────────────
   if (authLoading || (isAuthenticated && loadingCars && cars.length === 0)) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
         <View style={styles.center}>
-          <ActivityIndicator color="#FF6B35" size="large" />
+          <ActivityIndicator color={colors.racingRed} size="large" />
           <Text style={styles.loadingText}>Opening your garage…</Text>
         </View>
       </View>
@@ -358,24 +447,33 @@ export default function SelectCarScreen() {
   if (!isAuthenticated) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <View style={[styles.center, { paddingHorizontal: 32 }]}>
-          <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.guestIcon}>
-            <Car size={40} color="#FFFFFF" />
-          </LinearGradient>
-          <Text style={styles.guestTitle}>Enter Your Garage</Text>
-          <Text style={styles.guestSub}>
-            Sign in to pick your ride and unlock XP, routes, and your car collection.
+        <View style={[styles.center, styles.gate]}>
+          <View style={styles.gateMark}>
+            <Car size={ICON_LG} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+          </View>
+          <Text style={styles.gateTitle}>Enter your garage</Text>
+          <Text style={styles.gateBody}>
+            Picking a ride needs an account — it is what your XP, routes and car
+            collection hang off. Tap Sign In below, or keep looking around as a
+            guest.
           </Text>
-          <TouchableOpacity style={styles.guestPrimary} onPress={() => router.push("/login" as any)} activeOpacity={0.85}>
-            <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.guestPrimaryGrad}>
-              <LogIn size={18} color="#FFFFFF" />
-              <Text style={styles.guestPrimaryText}>Sign In</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.guestSecondary} onPress={enterApp} activeOpacity={0.7}>
-            <Text style={styles.guestSecondaryText}>Continue as Guest</Text>
-          </TouchableOpacity>
+          <CutCornerButton
+            title="Sign In"
+            variant="primary"
+            size="lg"
+            corners="topRight"
+            icon={<LogIn size={ICON_MD} color={onRacingRed} strokeWidth={ICON_STROKE} />}
+            onPress={() => router.push("/login" as any)}
+            style={styles.gateAction}
+          />
+          <Pressable
+            accessibilityRole="link"
+            onPress={enterApp}
+            hitSlop={spacing.spacingSm}
+            style={({ pressed }) => [styles.textLinkHit, pressed && styles.pressed]}
+          >
+            <Text style={styles.textLink}>Continue as guest</Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -385,62 +483,85 @@ export default function SelectCarScreen() {
   if (cars.length === 0) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-        <View style={[styles.emptyWrap, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 }]}>
-          <View style={styles.center}>
-            <View style={styles.emptyIcon}>
-              <Car size={48} color="#FF6B35" strokeWidth={1.5} />
+        <View
+          style={[
+            styles.emptyWrap,
+            { paddingTop: insets.top + spacing.spacingXxl, paddingBottom: insets.bottom + spacing.spacingXl },
+          ]}
+        >
+          <View style={[styles.center, styles.gateStack]}>
+            <View style={styles.gateMark}>
+              <Car size={ICON_LG} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
             </View>
-            <Text style={styles.guestTitle}>Build Your Garage</Text>
-            <Text style={styles.guestSub}>Add your first ride to hit the road in style.</Text>
+            <Text style={styles.gateTitle}>Build your garage</Text>
+            <Text style={styles.gateBody}>
+              There is nothing to pick from yet. Tap Add a Car below to put your
+              first ride in it.
+            </Text>
           </View>
 
           {showAdd ? (
             <View style={styles.addForm}>
               <TextInput
-                style={styles.addInput}
+                style={styles.input}
                 placeholder="Car name (e.g. Night Fury)"
-                placeholderTextColor="#5A5A6E"
+                placeholderTextColor={colors.textSecondary}
                 value={newName}
                 onChangeText={setNewName}
               />
-              <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={styles.addFormRow}>
                 <TextInput
-                  style={[styles.addInput, { flex: 1 }]}
+                  style={[styles.input, styles.inputFlex]}
                   placeholder="Make (e.g. BMW)"
-                  placeholderTextColor="#5A5A6E"
+                  placeholderTextColor={colors.textSecondary}
                   value={newMake}
                   onChangeText={setNewMake}
                 />
                 <TextInput
-                  style={[styles.addInput, { width: 100 }]}
+                  style={[styles.input, styles.inputHp, styles.inputNumeric]}
                   placeholder="HP"
-                  placeholderTextColor="#5A5A6E"
+                  placeholderTextColor={colors.textSecondary}
                   value={newHp}
                   onChangeText={setNewHp}
                   keyboardType="number-pad"
                 />
               </View>
-              <TouchableOpacity style={styles.cta} onPress={handleAddCar} disabled={addBusy || !newName.trim()} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
-                  {addBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.ctaText}>Add to Garage</Text>}
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowAdd(false)} style={styles.skipBtn}>
-                <Text style={styles.skipText}>Cancel</Text>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="Add to Garage"
+                variant="primary"
+                size="lg"
+                corners="topRight"
+                disabled={addBusy || !newName.trim()}
+                icon={addBusy ? <ActivityIndicator color={onRacingRed} /> : undefined}
+                onPress={handleAddCar}
+              />
+              <Pressable
+                accessibilityRole="link"
+                onPress={() => setShowAdd(false)}
+                hitSlop={spacing.spacingSm}
+                style={({ pressed }) => [styles.textLinkHit, pressed && styles.pressed]}
+              >
+                <Text style={styles.textLink}>Cancel</Text>
+              </Pressable>
             </View>
           ) : (
             <View style={styles.addForm}>
-              <TouchableOpacity style={styles.cta} onPress={() => setShowAdd(true)} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.ctaGrad}>
-                  <Plus size={18} color="#FFFFFF" />
-                  <Text style={styles.ctaText}>Add a Car</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={enterApp} style={styles.skipBtn}>
-                <Text style={styles.skipText}>Skip for now</Text>
-              </TouchableOpacity>
+              <CutCornerButton
+                title="Add a Car"
+                variant="primary"
+                size="lg"
+                corners="topRight"
+                icon={<Plus size={ICON_MD} color={onRacingRed} strokeWidth={ICON_STROKE} />}
+                onPress={() => setShowAdd(true)}
+              />
+              <Pressable
+                accessibilityRole="link"
+                onPress={enterApp}
+                hitSlop={spacing.spacingSm}
+                style={({ pressed }) => [styles.textLinkHit, pressed && styles.pressed]}
+              >
+                <Text style={styles.textLink}>Skip for now</Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -448,421 +569,420 @@ export default function SelectCarScreen() {
     );
   }
 
+  const focusedCar = filteredCars[activeIndex];
+
   // ─── Garage carousel ─────────────────────────────────────
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={StyleSheet.absoluteFill} />
-      {/* Color-tinted ambient glow behind the focused car */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.ambientGlow,
-          {
-            backgroundColor: hexToRgba(activeColor, 0.5),
-            opacity: heroGlow.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.32] }),
-          },
-        ]}
-      />
-
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.brandRow}>
-            <Sparkles size={14} color="#FF6B35" />
-            <Text style={styles.brandLabel}>YOUR GARAGE</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.statsBtn}
-            onPress={() => router.push("/(tabs)/profile" as any)}
-            activeOpacity={0.75}
-          >
-            <TrendingUp size={14} color="#FFFFFF" />
-            <Text style={styles.statsBtnText}>Garage Stats</Text>
-            <ChevronRight size={14} color="#8A8A9A" />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.title}>Choose your ride</Text>
-        <Text style={styles.subtitle}>
-          {user?.name ? `Welcome back, ${user.name.split(" ")[0]}. ` : ""}
-          Swipe to pick the car you're driving today.
-        </Text>
-      </View>
-
-      {/* Carousel */}
-      <View style={styles.carouselWrap}>
-        {filteredCars.length === 0 ? (
-          <View style={styles.center}>
-            <Text style={styles.emptyFilterText}>No cars in this category yet.</Text>
-          </View>
-        ) : (
-          <Animated.FlatList
-            ref={listRef}
-            data={filteredCars}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={SNAP}
-            decelerationRate="fast"
-            contentContainerStyle={{ paddingHorizontal: SIDE_PADDING }}
-            onScroll={onScroll}
-            scrollEventThrottle={16}
-            renderItem={({ item, index }) => (
-              <View style={{ width: CARD_WIDTH, marginRight: SPACING }}>
-                <CarCard
-                  car={item}
-                  index={index}
-                  scrollX={scrollX}
-                  onMenu={handleCarMenu}
-                  driveStats={statsByCarId[item.id]}
-                />
-              </View>
-            )}
-          />
-        )}
-      </View>
-
-      {/* Pagination */}
-      <View style={styles.dots}>
-        {filteredCars.map((c, i) => (
-          <View
-            key={c.id}
-            style={[
-              styles.dot2,
-              i === activeIndex && { backgroundColor: activeColor, width: 22 },
-            ]}
-          />
-        ))}
-      </View>
-
-      {/* Category filter */}
-      <View style={styles.categoryRow}>
-        {CATEGORY_FILTERS.map((cat) => {
-          const active = category === cat.key;
-          return (
-            <TouchableOpacity
-              key={cat.key}
-              style={[styles.categoryChip, active && styles.categoryChipActive]}
-              onPress={() => handleCategoryChange(cat.key)}
-              activeOpacity={0.75}
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: insets.top + spacing.spacingLg }]}>
+          <View style={styles.headerTopRow}>
+            <View style={styles.brandRow}>
+              <Sparkles size={ICON_SM} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+              <Text style={styles.brandLabel}>YOUR GARAGE</Text>
+            </View>
+            {/* Same link convention as the profile's "See All": red caption
+                text, no chrome. */}
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => router.push("/(tabs)/profile" as any)}
+              hitSlop={spacing.spacingSm}
+              style={({ pressed }) => pressed && styles.pressed}
             >
-              <cat.icon size={14} color={active ? "#FF6B35" : "#8A8A9A"} />
-              <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
-                {cat.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+              <Text style={styles.link}>Garage Stats</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.title}>Choose your ride</Text>
+          <Text style={styles.subtitle}>
+            {user?.name ? `Welcome back, ${user.name.split(" ")[0]}. ` : ""}
+            Swipe to pick the car you&apos;re driving today.
+          </Text>
+        </View>
 
-      {/* Garage-wide stats */}
-      <View style={styles.statsGrid}>
-        <View style={styles.statTile}>
-          <Car size={16} color="#8A8A9A" />
-          <Text style={styles.statValue}>{cars.length}</Text>
-          <Text style={styles.statLabel}>Cars Owned</Text>
+        {/* Carousel */}
+        <View style={styles.carouselWrap}>
+          {filteredCars.length === 0 ? (
+            <Text style={styles.emptyFilterText}>
+              No cars in this category yet. Pick All Cars to see the whole garage.
+            </Text>
+          ) : (
+            <Animated.FlatList
+              ref={listRef}
+              data={filteredCars}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={SNAP}
+              decelerationRate="fast"
+              contentContainerStyle={{ paddingHorizontal: SIDE_PADDING }}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              renderItem={({ item, index }) => (
+                <View style={styles.cardSlot}>
+                  <CarCard
+                    car={item}
+                    index={index}
+                    scrollX={scrollX}
+                    onMenu={handleCarMenu}
+                    driveStats={statsByCarId[item.id]}
+                    reducedMotion={reducedMotion}
+                  />
+                </View>
+              )}
+            />
+          )}
         </View>
-        <View style={styles.statTile}>
-          <RouteIcon size={16} color="#8A8A9A" />
-          <Text style={styles.statValue}>{driveStats.totalDrives}</Text>
-          <Text style={styles.statLabel}>Total Drives</Text>
+
+        {/* Pagination */}
+        {filteredCars.length > 1 ? (
+          <View style={styles.dots}>
+            {filteredCars.map((c, i) => (
+              <View key={c.id} style={[styles.dot, i === activeIndex && styles.dotActive]} />
+            ))}
+          </View>
+        ) : null}
+
+        {/* Category filter */}
+        <View style={styles.categoryRow}>
+          {CATEGORY_FILTERS.map((cat) => {
+            const active = category === cat.key;
+            return (
+              <CutCornerChip
+                key={cat.key}
+                label={cat.label}
+                active={active}
+                icon={
+                  <cat.icon
+                    size={ICON_SM}
+                    color={chipContentColor(active)}
+                    strokeWidth={ICON_STROKE}
+                  />
+                }
+                onPress={() => handleCategoryChange(cat.key)}
+              />
+            );
+          })}
         </View>
-        <View style={styles.statTile}>
-          <MapPin size={16} color="#8A8A9A" />
-          <Text style={styles.statValue}>{formatDistance(driveStats.totalDistanceKm)} km</Text>
-          <Text style={styles.statLabel}>Total Distance</Text>
+
+        {/* Garage-wide stats */}
+        <View style={styles.statsStrip}>
+          <SpecCell icon={Car} value={String(cars.length)} label="Cars owned" />
+          <View style={styles.specDivider} />
+          <SpecCell icon={RouteIcon} value={String(driveStats.totalDrives)} label="Total drives" />
+          <View style={styles.specDivider} />
+          <SpecCell
+            icon={MapPin}
+            value={formatDistance(driveStats.totalDistanceKm)}
+            label="km driven"
+          />
+          <View style={styles.specDivider} />
+          <SpecCell icon={Hexagon} value={totalXp.toLocaleString("en-US")} label="Garage XP" />
         </View>
-        <View style={styles.statTile}>
-          <Hexagon size={16} color="#8A8A9A" />
-          <Text style={styles.statValue}>{totalXp.toLocaleString("en-US")}</Text>
-          <Text style={styles.statLabel}>Garage XP</Text>
-        </View>
-      </View>
       </ScrollView>
 
-      {/* Footer actions */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
-        <TouchableOpacity
-          style={styles.cta}
+      {/* Footer actions — the screen's one primary action */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.spacingLg }]}>
+        <CutCornerButton
+          title={focusedCar ? `Drive the ${focusedCar.name}` : "Select a car"}
+          variant="primary"
+          size="lg"
+          corners="topRight"
+          disabled={entering || !focusedCar}
+          icon={entering ? <ActivityIndicator color={onRacingRed} /> : undefined}
+          trailingIcon={
+            entering ? undefined : (
+              <ChevronRight size={ICON_MD} color={onRacingRed} strokeWidth={ICON_STROKE} />
+            )
+          }
+          textStyle={styles.ctaLabel}
           onPress={handleEnter}
-          disabled={entering || !filteredCars[activeIndex]}
-          activeOpacity={0.85}
-        >
-          <LinearGradient
-            colors={[activeColor, "#FF3B6F"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.ctaGrad}
-          >
-            {entering ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Text style={styles.ctaText}>
-                  {filteredCars[activeIndex] ? `Drive the ${filteredCars[activeIndex].name}` : "Select a car"}
-                </Text>
-                <ChevronRight size={20} color="#FFFFFF" />
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+        />
 
-        <TouchableOpacity
-          style={styles.addGhost}
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="Manage garage"
           onPress={() => router.push("/(tabs)/profile" as any)}
-          activeOpacity={0.7}
+          hitSlop={spacing.spacingSm}
+          style={({ pressed }) => [styles.manageLink, pressed && styles.pressed]}
         >
-          <Plus size={16} color="#8A8A9A" />
-          <Text style={styles.addGhostText}>Manage garage</Text>
-        </TouchableOpacity>
+          <Plus size={ICON_MD} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+          <Text style={styles.manageLinkText}>Manage garage</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
+/** Overline: the app-wide small-caps label, per the profile's `OVERLINE`. */
+const OVERLINE = {
+  fontFamily: fontFamily.displaySemiBold,
+  fontSize: 11,
+  lineHeight: 14,
+  letterSpacing: 1,
+} as const;
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  loadingText: { color: "#8A8A9A", fontSize: 14, marginTop: 16, fontWeight: "600" },
-  ambientGlow: {
-    position: "absolute",
-    top: "18%",
-    alignSelf: "center",
-    width: SCREEN_WIDTH * 0.9,
-    height: SCREEN_WIDTH * 0.9,
-    borderRadius: SCREEN_WIDTH * 0.45,
+  pressed: { opacity: 0.7 },
+  loadingText: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+    marginTop: spacing.spacingLg,
   },
+
   // Header
   scrollArea: { flex: 1 },
-  scrollContent: { paddingBottom: 12 },
-  header: { paddingHorizontal: 24, paddingBottom: 8 },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  brandLabel: { fontSize: 12, fontWeight: "800", color: "#FF6B35", letterSpacing: 2 },
-  statsBtn: {
+  scrollContent: { paddingBottom: spacing.spacingLg },
+  header: { paddingHorizontal: SCREEN_MARGIN, gap: spacing.spacingXs },
+  headerTopRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    marginBottom: 8,
+    justifyContent: "space-between",
+    marginBottom: spacing.spacingSm,
   },
-  statsBtnText: { fontSize: 12, fontWeight: "700", color: "#FFFFFF" },
-  title: { fontSize: 30, fontWeight: "900", color: "#FFFFFF", letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: "#8A8A9A", marginTop: 6, lineHeight: 20 },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.spacingXs },
+  brandLabel: { ...OVERLINE, color: colors.racingRed },
+  link: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
+  },
+  title: {
+    ...textStyle("displayXl"),
+    color: colors.textPrimary,
+  },
+  subtitle: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+  },
+
   // Carousel
-  carouselWrap: { justifyContent: "center", paddingVertical: 12 },
-  emptyFilterText: { color: "#8A8A9A", fontSize: 14, paddingVertical: 40 },
-  card: {
-    height: Math.min(CARD_WIDTH * 1.28, 440),
-    borderRadius: 28,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+  carouselWrap: { paddingVertical: spacing.spacingLg },
+  cardSlot: { width: CARD_WIDTH, marginRight: CARD_GAP },
+  emptyFilterText: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+    paddingHorizontal: SCREEN_MARGIN,
+    paddingVertical: spacing.spacingXxl,
+    textAlign: "center",
   },
-  cardGradient: { flex: 1, padding: 22, alignItems: "center" },
-  ribbon: {
-    position: "absolute",
-    top: 16,
-    left: 16,
+  card: { minHeight: CARD_MIN_HEIGHT },
+  cardContent: {
+    flex: 1,
+    padding: spacing.spacingLg,
+    alignItems: "center",
+  },
+  cardChrome: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    alignSelf: "stretch",
+  },
+  menuBtn: {
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+  },
+
+  // Photo mask
+  photo: {
+    width: PHOTO_SIZE,
+    height: PHOTO_SIZE,
+    borderRadius: radius.circle,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    marginTop: spacing.spacingSm,
+    marginBottom: spacing.spacingMd,
+  },
+  photoImage: { width: "100%", height: "100%" },
+
+  // Identity
+  carName: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+    textAlign: "center",
+  },
+  carMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    zIndex: 2,
+    gap: spacing.spacingXs,
+    marginTop: spacing.spacingXs,
   },
-  ribbonText: { fontSize: 10, fontWeight: "900", color: "#0A0A0F", letterSpacing: 0.5 },
-  menuBtn: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 2,
+  carMake: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
-  carVisual: {
-    height: 170,
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-    marginBottom: 6,
+  carMetaSep: {
+    ...textStyle("caption"),
+    color: colors.hairline,
   },
-  carGlow: {
-    position: "absolute",
-    width: 190,
-    height: 190,
-    borderRadius: 95,
+  carMono: {
+    ...textStyle("caption", { fontFamily: fontFamily.dataRegular }),
+    color: colors.textSecondary,
   },
-  carPhoto: { width: "92%", height: 170, borderRadius: 18 },
-  carName: { fontSize: 24, fontWeight: "900", color: "#FFFFFF", marginTop: 4, textAlign: "center" },
-  carMakeRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  carMake: { fontSize: 14, color: "#B0B0BE", fontWeight: "600" },
-  dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: "#5A5A6E" },
+
+  // Readout strips
   specBar: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.3)",
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    marginTop: 20,
-    width: "100%",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    alignItems: "stretch",
+    alignSelf: "stretch",
+    marginTop: "auto",
+    paddingVertical: spacing.spacingMd,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
-  spec: { flex: 1, alignItems: "center", gap: 3 },
-  specDivider: { width: 1, height: 34, backgroundColor: "rgba(255,255,255,0.08)" },
-  specValue: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
-  specLabel: { fontSize: 10, color: "#8A8A9A", textTransform: "uppercase", letterSpacing: 0.5 },
-  colorDot: { width: 15, height: 15, borderRadius: 8, borderWidth: 2, borderColor: "rgba(255,255,255,0.25)" },
-  driveDataBar: {
+  driveLine: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
-    width: "100%",
-    paddingVertical: 8,
+    gap: spacing.spacingXs,
+    marginTop: spacing.spacingMd,
   },
-  driveDataValue: { fontSize: 14, fontWeight: "800", color: "#FFFFFF" },
-  plate: {
-    marginTop: 14,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+  driveLineText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
-  plateText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#CACAD5",
-    letterSpacing: 2,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  driveLineValue: {
+    ...textStyle("caption", { fontFamily: fontFamily.dataRegular }),
+    color: colors.textPrimary,
   },
-  // Dots
-  dots: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 18, marginBottom: 4 },
-  dot2: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.18)" },
-  // Category filter chips
+  specCell: {
+    flex: 1,
+    alignItems: "center",
+    gap: spacing.spacingXs,
+    paddingHorizontal: spacing.spacingXs,
+  },
+  specDivider: {
+    width: borderWidth.hairline,
+    marginVertical: spacing.spacingXs,
+    backgroundColor: colors.hairline,
+  },
+  specValue: {
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
+  },
+  specLabel: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+
+  // Pagination
+  dots: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: spacing.spacingXs,
+    marginBottom: spacing.spacingLg,
+  },
+  dot: {
+    width: DOT_WIDTH,
+    height: DOT_HEIGHT,
+    backgroundColor: colors.hairline,
+  },
+  dotActive: {
+    width: DOT_WIDTH_ACTIVE,
+    backgroundColor: colors.racingRed,
+  },
+
+  // Category filter
   categoryRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 24,
-    marginTop: 20,
+    gap: spacing.spacingSm,
+    paddingHorizontal: SCREEN_MARGIN,
+    marginBottom: spacing.spacingLg,
   },
-  categoryChip: {
+
+  // Garage-wide stats
+  statsStrip: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "stretch",
+    marginHorizontal: SCREEN_MARGIN,
+    paddingVertical: spacing.spacingMd,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
-  categoryChipActive: {
-    backgroundColor: "rgba(255,107,53,0.14)",
-    borderColor: "rgba(255,107,53,0.4)",
-  },
-  categoryChipText: { fontSize: 13, fontWeight: "600", color: "#8A8A9A" },
-  categoryChipTextActive: { color: "#FF6B35" },
-  // Garage-wide stats grid
-  statsGrid: {
-    flexDirection: "row",
-    paddingHorizontal: 8,
-    marginTop: 20,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    marginHorizontal: 24,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    paddingVertical: 16,
-  },
-  statTile: { flex: 1, alignItems: "center", gap: 4 },
-  statValue: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  statLabel: { fontSize: 10, color: "#8A8A9A", textAlign: "center" },
+
   // Footer
-  footer: { paddingHorizontal: 24, paddingTop: 12 },
-  cta: { borderRadius: 18, overflow: "hidden" },
-  ctaGrad: {
-    height: 58,
+  footer: {
+    paddingHorizontal: SCREEN_MARGIN,
+    paddingTop: spacing.spacingMd,
+    gap: spacing.spacingSm,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
+  },
+  ctaLabel: { flexShrink: 1 },
+  manageLink: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.spacingSm,
+    paddingVertical: spacing.spacingSm,
   },
-  ctaText: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
-  addGhost: {
-    flexDirection: "row",
+  manageLinkText: {
+    ...textStyle("body"),
+    color: colors.racingRed,
+  },
+
+  // Gate states (guest / empty garage)
+  gateStack: { gap: spacing.spacingMd },
+  gate: { paddingHorizontal: SCREEN_MARGIN, gap: spacing.spacingMd },
+  gateMark: {
+    width: spacing.spacingXxl + spacing.spacingXl,
+    height: spacing.spacingXxl + spacing.spacingXl,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    marginTop: 14,
-    paddingVertical: 8,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    marginBottom: spacing.spacingSm,
   },
-  addGhostText: { fontSize: 14, fontWeight: "600", color: "#8A8A9A" },
-  // Guest
-  guestIcon: {
-    width: 84,
-    height: 84,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 24,
+  gateTitle: {
+    ...textStyle("displayXl"),
+    color: colors.textPrimary,
+    textAlign: "center",
   },
-  guestTitle: { fontSize: 26, fontWeight: "900", color: "#FFFFFF", textAlign: "center" },
-  guestSub: { fontSize: 15, color: "#8A8A9A", textAlign: "center", lineHeight: 22, marginTop: 10 },
-  guestPrimary: { width: "100%", borderRadius: 16, overflow: "hidden", marginTop: 28 },
-  guestPrimaryGrad: {
-    height: 54,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
+  gateBody: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+    textAlign: "center",
   },
-  guestPrimaryText: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  guestSecondary: { marginTop: 14, paddingVertical: 10 },
-  guestSecondaryText: { fontSize: 15, fontWeight: "600", color: "#8A8A9A" },
+  gateAction: { alignSelf: "stretch", marginTop: spacing.spacingMd },
+  textLinkHit: { paddingVertical: spacing.spacingSm, alignSelf: "center" },
+  textLink: {
+    ...textStyle("body"),
+    color: colors.racingRed,
+  },
+
   // Empty garage
-  emptyWrap: { flex: 1, paddingHorizontal: 24 },
-  emptyIcon: {
-    width: 96,
-    height: 96,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,107,53,0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: "rgba(255,107,53,0.2)",
+  emptyWrap: { flex: 1, paddingHorizontal: SCREEN_MARGIN },
+  addForm: { gap: spacing.spacingMd },
+  addFormRow: { flexDirection: "row", gap: spacing.spacingSm },
+  input: {
+    ...textStyle("body"),
+    color: colors.textPrimary,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingMd,
   },
-  addForm: { gap: 10 },
-  addInput: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 50,
-    fontSize: 15,
-    color: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-  },
-  skipBtn: { alignItems: "center", paddingVertical: 10, marginTop: 2 },
-  skipText: { fontSize: 14, fontWeight: "600", color: "#8A8A9A" },
+  inputFlex: { flex: 1 },
+  inputHp: { width: 96 },
+  inputNumeric: { fontFamily: fontFamily.dataRegular },
 });
