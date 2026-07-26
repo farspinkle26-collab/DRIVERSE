@@ -25,7 +25,8 @@
           "location"
         ]
       },
-      "usesIcloudStorage": true
+      "usesIcloudStorage": true,
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -102,7 +103,8 @@
         {
           "iCloudContainerEnvironment": "Production"
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true
