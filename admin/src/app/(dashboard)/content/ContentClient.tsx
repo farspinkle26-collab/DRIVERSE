@@ -22,6 +22,7 @@ import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
 import { AddPostButton } from "@/components/AddPostButton";
 import { EditPostButton } from "@/components/EditPostButton";
+import { PostCheckedCheckbox } from "@/components/PostCheckedCheckbox";
 import { SERIES, AXIS, STATUS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
 import { fmtInt, fmtDate } from "@/lib/format";
 import { fmtAbsoluteWIB } from "@/lib/dates";
@@ -469,23 +470,29 @@ function UpcomingCard({ posts }: { posts: Post[] }) {
       {posts.length ? (
         <div className="space-y-2">
           {posts.map((p) => (
-            <Link
+            <div
               key={p.slug}
-              href={`/content/posts/${p.slug}`}
               className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm transition hover:bg-surface-2/70"
             >
-              <div className="flex items-center gap-2">
-                {p.frontmatter.pillar ? (
-                  <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
-                ) : (
-                  <span className="text-ink-muted">—</span>
-                )}
-                <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />
+              <div className="flex items-center gap-2.5">
+                <PostCheckedCheckbox post={p} />
+                <Link href={`/content/posts/${p.slug}`} className="flex items-center gap-2">
+                  {p.frontmatter.pillar ? (
+                    <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
+                  ) : (
+                    <span className="text-ink-muted">—</span>
+                  )}
+                  <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />
+                </Link>
               </div>
-              <span className="tabular text-xs text-ink-secondary" title={fmtAbsoluteWIB(`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`)}>
+              <Link
+                href={`/content/posts/${p.slug}`}
+                className="tabular text-xs text-ink-secondary"
+                title={fmtAbsoluteWIB(`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`)}
+              >
                 {fmtDate(p.frontmatter.date)} · {p.frontmatter.time}
-              </span>
-            </Link>
+              </Link>
+            </div>
           ))}
         </div>
       ) : (
@@ -499,6 +506,13 @@ function UpcomingCard({ posts }: { posts: Post[] }) {
 function usePostColumns(): Column<Post>[] {
   return useMemo(
     () => [
+      {
+        key: "checked",
+        header: "Done",
+        sortValue: (p) => (p.frontmatter.checked ? 1 : 0),
+        csvValue: (p) => (p.frontmatter.checked ? "yes" : "no"),
+        render: (p) => <PostCheckedCheckbox post={p} />,
+      },
       {
         key: "date",
         header: "Date",

@@ -90,6 +90,7 @@ export interface PostFrontmatter {
   source?: "posted" | "trip_card_share"; // Share Trip UGC vs our own posts
   pillar_fit_flag?: string; // set by the classifier when a post fits no pillar cleanly
   enriched_at?: string; // ISO timestamp of last enrichment run
+  checked?: boolean; // manual "done" tick in the posts table checklist column
   [key: string]: unknown; // tolerate unknown keys round-tripping through
 }
 
