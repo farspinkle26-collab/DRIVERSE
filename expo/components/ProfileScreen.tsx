@@ -70,6 +70,8 @@ import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
+import { CutCornerCard, CutCornerSurface } from "@/components/CutCorner";
+import { colors, fontFamily, onRacingRed, radius, spacing } from "@/constants/theme";
 
 function TripMiniMap({ trip }: { trip: TripItem }) {
   const { isDark } = useTheme();
@@ -726,7 +728,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   if (!isAuthenticated && isSelf) {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
         <View style={[styles.loginPrompt, { paddingTop: insets.top + 100 }]}>
           <LinearGradient colors={["#FF6B35", "#FF3B6F"]} style={styles.loginIcon}>
             <Car size={40} color="#FFFFFF" />
@@ -749,10 +750,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }
 
   const stats = [
-    { icon: Car, value: cars.length, label: "Cars", color: "#FF6B35" },
-    { icon: Users, value: acceptedFriends.length, label: "Friends", color: "#FF6B35" },
-    { icon: RouteIcon, value: trips.length, label: "Trips", color: "#FF6B35" },
-    { icon: Flame, value: streak, label: "Day Streak", color: "#FF6B35" },
+    { icon: Car, value: cars.length, label: "Cars" },
+    { icon: Users, value: acceptedFriends.length, label: "Friends" },
+    { icon: RouteIcon, value: trips.length, label: "Trips" },
+    { icon: Flame, value: streak, label: "Day Streak" },
   ];
 
   const TABS: { key: ProfileTab; label: string; icon: typeof Car; badge?: number }[] = [
@@ -763,25 +764,23 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
-
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 120, paddingTop: insets.top + 8 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.racingRed} />}
       >
         {/* ═══ TOP BAR: back (other) + bell + messages ═══ */}
         <View style={styles.topBar}>
           {!isSelf ? (
             <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} activeOpacity={0.7}>
-              <ArrowLeft size={20} color="#FFFFFF" />
+              <ArrowLeft size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           ) : (
             <View style={{ width: 42 }} />
           )}
           <View style={styles.topBarActions}>
             <TouchableOpacity style={styles.iconBtn} onPress={() => setNotifOpen(true)} activeOpacity={0.7}>
-              <Bell size={20} color="#FFFFFF" />
+              <Bell size={20} color={colors.textPrimary} />
               {notifCount > 0 && (
                 <View style={styles.iconBadge}>
                   <Text style={styles.iconBadgeText}>{notifCount}</Text>
@@ -789,7 +788,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               )}
             </TouchableOpacity>
             <TouchableOpacity style={styles.iconBtn} onPress={openMessages} activeOpacity={0.7}>
-              <MessageCircle size={20} color="#FFFFFF" />
+              <MessageCircle size={20} color={colors.textPrimary} />
               {unreadMessages > 0 && (
                 <View style={styles.iconBadge}>
                   <Text style={styles.iconBadgeText}>{unreadMessages}</Text>
@@ -807,17 +806,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             activeOpacity={isSelf ? 0.85 : 1}
             disabled={!isSelf || uploadingAvatar}
           >
-            <LinearGradient colors={["#FF6B35", "#FF8A50"]} style={styles.avatarRing}>
+            <View style={styles.avatarRing}>
               <View style={styles.avatarInner}>
                 {uploadingAvatar ? (
-                  <ActivityIndicator color="#FF6B35" />
+                  <ActivityIndicator color={colors.racingRed} />
                 ) : profileAvatar ? (
                   <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
                 ) : (
                   <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
                 )}
               </View>
-            </LinearGradient>
+            </View>
             <View style={styles.levelBadge}>
               <Text style={styles.levelBadgeText}>{level}</Text>
             </View>
@@ -833,7 +832,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   autoFocus
                   onBlur={saveName}
                   onSubmitEditing={saveName}
-                  placeholderTextColor="#5A5A6E"
+                  placeholderTextColor={colors.textSecondary}
                 />
               ) : (
                 <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
@@ -843,7 +842,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   onPress={() => { setNameDraft(profileName); setEditingName(true); }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Pencil size={15} color="#8A8A9A" />
+                  <Pencil size={15} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -859,11 +858,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     onBlur={saveCountry}
                     onSubmitEditing={saveCountry}
                     placeholder="Country"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                   />
                 ) : (
                   <View style={styles.countryChip}>
-                    <MapPin size={12} color="#8A8A9A" />
+                    <MapPin size={12} color={colors.textSecondary} />
                     <Text style={styles.countryChipText}>{user?.country || "Set your country"}</Text>
                   </View>
                 )}
@@ -872,14 +871,14 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     onPress={() => { setCountryDraft(user?.country ?? ""); setEditingCountry(true); }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Pencil size={13} color="#8A8A9A" />
+                    <Pencil size={13} color={colors.textSecondary} />
                   </TouchableOpacity>
                 )}
               </View>
             )}
             {primaryCar && (
               <View style={styles.drivingChip}>
-                <Car size={12} color="#FF6B35" />
+                <Car size={12} color={colors.textSecondary} />
                 <Text style={styles.drivingChipText} numberOfLines={1}>
                   Driving <Text style={styles.drivingChipCar}>{primaryCar.name}</Text>
                 </Text>
@@ -887,15 +886,26 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             )}
           </View>
 
-          {/* Current rank card */}
-          <TouchableOpacity style={styles.rankCard} activeOpacity={0.85} onPress={() => router.push("/ranks" as any)}>
-            <Text style={styles.rankCardLabel}>CURRENT RANK</Text>
-            <RankBadge rank={rank} size={54} />
-            <Text style={styles.rankCardName}>{rank.name}</Text>
-            <View style={styles.rankDivisionRow}>
-              <Info size={11} color="#5A5A6E" />
-            </View>
-          </TouchableOpacity>
+          {/* Current rank card — the viewer's rank right now (primary). */}
+          <CutCornerCard
+            style={styles.rankCard}
+            contentStyle={styles.rankCardContent}
+            cutSize={spacing.spacingMd}
+            corners="topRight"
+          >
+            <TouchableOpacity
+              style={styles.rankCardTouchable}
+              activeOpacity={0.85}
+              onPress={() => router.push("/ranks" as any)}
+            >
+              <Text style={styles.rankCardLabel}>CURRENT RANK</Text>
+              <RankBadge rank={rank} size={54} />
+              <Text style={styles.rankCardName}>{rank.name}</Text>
+              <View style={styles.rankDivisionRow}>
+                <Info size={11} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
+          </CutCornerCard>
         </View>
 
         {/* ═══ LEVEL / XP BAR ═══ */}
@@ -905,12 +915,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             <Text style={styles.xpValue}>{xpCurrentLevel} / {xpRequired} XP</Text>
           </View>
           <View style={styles.xpTrack}>
-            <LinearGradient
-              colors={["#FF6B35", "#FFD700"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={[styles.xpFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]}
-            />
+            <View style={[styles.xpFill, { width: `${Math.min(xpProgress * 100, 100)}%` }]} />
           </View>
           <Text style={styles.xpToNext}>{Math.max(xpRequired - xpCurrentLevel, 0)} XP to next level</Text>
         </View>
@@ -957,13 +962,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {/* ═══ STAT CARDS ═══ */}
         <View style={styles.statsRow}>
           {stats.map((s) => (
-            <View key={s.label} style={styles.statCard}>
-              <View style={styles.statIconCircle}>
-                <s.icon size={16} color={s.color} />
-              </View>
+            <CutCornerCard
+              key={s.label}
+              style={styles.statCard}
+              contentStyle={styles.statCardContent}
+              cutSize={spacing.spacingSm}
+              corners="topRight"
+            >
+              <s.icon size={18} color={colors.textSecondary} strokeWidth={1.75} />
               <Text style={styles.statValue}>{s.value}</Text>
               <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
+            </CutCornerCard>
           ))}
         </View>
 
@@ -972,15 +981,23 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           {TABS.map((tab) => (
             <TouchableOpacity
               key={tab.key}
-              style={[styles.contentTab, activeTab === tab.key && styles.contentTabActive]}
               onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.7}
+              style={styles.contentTabTouchable}
             >
-              <tab.icon size={15} color={activeTab === tab.key ? "#FF6B35" : "#5A5A6E"} />
-              <Text style={[styles.contentTabText, activeTab === tab.key && styles.contentTabTextActive]}>{tab.label}</Text>
-              {tab.badge ? (
-                <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{tab.badge}</Text></View>
-              ) : null}
+              <CutCornerSurface
+                fill={activeTab === tab.key ? colors.racingRed : colors.carbonSurface}
+                borderColor={activeTab === tab.key ? colors.racingRed : colors.hairline}
+                cutSize={spacing.spacingSm}
+                corners="topRight"
+                contentStyle={styles.contentTabContent}
+              >
+                <tab.icon size={15} color={activeTab === tab.key ? onRacingRed : colors.textSecondary} strokeWidth={1.75} />
+                <Text style={[styles.contentTabText, activeTab === tab.key && styles.contentTabTextActive]}>{tab.label}</Text>
+                {tab.badge ? (
+                  <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{tab.badge}</Text></View>
+                ) : null}
+              </CutCornerSurface>
             </TouchableOpacity>
           ))}
         </View>
@@ -989,7 +1006,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {activeTab === "garage" && (
           <View style={styles.section}>
             {loading ? (
-              <ActivityIndicator color="#FF6B35" style={{ marginTop: 20 }} />
+              <ActivityIndicator color={colors.racingRed} style={{ marginTop: 20 }} />
             ) : primaryCar ? (
               <FeaturedCar
                 car={primaryCar}
@@ -1000,7 +1017,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               />
             ) : (
               <View style={styles.emptyState}>
-                <Car size={40} color="#3A3A4E" />
+                <Car size={40} color={colors.hairline} strokeWidth={1.5} />
                 <Text style={styles.emptyText}>No cars yet</Text>
                 <Text style={styles.emptySub}>{isSelf ? "Add your first ride to the garage" : "This driver hasn't added a car"}</Text>
               </View>
@@ -1008,83 +1025,103 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
             {/* Secondary cars */}
             {otherCars.map((car) => (
-              <TouchableOpacity
+              <CutCornerCard
                 key={car.id}
                 style={styles.garageCard}
-                activeOpacity={0.8}
-                onLongPress={isSelf ? () => handleDeleteCar(car.id) : undefined}
+                contentStyle={styles.garageCardContent}
+                cutSize={spacing.spacingSm}
+                corners="topRight"
               >
-                <View style={[styles.carColorBar, { backgroundColor: car.color }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.carName}>{car.name}</Text>
-                  <View style={styles.carMeta}>
-                    <Text style={styles.carMetaText}>{car.make}</Text>
-                    <Text style={styles.carMetaDot}>•</Text>
-                    <Text style={styles.carMetaText}>{car.year}</Text>
-                    <Text style={styles.carMetaDot}>•</Text>
-                    <Text style={[styles.carMetaText, { color: car.color }]}>{car.hp} HP</Text>
+                <TouchableOpacity
+                  style={styles.garageCardTouchable}
+                  activeOpacity={0.8}
+                  onLongPress={isSelf ? () => handleDeleteCar(car.id) : undefined}
+                >
+                  <View style={[styles.carColorBar, { backgroundColor: colors.racingRed }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.carName}>{car.name}</Text>
+                    <View style={styles.carMeta}>
+                      <Text style={styles.carMetaText}>{car.make} · {car.year} · {car.hp} HP</Text>
+                    </View>
+                    <CarDriveDataRow stats={statsByCarId[car.id]} />
                   </View>
-                  <CarDriveDataRow stats={statsByCarId[car.id]} />
-                </View>
-                {isSelf && (
-                  <TouchableOpacity onPress={() => handleSetPrimary(car.id)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    {car.is_primary ? <CheckCircle2 size={18} color="#FF6B35" /> : <Circle size={18} color="#5A5A6E" />}
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
+                  {isSelf && (
+                    <TouchableOpacity onPress={() => handleSetPrimary(car.id)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      {car.is_primary ? <CheckCircle2 size={18} color={colors.racingRed} strokeWidth={1.75} /> : <Circle size={18} color={colors.textSecondary} strokeWidth={1.75} />}
+                    </TouchableOpacity>
+                  )}
+                </TouchableOpacity>
+              </CutCornerCard>
             ))}
 
             {/* Add a car (self only) */}
             {isSelf && (showAddCar ? (
               <View style={styles.addCarForm}>
-                <TextInput style={styles.addCarInput} placeholder="Car name (e.g. Night Fury)" placeholderTextColor="#5A5A6E" value={newCarName} onChangeText={setNewCarName} />
+                <TextInput style={styles.addCarInput} placeholder="Car name (e.g. Night Fury)" placeholderTextColor={colors.textSecondary} value={newCarName} onChangeText={setNewCarName} />
                 <View style={styles.addCarFormRow}>
-                  <TextInput style={[styles.addCarInput, { flex: 1 }]} placeholder="Make (e.g. BMW)" placeholderTextColor="#5A5A6E" value={newCarMake} onChangeText={setNewCarMake} />
-                  <TextInput style={[styles.addCarInput, { flex: 1, marginLeft: 8 }]} placeholder="Year" placeholderTextColor="#5A5A6E" value={newCarYear} onChangeText={setNewCarYear} keyboardType="number-pad" />
+                  <TextInput style={[styles.addCarInput, { flex: 1 }]} placeholder="Make (e.g. BMW)" placeholderTextColor={colors.textSecondary} value={newCarMake} onChangeText={setNewCarMake} />
+                  <TextInput style={[styles.addCarInput, { flex: 1, marginLeft: 8 }]} placeholder="Year" placeholderTextColor={colors.textSecondary} value={newCarYear} onChangeText={setNewCarYear} keyboardType="number-pad" />
                 </View>
-                <TextInput style={styles.addCarInput} placeholder="HP" placeholderTextColor="#5A5A6E" value={newCarHP} onChangeText={setNewCarHP} keyboardType="number-pad" />
+                <TextInput style={styles.addCarInput} placeholder="HP" placeholderTextColor={colors.textSecondary} value={newCarHP} onChangeText={setNewCarHP} keyboardType="number-pad" />
                 <View style={styles.addCarActions}>
                   <TouchableOpacity style={styles.addCarCancel} onPress={() => setShowAddCar(false)}><Text style={styles.addCarCancelText}>Cancel</Text></TouchableOpacity>
                   <TouchableOpacity style={styles.addCarSubmit} onPress={handleAddCar}><Text style={styles.addCarSubmitText}>Add Car</Text></TouchableOpacity>
                 </View>
               </View>
             ) : (
-              <TouchableOpacity style={styles.addCarButton} onPress={() => setShowAddCar(true)} activeOpacity={0.7}>
-                <View style={styles.addCarIcon}><Plus size={20} color="#FF6B35" /></View>
-                <Text style={styles.addCarText}>Add a car to your garage</Text>
-              </TouchableOpacity>
+              <CutCornerCard
+                style={styles.addCarButton}
+                contentStyle={styles.addCarButtonContent}
+                cutSize={spacing.spacingSm}
+                corners="topRight"
+                borderColor={colors.hairline}
+              >
+                <TouchableOpacity style={styles.addCarTouchable} onPress={() => setShowAddCar(true)} activeOpacity={0.7}>
+                  <Plus size={20} color={colors.racingRed} strokeWidth={1.75} />
+                  <Text style={styles.addCarText}>Add a car to your garage</Text>
+                </TouchableOpacity>
+              </CutCornerCard>
             ))}
 
-            {/* Rank progress card */}
-            <TouchableOpacity style={styles.seasonCard} activeOpacity={0.9} onPress={() => router.push("/ranks" as any)}>
-              <View style={styles.seasonBadgeWrap}>
-                <RankBadge rank={rank} size={54} />
-              </View>
-              <View style={styles.seasonMiddle}>
-                <Text style={styles.seasonLabel}>RANK PROGRESS</Text>
-                <Text style={styles.seasonName}>{rank.name}</Text>
-                <View style={styles.seasonTrack}>
-                  <LinearGradient colors={[rank.color, "#FFD700"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.seasonFill, { width: `${Math.min(rankProg.progress * 100, 100)}%` }]} />
+            {/* Rank progress card — secondary framing of the same rank shown
+                in the header's Current Rank card above; kept quieter (no
+                racingRed label, thinner emphasis) so the two don't compete. */}
+            <CutCornerCard
+              style={styles.seasonCard}
+              contentStyle={styles.seasonCardContent}
+              cutSize={spacing.spacingMd}
+              corners="topRight"
+            >
+              <TouchableOpacity style={styles.seasonTouchable} activeOpacity={0.9} onPress={() => router.push("/ranks" as any)}>
+                <View style={styles.seasonBadgeWrap}>
+                  <RankBadge rank={rank} size={54} />
                 </View>
-                <Text style={styles.seasonXp}>{rankProg.next ? `${rankProg.levelsToNext} levels to next rank` : "Top rank reached"}</Text>
-              </View>
-              <View style={styles.seasonDivider} />
-              <View style={styles.seasonNext}>
-                <Text style={styles.seasonNextLabel}>NEXT RANK</Text>
-                {rankProg.next && (
-                  <>
-                    <RankBadge rank={rankProg.next} size={30} />
-                    <Text style={styles.seasonNextName}>{rankProg.next.name}</Text>
-                    <Text style={styles.seasonNextXp}>Lv {rankProg.next.minLevel}</Text>
-                  </>
-                )}
-                <ChevronRight size={16} color="#5A5A6E" style={{ position: "absolute", right: 0, top: "50%" }} />
-              </View>
-            </TouchableOpacity>
+                <View style={styles.seasonMiddle}>
+                  <Text style={styles.seasonLabel}>RANK PROGRESS</Text>
+                  <Text style={styles.seasonName}>{rank.name}</Text>
+                  <View style={styles.seasonTrack}>
+                    <View style={[styles.seasonFill, { width: `${Math.min(rankProg.progress * 100, 100)}%` }]} />
+                  </View>
+                  <Text style={styles.seasonXp}>{rankProg.next ? `${rankProg.levelsToNext} levels to next rank` : "Top rank reached"}</Text>
+                </View>
+                <View style={styles.seasonDivider} />
+                <View style={styles.seasonNext}>
+                  <Text style={styles.seasonNextLabel}>NEXT RANK</Text>
+                  {rankProg.next && (
+                    <>
+                      <RankBadge rank={rankProg.next} size={30} />
+                      <Text style={styles.seasonNextName}>{rankProg.next.name}</Text>
+                      <Text style={styles.seasonNextXp}>Lv {rankProg.next.minLevel}</Text>
+                    </>
+                  )}
+                  <ChevronRight size={16} color={colors.textSecondary} style={{ position: "absolute", right: 0, top: "50%" }} />
+                </View>
+              </TouchableOpacity>
+            </CutCornerCard>
 
             {/* Live Feed + Inbox */}
             <View style={styles.feedRow}>
-              <View style={styles.feedCol}>
+              <CutCornerCard style={styles.feedCol} contentStyle={styles.feedColContent} cutSize={spacing.spacingSm} corners="topRight">
                 <View style={styles.feedHeader}>
                   <View style={styles.feedTitleRow}>
                     <View style={styles.liveDot} />
@@ -1094,8 +1131,8 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 </View>
                 {events.slice(0, 3).map((e) => (
                   <TouchableOpacity key={e.id} style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push("/(tabs)/map" as any)}>
-                    <View style={[styles.feedIcon, { backgroundColor: "rgba(139,92,246,0.15)" }]}>
-                      {e.is_live ? <Radio size={13} color="#8B5CF6" /> : <MapPin size={13} color="#8B5CF6" />}
+                    <View style={styles.feedIcon}>
+                      {e.is_live ? <Radio size={13} color={colors.textSecondary} strokeWidth={1.75} /> : <MapPin size={13} color={colors.textSecondary} strokeWidth={1.75} />}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.feedItemTitle} numberOfLines={1}>{e.title}</Text>
@@ -1106,10 +1143,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     <Text style={styles.feedTime}>{timeAgo(e.starts_at)}</Text>
                   </TouchableOpacity>
                 ))}
-                {events.length === 0 && <Text style={styles.feedEmpty}>No nearby activity</Text>}
-              </View>
+                {events.length === 0 && <Text style={styles.feedEmpty}>No nearby activity yet.</Text>}
+              </CutCornerCard>
 
-              <View style={styles.feedCol}>
+              <CutCornerCard style={styles.feedCol} contentStyle={styles.feedColContent} cutSize={spacing.spacingSm} corners="topRight">
                 <View style={styles.feedHeader}>
                   <Text style={styles.feedTitle}>INBOX</Text>
                   <View style={styles.feedHeaderRight}>
@@ -1119,7 +1156,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 </View>
                 {/* Reward notification */}
                 <TouchableOpacity style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
-                  <View style={[styles.feedIcon, { backgroundColor: "rgba(255,215,0,0.15)" }]}><Trophy size={13} color="#FFD700" /></View>
+                  <View style={styles.feedIcon}><Trophy size={13} color={colors.textSecondary} strokeWidth={1.75} /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.feedItemTitle} numberOfLines={1}>Rank Rewards</Text>
                     <Text style={styles.feedItemSub} numberOfLines={1}>You&apos;ve earned {totalXp} XP!</Text>
@@ -1129,7 +1166,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   const p = getFriendInfo(partnerId);
                   return (
                     <TouchableOpacity key={partnerId} style={styles.feedItem} activeOpacity={0.7} onPress={() => router.push(`/messages/${partnerId}` as any)}>
-                      <View style={[styles.feedIcon, { backgroundColor: "rgba(59,130,246,0.15)" }]}><MessageCircle size={13} color="#3B82F6" /></View>
+                      <View style={styles.feedIcon}><MessageCircle size={13} color={colors.textSecondary} strokeWidth={1.75} /></View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.feedItemTitle} numberOfLines={1}>{p.name}</Text>
                         <Text style={styles.feedItemSub} numberOfLines={1}>{last.sender_id === user?.id ? "You: " : ""}{last.content}</Text>
@@ -1139,7 +1176,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   );
                 })}
                 {messages.length === 0 && <Text style={styles.feedEmpty}>No messages yet</Text>}
-              </View>
+              </CutCornerCard>
             </View>
           </View>
         )}
@@ -1288,27 +1325,27 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           <View style={styles.settingsSection}>
             <Text style={styles.settingsTitle}>Settings</Text>
             <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/messages" as any)}>
-              <View style={styles.settingLeft}><MessageCircle size={18} color="#3B82F6" /><Text style={styles.settingText}>Messages</Text></View>
+              <View style={styles.settingLeft}><MessageCircle size={18} color={colors.textSecondary} strokeWidth={2} /><Text style={styles.settingText}>Messages</Text></View>
               <View style={styles.settingRight}>
                 {unreadMessages > 0 && <View style={styles.settingBadge}><Text style={styles.settingBadgeText}>{unreadMessages}</Text></View>}
-                <ChevronRight size={16} color="#5A5A6E" />
+                <ChevronRight size={16} color={colors.textSecondary} strokeWidth={2} />
               </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/convoy" as any)}>
-              <View style={styles.settingLeft}><Crown size={18} color="#FFD700" /><Text style={styles.settingText}>Convoy</Text></View>
-              <ChevronRight size={16} color="#5A5A6E" />
+              <View style={styles.settingLeft}><Crown size={18} color={colors.textSecondary} strokeWidth={2} /><Text style={styles.settingText}>Convoy</Text></View>
+              <ChevronRight size={16} color={colors.textSecondary} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/ranks" as any)}>
-              <View style={styles.settingLeft}><Trophy size={18} color="#FFD700" /><Text style={styles.settingText}>Levels & Ranks</Text></View>
-              <ChevronRight size={16} color="#5A5A6E" />
+              <View style={styles.settingLeft}><Trophy size={18} color={colors.textSecondary} strokeWidth={2} /><Text style={styles.settingText}>Levels & Ranks</Text></View>
+              <ChevronRight size={16} color={colors.textSecondary} strokeWidth={2} />
             </TouchableOpacity>
             <TouchableOpacity style={styles.settingRow} activeOpacity={0.7} onPress={() => router.push("/terms-and-conditions" as any)}>
-              <View style={styles.settingLeft}><Shield size={18} color="#8A8A9A" /><Text style={styles.settingText}>Privacy & Terms</Text></View>
-              <ChevronRight size={16} color="#5A5A6E" />
+              <View style={styles.settingLeft}><Shield size={18} color={colors.textSecondary} strokeWidth={2} /><Text style={styles.settingText}>Privacy & Terms</Text></View>
+              <ChevronRight size={16} color={colors.textSecondary} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.settingRow} activeOpacity={0.7}>
-              <View style={styles.settingLeft}><HelpCircle size={18} color="#8A8A9A" /><Text style={styles.settingText}>Help & Support</Text></View>
-              <ChevronRight size={16} color="#5A5A6E" />
+            <TouchableOpacity style={[styles.settingRow, styles.settingRowLast]} activeOpacity={0.7}>
+              <View style={styles.settingLeft}><HelpCircle size={18} color={colors.textSecondary} strokeWidth={2} /><Text style={styles.settingText}>Help & Support</Text></View>
+              <ChevronRight size={16} color={colors.textSecondary} strokeWidth={2} />
             </TouchableOpacity>
           </View>
         )}
@@ -1429,15 +1466,15 @@ function CarDriveDataRow({ stats }: { stats?: CarDriveStats }) {
   return (
     <View style={styles.driveDataRow}>
       <View style={styles.driveDataItem}>
-        <RouteIcon size={13} color="#FF6B35" />
+        <RouteIcon size={13} color={colors.textSecondary} strokeWidth={1.75} />
         <Text style={styles.driveDataText}>{Math.round(stats.totalDistanceKm).toLocaleString("en-US")} km</Text>
       </View>
       <View style={styles.driveDataItem}>
-        <Gauge size={13} color="#FF6B35" />
+        <Gauge size={13} color={colors.textSecondary} strokeWidth={1.75} />
         <Text style={styles.driveDataText}>{stats.avgSpeedKmh.toFixed(0)} km/h avg</Text>
       </View>
       <View style={styles.driveDataItem}>
-        <Trophy size={13} color="#FFD700" />
+        <Trophy size={13} color={colors.textSecondary} strokeWidth={1.75} />
         <Text style={styles.driveDataText}>{stats.totalXp.toLocaleString("en-US")} XP</Text>
       </View>
     </View>
@@ -1459,56 +1496,53 @@ function FeaturedCar({
 }) {
   const hasRender = !!car.photo_url;
   return (
-    <View style={styles.featuredCard}>
-      <LinearGradient colors={["#1A1206", "#0D0A08"]} style={styles.featuredBg}>
-        <View style={[styles.featuredAccent, { backgroundColor: car.color }]} />
-        <View style={styles.featuredTop}>
-          <View style={{ flex: 1 }}>
-            <View style={styles.featuredNameRow}>
-              <Text style={styles.featuredName} numberOfLines={1}>{car.name}</Text>
-              {hasRender && <Star size={15} color="#FFD700" fill="#FFD700" />}
-            </View>
-            <View style={styles.carMeta}>
-              <Text style={styles.carMetaText}>{car.make}</Text>
-              <Text style={styles.carMetaDot}>•</Text>
-              <Text style={styles.carMetaText}>{car.year}</Text>
-              <Text style={styles.carMetaDot}>•</Text>
-              <Text style={[styles.carMetaText, { color: "#FF6B35" }]}>{car.hp} HP</Text>
-            </View>
+    <CutCornerCard
+      style={styles.featuredCard}
+      contentStyle={styles.featuredBg}
+      cutSize={spacing.spacingMd}
+      corners="topRight"
+    >
+      <View style={styles.featuredAccent} />
+      <View style={styles.featuredTop}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.featuredNameRow}>
+            <Text style={styles.featuredName} numberOfLines={1}>{car.name}</Text>
+            {hasRender && <Star size={15} color={colors.racingRed} fill={colors.racingRed} />}
           </View>
-          {isSelf && (
-            <TouchableOpacity onPress={onDelete} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Trash2 size={16} color="#5A5A6E" />
+          <View style={styles.carMeta}>
+            <Text style={styles.carMetaText}>{car.make} · {car.year} · {car.hp} HP</Text>
+          </View>
+        </View>
+        {isSelf && (
+          <TouchableOpacity onPress={onDelete} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Trash2 size={16} color={colors.textSecondary} strokeWidth={1.75} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {hasRender ? (
+        <Image source={{ uri: car.photo_url as string }} style={styles.featuredImage} resizeMode="cover" />
+      ) : (
+        <View style={styles.featuredLocked}>
+          <View style={styles.featuredCarSilhouette}>
+            <Car size={64} color={colors.hairline} strokeWidth={1.5} />
+          </View>
+          <View style={styles.premiumLockPill}>
+            <Sparkles size={12} color={colors.racingRed} />
+            <Text style={styles.premiumLockText}>PREMIUM</Text>
+          </View>
+          {isSelf ? (
+            <TouchableOpacity style={styles.generateBtn} onPress={onGenerate} activeOpacity={0.85}>
+              <Sparkles size={15} color={onRacingRed} />
+              <Text style={styles.generateText}>Generate My Car</Text>
             </TouchableOpacity>
+          ) : (
+            <Text style={styles.featuredLockedNote}>Not generated yet</Text>
           )}
         </View>
-
-        {hasRender ? (
-          <Image source={{ uri: car.photo_url as string }} style={styles.featuredImage} resizeMode="cover" />
-        ) : (
-          <View style={styles.featuredLocked}>
-            <View style={styles.featuredCarSilhouette}>
-              <Car size={64} color="#2A2A38" />
-            </View>
-            <View style={styles.premiumLockPill}>
-              <Sparkles size={12} color="#FFD700" />
-              <Text style={styles.premiumLockText}>PREMIUM</Text>
-            </View>
-            {isSelf ? (
-              <TouchableOpacity style={styles.generateBtn} onPress={onGenerate} activeOpacity={0.85}>
-                <LinearGradient colors={["#FF6B35", "#FF3B6F"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.generateGrad}>
-                  <Sparkles size={15} color="#FFFFFF" />
-                  <Text style={styles.generateText}>Generate My Car</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            ) : (
-              <Text style={styles.featuredLockedNote}>Not generated yet</Text>
-            )}
-          </View>
-        )}
-        <CarDriveDataRow stats={driveStats} />
-      </LinearGradient>
-    </View>
+      )}
+      <CarDriveDataRow stats={driveStats} />
+    </CutCornerCard>
   );
 }
 
@@ -1527,8 +1561,7 @@ function inboxConversations(messages: MessageItem[], myId?: string): Array<[stri
 
 // ─── Styles ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#060609" },
-  bg: { ...StyleSheet.absoluteFillObject },
+  container: { flex: 1, backgroundColor: colors.voidBlack },
 
   // Login prompt
   loginPrompt: { flex: 1, alignItems: "center", paddingHorizontal: 32 },
@@ -1544,69 +1577,71 @@ const styles = StyleSheet.create({
   // Top bar
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 8 },
   topBarActions: { flexDirection: "row", gap: 10 },
-  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" },
-  iconBadge: { position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#060609" },
-  iconBadgeText: { fontSize: 10, fontWeight: "800", color: "#FFFFFF" },
+  iconBtn: { width: 42, height: 42, borderRadius: radius.circle, backgroundColor: colors.carbonSurface, borderWidth: 1, borderColor: colors.hairline, alignItems: "center", justifyContent: "center" },
+  iconBadge: { position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: radius.circle, backgroundColor: colors.racingRed, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.voidBlack },
+  iconBadgeText: { fontFamily: fontFamily.dataBold, fontSize: 10, color: onRacingRed },
 
   // Identity
   identityRow: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 16, gap: 12, marginBottom: 14 },
   avatarSection: { position: "relative" },
-  avatarRing: { width: 70, height: 70, borderRadius: 35, justifyContent: "center", alignItems: "center", padding: 3 },
-  avatarInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#0A0A0F", justifyContent: "center", alignItems: "center", overflow: "hidden" },
-  avatarLetter: { fontSize: 26, fontWeight: "800", color: "#FF6B35" },
-  avatarImage: { width: 64, height: 64, borderRadius: 32 },
-  levelBadge: { position: "absolute", bottom: -2, right: -2, minWidth: 24, height: 24, paddingHorizontal: 5, borderRadius: 12, backgroundColor: "#FFD700", justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: "#060609" },
-  levelBadgeText: { fontSize: 12, fontWeight: "800", color: "#000" },
+  avatarRing: { width: 70, height: 70, borderRadius: radius.circle, justifyContent: "center", alignItems: "center", padding: 3, backgroundColor: colors.racingRed },
+  avatarInner: { width: 64, height: 64, borderRadius: radius.circle, backgroundColor: colors.carbonSurface, justifyContent: "center", alignItems: "center", overflow: "hidden" },
+  avatarLetter: { fontFamily: fontFamily.displayBold, fontSize: 26, color: colors.racingRed },
+  avatarImage: { width: 64, height: 64, borderRadius: radius.circle },
+  levelBadge: { position: "absolute", bottom: -2, right: -2, minWidth: 24, height: 24, paddingHorizontal: 5, borderRadius: radius.circle, backgroundColor: colors.racingRed, justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: colors.voidBlack },
+  levelBadgeText: { fontFamily: fontFamily.dataBold, fontSize: 12, color: onRacingRed },
   identityInfo: { flex: 1, paddingTop: 6 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  userName: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", flexShrink: 1 },
-  nameInput: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
-  rankSubtitle: { fontSize: 14, color: "#FF6B35", fontWeight: "700", marginTop: 2 },
+  userName: { fontFamily: fontFamily.displayBold, fontSize: 22, color: colors.textPrimary, flexShrink: 1 },
+  nameInput: { fontFamily: fontFamily.displayBold, fontSize: 22, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.racingRed, flex: 1, paddingVertical: 0 },
+  rankSubtitle: { fontFamily: fontFamily.bodySemiBold, fontSize: 14, color: colors.racingRed, marginTop: 2 },
   countryChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: colors.carbonSurface,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: 8,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
     paddingHorizontal: 8,
     paddingVertical: 3,
     alignSelf: "flex-start",
   },
-  countryChipText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
-  countryInput: { fontSize: 13, fontWeight: "700", color: "#FFFFFF", borderBottomWidth: 1, borderBottomColor: "#FF6B35", flex: 1, paddingVertical: 0 },
+  countryChipText: { fontFamily: fontFamily.bodyMedium, fontSize: 12, color: colors.textSecondary },
+  countryInput: { fontFamily: fontFamily.bodySemiBold, fontSize: 13, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.racingRed, flex: 1, paddingVertical: 0 },
   drivingChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(255,107,53,0.1)",
+    backgroundColor: colors.carbonSurface,
     borderWidth: 1,
-    borderColor: "rgba(255,107,53,0.25)",
-    borderRadius: 8,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
     paddingHorizontal: 8,
     paddingVertical: 3,
     marginTop: 6,
     alignSelf: "flex-start",
   },
-  drivingChipText: { fontSize: 11, color: "#C9C9D4", fontWeight: "500" },
-  drivingChipCar: { color: "#FFFFFF", fontWeight: "700" },
+  drivingChipText: { fontFamily: fontFamily.bodyRegular, fontSize: 11, color: colors.textSecondary },
+  drivingChipCar: { fontFamily: fontFamily.bodySemiBold, color: colors.textPrimary },
 
-  // Current rank card
-  rankCard: { width: 108, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", alignItems: "center", paddingVertical: 10, paddingHorizontal: 6 },
-  rankCardLabel: { fontSize: 8, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.8, marginBottom: 4 },
-  rankCardName: { fontSize: 13, fontWeight: "800", color: "#FFFFFF", marginTop: 4 },
+  // Current rank card (header — primary framing of the viewer's rank)
+  rankCard: { width: 108 },
+  rankCardTouchable: { alignItems: "center", width: "100%" },
+  rankCardContent: { alignItems: "center", paddingVertical: 10, paddingHorizontal: 6 },
+  rankCardLabel: { fontFamily: fontFamily.displaySemiBold, fontSize: 10, color: colors.textSecondary, letterSpacing: 0.8, marginBottom: 4 },
+  rankCardName: { fontFamily: fontFamily.displayBold, fontSize: 13, color: colors.textPrimary, marginTop: 4 },
   rankDivisionRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  rankDivision: { fontSize: 9, fontWeight: "800", letterSpacing: 0.8 },
+  rankDivision: { fontFamily: fontFamily.displaySemiBold, fontSize: 9, letterSpacing: 0.8 },
 
   // XP block
   xpBlock: { paddingHorizontal: 16, marginBottom: 16 },
   xpRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  xpLevelLabel: { fontSize: 12, fontWeight: "800", color: "#B0B0BE", letterSpacing: 0.5 },
-  xpValue: { fontSize: 12, fontWeight: "700", color: "#8A8A9A" },
-  xpTrack: { height: 7, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
-  xpFill: { height: "100%", borderRadius: 4 },
-  xpToNext: { fontSize: 11, color: "#FF6B35", fontWeight: "700", marginTop: 6 },
+  xpLevelLabel: { fontFamily: fontFamily.dataBold, fontSize: 12, color: colors.textPrimary, letterSpacing: 0.5 },
+  xpValue: { fontFamily: fontFamily.dataMedium, fontSize: 12, color: colors.textSecondary },
+  xpTrack: { height: 7, borderRadius: radius.sharp, backgroundColor: colors.carbonSurface, overflow: "hidden" },
+  xpFill: { height: "100%", borderRadius: radius.sharp, backgroundColor: colors.racingRed },
+  xpToNext: { fontFamily: fontFamily.bodyRegular, fontSize: 11, color: colors.textSecondary, marginTop: 6 },
 
   // Friend action row
   friendActionRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 16 },
@@ -1621,43 +1656,43 @@ const styles = StyleSheet.create({
 
   // Stat cards
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 16 },
-  statCard: { flex: 1, alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  statIconCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.12)", alignItems: "center", justifyContent: "center", marginBottom: 6 },
-  statValue: { fontSize: 19, fontWeight: "800", color: "#FFFFFF" },
-  statLabel: { fontSize: 10, color: "#8A8A9A", marginTop: 1 },
+  statCard: { flex: 1 },
+  statCardContent: { alignItems: "center", paddingVertical: 12, gap: 6 },
+  statValue: { fontFamily: fontFamily.dataBold, fontSize: 19, color: colors.textPrimary },
+  statLabel: { fontFamily: fontFamily.bodyRegular, fontSize: 10, color: colors.textSecondary },
 
   // Content tabs
   contentTabs: { flexDirection: "row", gap: 6, paddingHorizontal: 16, marginBottom: 12 },
-  contentTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.03)" },
-  contentTabActive: { backgroundColor: "rgba(255,107,53,0.14)", borderWidth: 1, borderColor: "rgba(255,107,53,0.3)" },
-  contentTabText: { fontSize: 12, fontWeight: "700", color: "#5A5A6E" },
-  contentTabTextActive: { color: "#FF6B35" },
-  tabBadge: { minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
-  tabBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
+  contentTabTouchable: { flex: 1 },
+  contentTabContent: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10 },
+  contentTabText: { fontFamily: fontFamily.displaySemiBold, fontSize: 12, color: colors.textSecondary },
+  contentTabTextActive: { color: onRacingRed },
+  tabBadge: { minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: radius.circle, backgroundColor: colors.voidBlack, alignItems: "center", justifyContent: "center" },
+  tabBadgeText: { fontFamily: fontFamily.dataBold, fontSize: 9, color: colors.racingRed },
 
   section: { paddingHorizontal: 16 },
 
   // Empty states
   emptyState: { alignItems: "center", paddingVertical: 40 },
-  emptyText: { fontSize: 16, fontWeight: "700", color: "#8A8A9A", marginTop: 12 },
-  emptySub: { fontSize: 13, color: "#5A5A6E", textAlign: "center", marginTop: 6 },
+  emptyText: { fontFamily: fontFamily.bodySemiBold, fontSize: 16, color: colors.textSecondary, marginTop: 12 },
+  emptySub: { fontFamily: fontFamily.bodyRegular, fontSize: 13, color: colors.textSecondary, textAlign: "center", marginTop: 6 },
 
   // Featured car
-  featuredCard: { borderRadius: 20, overflow: "hidden", marginBottom: 12, borderWidth: 1, borderColor: "rgba(255,107,53,0.25)" },
+  featuredCard: { marginBottom: 12 },
   featuredBg: { padding: 16 },
-  featuredAccent: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  featuredAccent: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4, backgroundColor: colors.racingRed },
   featuredTop: { flexDirection: "row", alignItems: "flex-start", marginBottom: 12 },
   featuredNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  featuredName: { fontSize: 20, fontWeight: "800", color: "#FFFFFF" },
-  featuredImage: { width: "100%", height: 170, borderRadius: 14, backgroundColor: "#000" },
-  featuredLocked: { height: 170, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  featuredName: { fontFamily: fontFamily.displayBold, fontSize: 20, color: colors.textPrimary },
+  featuredImage: { width: "100%", height: 170, borderRadius: radius.sharp, backgroundColor: colors.voidBlack },
+  featuredLocked: { height: 170, borderRadius: radius.sharp, backgroundColor: colors.voidBlack, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   featuredCarSilhouette: { position: "absolute", opacity: 0.5 },
-  premiumLockPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,215,0,0.4)", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 14 },
-  premiumLockText: { fontSize: 10, fontWeight: "800", color: "#FFD700", letterSpacing: 1 },
-  generateBtn: { borderRadius: 12, overflow: "hidden" },
+  premiumLockPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.carbonSurface, borderWidth: 1, borderColor: colors.hairline, borderRadius: radius.sharp, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 14 },
+  premiumLockText: { fontFamily: fontFamily.displaySemiBold, fontSize: 10, color: colors.racingRed, letterSpacing: 1 },
+  generateBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 18, height: 44, borderRadius: radius.sharp, backgroundColor: colors.racingRed },
   generateGrad: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, height: 44 },
-  generateText: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
-  featuredLockedNote: { fontSize: 13, color: "#5A5A6E", fontWeight: "600" },
+  generateText: { fontFamily: fontFamily.bodySemiBold, fontSize: 14, color: onRacingRed },
+  featuredLockedNote: { fontFamily: fontFamily.bodyMedium, fontSize: 13, color: colors.textSecondary },
 
   // Per-car drive data (distance / avg speed / XP earned in this car)
   driveDataRow: {
@@ -1667,64 +1702,70 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.08)",
+    borderTopColor: colors.hairline,
   },
   driveDataItem: { flexDirection: "row", alignItems: "center", gap: 5 },
-  driveDataText: { fontSize: 12, fontWeight: "700", color: "#CACAD5" },
+  driveDataText: { fontFamily: fontFamily.dataMedium, fontSize: 12, color: colors.textSecondary },
 
   // Garage secondary cards
-  garageCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
-  carColorBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
-  carName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  garageCard: { marginBottom: 10 },
+  garageCardContent: { padding: 14, overflow: "hidden" },
+  garageCardTouchable: { flexDirection: "row", alignItems: "center" },
+  carColorBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 3 },
+  carName: { fontFamily: fontFamily.displaySemiBold, fontSize: 15, color: colors.textPrimary },
   carMeta: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
-  carMetaText: { fontSize: 12, color: "#8A8A9A", fontWeight: "600" },
-  carMetaDot: { fontSize: 12, color: "#3A3A4E" },
+  carMetaText: { fontFamily: fontFamily.dataRegular, fontSize: 12, color: colors.textSecondary },
+  carMetaDot: { fontSize: 12, color: colors.textSecondary },
 
   // Add car
-  addCarButton: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", borderStyle: "dashed", marginBottom: 16 },
-  addCarIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,107,53,0.14)", alignItems: "center", justifyContent: "center" },
-  addCarText: { fontSize: 14, color: "#8A8A9A", fontWeight: "600" },
-  addCarForm: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 16, gap: 10 },
+  addCarButton: { marginBottom: 16 },
+  addCarButtonContent: { padding: 14 },
+  addCarTouchable: { flexDirection: "row", alignItems: "center", gap: 12 },
+  addCarText: { fontFamily: fontFamily.bodyMedium, fontSize: 14, color: colors.textSecondary },
+  addCarForm: { backgroundColor: colors.carbonSurface, borderRadius: radius.sharp, borderWidth: 1, borderColor: colors.hairline, padding: 14, marginBottom: 16, gap: 10 },
   addCarFormRow: { flexDirection: "row" },
-  addCarInput: { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: "#FFFFFF", fontSize: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  addCarInput: { backgroundColor: colors.voidBlack, borderRadius: radius.sharp, paddingHorizontal: 12, paddingVertical: 10, color: colors.textPrimary, fontFamily: fontFamily.bodyRegular, fontSize: 14, borderWidth: 1, borderColor: colors.hairline },
   addCarActions: { flexDirection: "row", gap: 10, marginTop: 2 },
-  addCarCancel: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)" },
-  addCarCancelText: { color: "#8A8A9A", fontWeight: "700" },
-  addCarSubmit: { flex: 1, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#FF6B35" },
-  addCarSubmitText: { color: "#FFFFFF", fontWeight: "700" },
+  addCarCancel: { flex: 1, height: 44, borderRadius: radius.sharp, alignItems: "center", justifyContent: "center", backgroundColor: colors.voidBlack, borderWidth: 1, borderColor: colors.hairline },
+  addCarCancelText: { fontFamily: fontFamily.bodySemiBold, color: colors.textSecondary },
+  addCarSubmit: { flex: 1, height: 44, borderRadius: radius.sharp, alignItems: "center", justifyContent: "center", backgroundColor: colors.racingRed },
+  addCarSubmitText: { fontFamily: fontFamily.bodySemiBold, color: onRacingRed },
 
-  // Rank progress card
-  seasonCard: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 18, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  // Rank progress card (secondary — see comment at usage site)
+  seasonCard: { marginBottom: 16 },
+  seasonCardContent: { padding: 14 },
+  seasonTouchable: { flexDirection: "row", alignItems: "center" },
   seasonBadgeWrap: { marginRight: 12 },
   seasonMiddle: { flex: 1 },
-  seasonLabel: { fontSize: 10, fontWeight: "800", color: "#FF6B35", letterSpacing: 1 },
-  seasonName: { fontSize: 17, fontWeight: "800", color: "#FFFFFF", marginTop: 2, marginBottom: 8 },
-  seasonTrack: { height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", overflow: "hidden" },
-  seasonFill: { height: "100%", borderRadius: 3 },
-  seasonXp: { fontSize: 11, color: "#8A8A9A", fontWeight: "700", marginTop: 6 },
-  seasonDivider: { width: 1, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.08)", marginHorizontal: 12 },
+  seasonLabel: { fontFamily: fontFamily.displaySemiBold, fontSize: 10, color: colors.textSecondary, letterSpacing: 1 },
+  seasonName: { fontFamily: fontFamily.displayBold, fontSize: 17, color: colors.textPrimary, marginTop: 2, marginBottom: 8 },
+  seasonTrack: { height: 6, borderRadius: radius.sharp, backgroundColor: colors.carbonSurface, overflow: "hidden" },
+  seasonFill: { height: "100%", borderRadius: radius.sharp, backgroundColor: colors.racingRed },
+  seasonXp: { fontFamily: fontFamily.bodyRegular, fontSize: 11, color: colors.textSecondary, marginTop: 6 },
+  seasonDivider: { width: 1, alignSelf: "stretch", backgroundColor: colors.hairline, marginHorizontal: 12 },
   seasonNext: { width: 88, alignItems: "center", justifyContent: "center" },
-  seasonNextLabel: { fontSize: 8, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.6, marginBottom: 4 },
-  seasonNextName: { fontSize: 12, fontWeight: "800", color: "#FFFFFF", marginTop: 3 },
-  seasonNextXp: { fontSize: 10, color: "#3B82F6", fontWeight: "700", marginTop: 1 },
+  seasonNextLabel: { fontFamily: fontFamily.displaySemiBold, fontSize: 8, color: colors.textSecondary, letterSpacing: 0.6, marginBottom: 4 },
+  seasonNextName: { fontFamily: fontFamily.displayBold, fontSize: 12, color: colors.textPrimary, marginTop: 3 },
+  seasonNextXp: { fontFamily: fontFamily.dataMedium, fontSize: 10, color: colors.textSecondary, marginTop: 1 },
 
   // Live feed + inbox
   feedRow: { flexDirection: "row", gap: 10, marginBottom: 8 },
-  feedCol: { flex: 1, backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 16, padding: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  feedCol: { flex: 1 },
+  feedColContent: { padding: 12 },
   feedHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   feedTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#22C55E" },
-  feedTitle: { fontSize: 10, fontWeight: "800", color: "#B0B0BE", letterSpacing: 0.5 },
+  liveDot: { width: 7, height: 7, borderRadius: radius.circle, backgroundColor: "#22C55E" },
+  feedTitle: { fontFamily: fontFamily.displaySemiBold, fontSize: 10, color: colors.textSecondary, letterSpacing: 0.5 },
   feedHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
-  feedHeaderBadge: { minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center" },
-  feedHeaderBadgeText: { fontSize: 9, fontWeight: "800", color: "#FFFFFF" },
-  feedSeeAll: { fontSize: 10, fontWeight: "700", color: "#FF6B35" },
+  feedHeaderBadge: { minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: radius.circle, backgroundColor: colors.racingRed, alignItems: "center", justifyContent: "center" },
+  feedHeaderBadgeText: { fontFamily: fontFamily.dataBold, fontSize: 9, color: onRacingRed },
+  feedSeeAll: { fontFamily: fontFamily.bodySemiBold, fontSize: 10, color: colors.racingRed },
   feedItem: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
-  feedIcon: { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  feedItemTitle: { fontSize: 11, fontWeight: "700", color: "#FFFFFF" },
-  feedItemSub: { fontSize: 10, color: "#8A8A9A", marginTop: 1 },
-  feedTime: { fontSize: 9, color: "#5A5A6E", fontWeight: "600" },
-  feedEmpty: { fontSize: 11, color: "#5A5A6E", textAlign: "center", paddingVertical: 12 },
+  feedIcon: { width: 26, height: 26, borderRadius: radius.circle, backgroundColor: colors.carbonSurface, borderWidth: 1, borderColor: colors.hairline, alignItems: "center", justifyContent: "center" },
+  feedItemTitle: { fontFamily: fontFamily.bodySemiBold, fontSize: 11, color: colors.textPrimary },
+  feedItemSub: { fontFamily: fontFamily.bodyRegular, fontSize: 10, color: colors.textSecondary, marginTop: 1 },
+  feedTime: { fontFamily: fontFamily.dataRegular, fontSize: 9, color: colors.textSecondary },
+  feedEmpty: { fontFamily: fontFamily.bodyRegular, fontSize: 11, color: colors.textSecondary, textAlign: "center", paddingVertical: 12 },
 
   // Trips
   tripCard: { backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
@@ -1773,13 +1814,14 @@ const styles = StyleSheet.create({
 
   // Settings
   settingsSection: { paddingHorizontal: 16, marginTop: 20 },
-  settingsTitle: { fontSize: 13, fontWeight: "800", color: "#8A8A9A", letterSpacing: 0.5, marginBottom: 12, textTransform: "uppercase" },
-  settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  settingsTitle: { fontFamily: fontFamily.displaySemiBold, fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5, marginBottom: 4, textTransform: "uppercase" },
+  settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.hairline },
+  settingRowLast: { borderBottomWidth: 0 },
   settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
   settingRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  settingText: { fontSize: 15, color: "#FFFFFF", fontWeight: "600" },
-  settingBadge: { minWidth: 20, height: 20, borderRadius: 10, backgroundColor: "#FF3B6F", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
-  settingBadgeText: { fontSize: 11, fontWeight: "800", color: "#FFFFFF" },
+  settingText: { fontFamily: fontFamily.bodyRegular, fontSize: 15, color: colors.textPrimary },
+  settingBadge: { minWidth: 20, height: 20, borderRadius: radius.circle, backgroundColor: colors.racingRed, alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
+  settingBadgeText: { fontFamily: fontFamily.dataBold, fontSize: 11, color: onRacingRed },
 
   // Modals
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)" },

@@ -1,5 +1,6 @@
 import React from 'react';
-import Svg, { Path, Circle, Rect, Defs, LinearGradient, Stop, G } from 'react-native-svg';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import { onRacingRed } from '../constants/theme';
 
 interface IconProps {
   color: string;
@@ -7,18 +8,13 @@ interface IconProps {
   filled?: boolean;
 }
 
-// Map icon — styled compass/map pin
+// Map icon — styled compass/map pin. `filled` (active tab) is a flat
+// racingRed fill — no gradients in this design system.
 export const MapIcon = ({ color, size = 24, filled = false }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Defs>
-      <LinearGradient id="mapGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF6B35" />
-        <Stop offset="100%" stopColor="#FF8A50" />
-      </LinearGradient>
-    </Defs>
     <Path
       d="M12 2L3 9V20L12 16L21 20V9L12 2Z"
-      fill={filled ? "url(#mapGrad)" : "none"}
+      fill={filled ? color : "none"}
       stroke={filled ? "none" : color}
       strokeWidth={2}
       strokeLinecap="round"
@@ -28,7 +24,7 @@ export const MapIcon = ({ color, size = 24, filled = false }: IconProps) => (
       cx={12}
       cy={11}
       r={3}
-      fill={filled ? "#FFFFFF" : "none"}
+      fill={filled ? onRacingRed : "none"}
       stroke={filled ? "none" : color}
       strokeWidth={2}
     />
@@ -38,23 +34,17 @@ export const MapIcon = ({ color, size = 24, filled = false }: IconProps) => (
 // Drive icon — steering wheel / racing
 export const DriveIcon = ({ color, size = 24, filled = false }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Defs>
-      <LinearGradient id="driveGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF6B35" />
-        <Stop offset="100%" stopColor="#FF3B6F" />
-      </LinearGradient>
-    </Defs>
     <Circle
       cx={12}
       cy={12}
       r={10}
-      fill={filled ? "url(#driveGrad)" : "none"}
+      fill={filled ? color : "none"}
       stroke={filled ? "none" : color}
       strokeWidth={2}
     />
     <Path
       d="M12 2V7M12 17V22M2 12H7M17 12H22"
-      stroke={filled ? "#FFFFFF" : color}
+      stroke={filled ? onRacingRed : color}
       strokeWidth={2}
       strokeLinecap="round"
       opacity={0.6}
@@ -63,27 +53,22 @@ export const DriveIcon = ({ color, size = 24, filled = false }: IconProps) => (
       cx={12}
       cy={12}
       r={3}
-      fill={filled ? "#FFFFFF" : color}
+      fill={filled ? onRacingRed : color}
       stroke={filled ? "none" : color}
       strokeWidth={1.5}
     />
   </Svg>
 );
 
-// Profile icon — person with racing helmet style
+// Profile icon — person with racing helmet style. Active state renders as
+// a filled racingRed circle per the Driveverse bottom nav spec.
 export const ProfileIcon = ({ color, size = 24, filled = false }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Defs>
-      <LinearGradient id="profileGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <Stop offset="0%" stopColor="#FF6B35" />
-        <Stop offset="100%" stopColor="#FF8A50" />
-      </LinearGradient>
-    </Defs>
     <Circle
       cx={12}
       cy={12}
       r={10}
-      fill={filled ? "url(#profileGrad)" : "none"}
+      fill={filled ? color : "none"}
       stroke={filled ? "none" : color}
       strokeWidth={2}
     />
@@ -91,13 +76,13 @@ export const ProfileIcon = ({ color, size = 24, filled = false }: IconProps) => 
       cx={12}
       cy={9}
       r={3}
-      fill={filled ? "#FFFFFF" : "none"}
+      fill={filled ? onRacingRed : "none"}
       stroke={filled ? "none" : color}
       strokeWidth={2}
     />
     <Path
       d="M5.5 20C6.5 17.5 9 16 12 16C15 16 17.5 17.5 18.5 20"
-      stroke={filled ? "#FFFFFF" : color}
+      stroke={filled ? onRacingRed : color}
       strokeWidth={2}
       strokeLinecap="round"
     />

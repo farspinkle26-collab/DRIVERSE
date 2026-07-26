@@ -5,6 +5,7 @@ import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { MapIcon, DriveIcon, ProfileIcon } from "../../components/TabIcons";
+import { alpha, colors } from "../../constants/theme";
 
 type TabKey = "map" | "drive" | "profile";
 
@@ -55,7 +56,7 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
             >
               <IconComponent
                 size={22}
-                color={isActive ? "#FF6B35" : "#5A5A6E"}
+                color={isActive ? colors.racingRed : colors.textSecondary}
                 filled={isActive}
               />
             </TouchableOpacity>
@@ -94,21 +95,16 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   tabBarAndroid: {
-    backgroundColor: "rgba(22, 22, 40, 0.9)",
+    backgroundColor: alpha(colors.carbonSurface, 0.92),
   },
   tabPill: {
     flexDirection: "row",
-    backgroundColor: "rgba(20, 20, 36, 0.92)",
+    backgroundColor: alpha(colors.carbonSurface, 0.92),
     borderRadius: 30,
     padding: 5,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderColor: colors.hairline,
     gap: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
-    elevation: 14,
   },
   tabItem: {
     width: 52,
@@ -118,11 +114,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tabItemActive: {
-    backgroundColor: "rgba(255, 107, 53, 0.16)",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: alpha(colors.racingRed, 0.16),
   },
 });
