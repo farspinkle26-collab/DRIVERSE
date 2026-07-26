@@ -129,7 +129,7 @@ export default function SignUpScreen() {
     if (success) {
       // The starter car is auto-created by the DB trigger, but we can also
       // upsert with the user's chosen car via Supabase directly
-      router.back();
+      router.replace("/select-car" as any);
     }
   };
 
@@ -137,7 +137,7 @@ export default function SignUpScreen() {
     setSocialLoading("google");
     try {
       const success = await signInWithGoogle();
-      if (success) router.back();
+      if (success) router.replace("/select-car" as any);
     } finally {
       setSocialLoading(null);
     }
@@ -147,7 +147,7 @@ export default function SignUpScreen() {
     setSocialLoading("apple");
     try {
       const success = await signInWithApple();
-      if (success) router.back();
+      if (success) router.replace("/select-car" as any);
     } finally {
       setSocialLoading(null);
     }

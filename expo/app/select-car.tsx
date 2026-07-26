@@ -443,7 +443,7 @@ export default function SelectCarScreen() {
     );
   }
 
-  // ─── Guest (not signed in) ───────────────────────────────
+  // ─── Signed out (session expired mid-use) ────────────────
   if (!isAuthenticated) {
     return (
       <View style={styles.container}>
@@ -451,11 +451,10 @@ export default function SelectCarScreen() {
           <View style={styles.gateMark}>
             <Car size={ICON_LG} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
           </View>
-          <Text style={styles.gateTitle}>Enter your garage</Text>
+          <Text style={styles.gateTitle}>Sign back in</Text>
           <Text style={styles.gateBody}>
-            Picking a ride needs an account — it is what your XP, routes and car
-            collection hang off. Tap Sign In below, or keep looking around as a
-            guest.
+            Your session ended. Sign in again to get back to your garage — your
+            XP, routes and car collection are waiting.
           </Text>
           <CutCornerButton
             title="Sign In"
@@ -463,17 +462,9 @@ export default function SelectCarScreen() {
             size="lg"
             corners="topRight"
             icon={<LogIn size={ICON_MD} color={onRacingRed} strokeWidth={ICON_STROKE} />}
-            onPress={() => router.push("/login" as any)}
+            onPress={() => router.replace("/login" as any)}
             style={styles.gateAction}
           />
-          <Pressable
-            accessibilityRole="link"
-            onPress={enterApp}
-            hitSlop={spacing.spacingSm}
-            style={({ pressed }) => [styles.textLinkHit, pressed && styles.pressed]}
-          >
-            <Text style={styles.textLink}>Continue as guest</Text>
-          </Pressable>
         </View>
       </View>
     );
