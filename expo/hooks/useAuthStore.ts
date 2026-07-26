@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
-import { signInWithSocialProvider, SocialProvider } from "@/lib/socialAuth";
+import { signInWithGoogleOAuth, signInWithAppleNative } from "@/lib/socialAuth";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 const GUEST_USER: User = {
@@ -251,12 +251,12 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   // ================================================================
   // SOCIAL SIGN-IN (Google / Apple)
   // ================================================================
-  const signInWithSocial = useCallback(async (provider: SocialProvider) => {
+  const signInWithGoogle = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const newSession = await signInWithSocialProvider(provider);
+      const newSession = await signInWithGoogleOAuth();
 
       if (newSession?.user) {
         setSession(newSession);
@@ -266,7 +266,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
       return false;
     } catch (err) {
-      console.error(`${provider} sign-in error:`, err);
+      console.error("google sign-in error:", err);
       setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
       return false;
     } finally {
@@ -274,8 +274,28 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, [loadUserProfile]);
 
-  const signInWithGoogle = useCallback(() => signInWithSocial("google"), [signInWithSocial]);
-  const signInWithApple = useCallback(() => signInWithSocial("apple"), [signInWithSocial]);
+  const signInWithApple = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const newSession = await signInWithAppleNative();
+
+      if (newSession?.user) {
+        setSession(newSession);
+        await loadUserProfile(newSession.user.id);
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error("apple sign-in error:", err);
+      setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [loadUserProfile]);
 
   // ================================================================
   // LOGOUT
