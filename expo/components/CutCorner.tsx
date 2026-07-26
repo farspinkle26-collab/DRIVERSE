@@ -438,6 +438,80 @@ export function CutCornerBadge({
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * CutCornerChip
+ * ------------------------------------------------------------------ */
+
+export interface CutCornerChipProps {
+  label: string;
+  active?: boolean;
+  /** Rendered before the label, already coloured by the caller. */
+  icon?: React.ReactNode;
+  /** Colour the caller should draw `icon` in — active vs inactive. */
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  corners?: CutCornerName | CutCornerName[];
+  style?: StyleProp<ViewStyle>;
+}
+
+/**
+ * A single-select filter / segment control.
+ *
+ * The header comment above says chips stay plain rectangles, and for a
+ * *tag* — an inert label attached to a value, like the location pill on a
+ * profile — that still holds. A filter chip is a different thing: it is a
+ * control the user presses, in the same family as the buttons, and the map
+ * established it as a brand surface (MAP_SCREEN_REFERENCE §7). Active is a
+ * solid racingRed slab with black content, inactive is a carbon slab with a
+ * hairline — the same primary/outline pair `CutCornerButton` uses.
+ *
+ * The label is Rajdhani, uppercase, tracked: a control sizing its own label,
+ * not body copy.
+ *
+ * Callers colour their own icon; `chipContentColor()` returns the value to
+ * use so an icon can never drift from its label.
+ */
+export function chipContentColor(active: boolean): string {
+  return active ? onRacingRed : colors.textSecondary;
+}
+
+export function CutCornerChip({
+  label,
+  active = false,
+  icon,
+  onPress,
+  accessibilityLabel,
+  corners = "topRight",
+  style,
+}: CutCornerChipProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={accessibilityLabel ?? label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.chipHit, pressed && styles.chipPressed, style]}
+    >
+      <CutCornerSurface
+        fill={active ? colors.racingRed : colors.carbonSurface}
+        borderColor={active ? colors.racingRed : colors.hairline}
+        borderWidth={borderWidthTokens.hairline}
+        cutSize={cut.sm}
+        corners={corners}
+        contentStyle={styles.chipContent}
+      >
+        {icon}
+        <Text
+          style={[styles.chipLabel, { color: chipContentColor(active) }]}
+          numberOfLines={1}
+        >
+          {label.toUpperCase()}
+        </Text>
+      </CutCornerSurface>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   disabled: {
     opacity: 0.4,
@@ -468,6 +542,28 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.dataMedium,
     fontSize: 11,
     lineHeight: 14,
+  },
+  chipHit: {
+    // Keeps the tap target on the chip itself; the surface draws inside it.
+    minHeight: spacing.spacingXxl,
+  },
+  /** Press feedback, since Pressable has none by default. */
+  chipPressed: {
+    opacity: 0.7,
+  },
+  chipContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.spacingXs,
+    paddingHorizontal: spacing.spacingSm,
+    paddingVertical: spacing.spacingSm,
+  },
+  chipLabel: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: 1,
   },
 });
 
