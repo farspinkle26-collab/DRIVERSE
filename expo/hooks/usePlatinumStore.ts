@@ -47,10 +47,13 @@ import {
   isPurchasesAvailable,
   NO_ENTITLEMENT,
   onEntitlementChange,
+  presentCustomerCenter as presentCustomerCenterUI,
+  presentPaywall as presentPaywallUI,
   purchase as purchasePackage,
   restore as restorePurchases,
   type EntitlementSnapshot,
   type PlatinumPackage,
+  type PresentPaywallResult,
   type PurchaseResult,
   type RestoreResult,
 } from "@/lib/purchases";
@@ -238,6 +241,32 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
     );
   }, []);
 
+  /**
+   * RevenueCat's hosted, dashboard-configured paywall — an alternative to
+   * `openPaywall` for a call site that wants a remotely-editable upsell
+   * instead of the in-house screen. Applies the result immediately when the
+   * sheet reports a purchase or restore, same as `purchase`/`restore` below.
+   */
+  const presentHostedPaywall = useCallback(
+    async (offeringIdentifier?: string): Promise<PresentPaywallResult> => {
+      const result = await presentPaywallUI(offeringIdentifier);
+      if (result.purchased || result.restored) await refresh();
+      return result;
+    },
+    [refresh]
+  );
+
+  /**
+   * Customer Center first, store deep link only when it can't be shown
+   * (Expo Go, web, or the UI module missing) — see `manageSubscriptionUrl`
+   * for the fallback path.
+   */
+  const openCustomerCenter = useCallback(async (): Promise<boolean> => {
+    const presented = await presentCustomerCenterUI();
+    if (presented) await refresh();
+    return presented;
+  }, [refresh]);
+
   const isPlatinum = entitlement.isPlatinum;
 
   /* ─── Limits ────────────────────────────────────────────── */
@@ -285,6 +314,8 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
       restore,
       refresh,
       openPaywall,
+      presentHostedPaywall,
+      openCustomerCenter,
       limit,
       atLimit,
       blockAtLimit,
@@ -300,6 +331,8 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
       restore,
       refresh,
       openPaywall,
+      presentHostedPaywall,
+      openCustomerCenter,
       limit,
       atLimit,
       blockAtLimit,

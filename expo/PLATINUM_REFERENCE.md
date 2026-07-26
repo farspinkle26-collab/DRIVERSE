@@ -29,25 +29,30 @@ question the app asks, and a second provider would answer the same question.
 ### Setup checklist (not done by this change — needs dashboard access)
 
 1. RevenueCat project → add the iOS and Android apps.
-2. App Store Connect / Play Console: create the subscription products
-   `driveverse_platinum_monthly` and `driveverse_platinum_yearly`
-   (`PLATINUM_PRODUCTS` in `constants/platinum.ts`).
+2. App Store Connect / Play Console: create the products
+   `driveverse_platinum_monthly` (auto-renewing), `driveverse_platinum_yearly`
+   (auto-renewing) and `driveverse_platinum_lifetime` (non-consumable /
+   non-renewing — see `PLATINUM_PRODUCTS` in `constants/platinum.ts`).
 3. RevenueCat → entitlement id **`platinum`**, offering id **`platinum`**,
-   with both products attached as the monthly and annual packages.
+   with all three products attached as the monthly, annual and lifetime
+   packages.
 4. `.env`, next to the Supabase pair:
    ```
    EXPO_PUBLIC_REVENUECAT_IOS_KEY=appl_…
    EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=goog_…
    ```
    These are *publishable* SDK keys and belong in the bundle. The secret key
-   never leaves the server.
+   never leaves the server. See `.env.example`. A single key is fine for both
+   platforms while testing on one RevenueCat project before per-store keys
+   exist — `configurePurchases` reads whichever `Platform.select` resolves.
 5. Deploy `supabase/functions/revenuecat-webhook`, set
    `REVENUECAT_WEBHOOK_SECRET`, and point RevenueCat's webhook at it with that
    value as the Authorization header.
 6. Run `database_migration_platinum.sql`.
-7. `react-native-purchases` has a native module, so Platinum purchasing needs
-   a dev/TestFlight/internal-track build. **In Expo Go and on web the app runs
-   normally and reports "not Platinum"** — see §7.
+7. `react-native-purchases` (and `react-native-purchases-ui`, added for the
+   hosted paywall and Customer Center — see §6) are native modules, so
+   Platinum purchasing needs a dev/TestFlight/internal-track build. **In Expo
+   Go and on web the app runs normally and reports "not Platinum"** — see §7.
 
 ### Sandbox testing
 
@@ -249,9 +254,22 @@ something the driver was in the middle of doing.
   press" is red everywhere in Driveverse and this is not the screen to break it.
 - "Restore Purchases": present as required by App Store guideline 3.1.1,
   deliberately not prominent.
-- Already subscribed: renewal state plus "Manage Subscription", which deep-links
-  to the platform's own screen. Both stores forbid an in-app cancel flow, so it
-  hands off rather than pretending.
+- Already subscribed: renewal state plus "Manage Subscription", which opens
+  RevenueCat's **Customer Center** (`react-native-purchases-ui`) — in-app
+  cancellation, plan info and support links, so the driver doesn't leave
+  Driveverse. Falls back to a deep link to the platform's own subscriptions
+  screen (`manageSubscriptionUrl()`) when the UI module isn't available on the
+  runtime (Expo Go, web). Both stores forbid a *custom* in-app cancel flow;
+  Customer Center is RevenueCat's own compliant implementation of one.
+- Lifetime purchasers see "Never expires" instead of a renewal date and no
+  "Manage Subscription" row — a one-time non-renewing purchase has nothing to
+  manage or cancel.
+- **Hosted paywall.** `lib/purchases.ts` also exports `presentPaywall()` /
+  `presentPaywallIfNeeded()`, wrapping RevenueCat's dashboard-configured
+  Paywall UI. Nothing calls them today — `app/platinum.tsx` remains the
+  default paywall so the chrome visual identity stays intact — but they're
+  available for a call site that wants a remotely-editable, A/B-testable
+  upsell without an app release.
 
 **Contextual trigger.** Friction points call `openPaywall(benefit)`, which
 routes to `?trigger=<benefitId>`; that benefit is pinned at the top under a

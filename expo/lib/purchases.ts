@@ -50,7 +50,7 @@ export interface StoreProduct {
   currencyCode: string;
 }
 
-export type PlatinumPeriod = "monthly" | "yearly";
+export type PlatinumPeriod = "monthly" | "yearly" | "lifetime";
 
 export interface PlatinumPackage {
   /** RevenueCat package identifier, passed back to `purchase()`. */
@@ -63,14 +63,19 @@ export interface PlatinumPackage {
 
 export interface EntitlementSnapshot {
   isPlatinum: boolean;
-  /** ISO date the current period ends, when the store reports one. */
+  /** ISO date the current period ends, when the store reports one. Always
+   *  null for a lifetime purchase — that absence is how `isLifetime` below
+   *  is derived, rather than tracking a separate purchased-period field. */
   expiresAt: string | null;
-  /** False once the driver cancels but before the period ends. */
+  /** False once the driver cancels but before the period ends. Also false
+   *  for lifetime, which never renews. */
   willRenew: boolean;
   /** RevenueCat's own sandbox flag — dev builds surface it, prod ignores it. */
   isSandbox: boolean;
   /** "App Store" | "Play Store" | "PROMOTIONAL" | … Useful in support. */
   store: string | null;
+  /** A one-time, non-renewing purchase — no "Manage Subscription" applies. */
+  isLifetime: boolean;
 }
 
 export const NO_ENTITLEMENT: EntitlementSnapshot = {
@@ -79,6 +84,7 @@ export const NO_ENTITLEMENT: EntitlementSnapshot = {
   willRenew: false,
   isSandbox: false,
   store: null,
+  isLifetime: false,
 };
 
 export type PurchaseResult =
@@ -238,12 +244,17 @@ function toSnapshot(customerInfo: unknown): EntitlementSnapshot {
   const entitlement = info?.entitlements?.active?.[PLATINUM_ENTITLEMENT_ID];
   if (!entitlement?.isActive) return NO_ENTITLEMENT;
 
+  const expiresAt = entitlement.expirationDate ?? null;
   return {
     isPlatinum: true,
-    expiresAt: entitlement.expirationDate ?? null,
-    willRenew: entitlement.willRenew ?? false,
+    expiresAt,
+    // A non-renewing (lifetime) purchase never reports willRenew or an
+    // expirationDate, so pinning willRenew to false here is redundant with
+    // isLifetime but keeps this field meaningful on its own.
+    willRenew: expiresAt ? entitlement.willRenew ?? false : false,
     isSandbox: entitlement.isSandbox ?? false,
     store: entitlement.store ?? null,
+    isLifetime: expiresAt === null,
   };
 }
 
@@ -288,9 +299,10 @@ export function onEntitlementChange(
  * Offerings
  * ------------------------------------------------------------------ */
 
-/** RevenueCat's own package-type constants, normalised to our two periods. */
+/** RevenueCat's own package-type constants, normalised to our three periods. */
 function periodOf(packageType: string, identifier: string): PlatinumPeriod | null {
   const value = `${packageType} ${identifier}`.toUpperCase();
+  if (value.includes("LIFETIME")) return "lifetime";
   if (value.includes("ANNUAL") || value.includes("YEAR")) return "yearly";
   if (value.includes("MONTH")) return "monthly";
   return null;
@@ -407,4 +419,130 @@ export function manageSubscriptionUrl(): string {
   return Platform.OS === "ios"
     ? "https://apps.apple.com/account/subscriptions"
     : "https://play.google.com/store/account/subscriptions";
+}
+
+/* ------------------------------------------------------------------ *
+ * RevenueCat UI — hosted paywall + Customer Center
+ *
+ * `react-native-purchases-ui` is a second, separate native module. It is
+ * loaded exactly as defensively as `react-native-purchases` above, so a
+ * runtime without either module (Expo Go, web) degrades the same way: the
+ * caller gets `{ presented: false }` back instead of a crash, and falls
+ * back to the in-house UI (the custom paywall, or the store deep link).
+ * ------------------------------------------------------------------ */
+
+type PurchasesUIModule = typeof import("react-native-purchases-ui").default;
+
+let uiResolved = false;
+let uiMod: PurchasesUIModule | null = null;
+
+function ui(): PurchasesUIModule | null {
+  if (uiResolved) return uiMod;
+  uiResolved = true;
+  if (Platform.OS === "web") {
+    uiMod = null;
+    return uiMod;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const required = require("react-native-purchases-ui");
+    const candidate = (required?.default ?? required) as PurchasesUIModule;
+    uiMod =
+      typeof (candidate as { presentPaywall?: unknown })?.presentPaywall === "function"
+        ? candidate
+        : null;
+  } catch {
+    uiMod = null;
+  }
+  return uiMod;
+}
+
+export interface PresentPaywallResult {
+  /** False when the UI module or store isn't available on this runtime. */
+  presented: boolean;
+  /** True once the driver actually completed a purchase from the sheet. */
+  purchased: boolean;
+  /** True if the driver restored an existing purchase from the sheet. */
+  restored: boolean;
+}
+
+const NOT_PRESENTED: PresentPaywallResult = {
+  presented: false,
+  purchased: false,
+  restored: false,
+};
+
+/**
+ * Presents RevenueCat's hosted, dashboard-configured Paywall for the
+ * `platinum` offering — an alternative to the custom screen at
+ * `app/platinum.tsx` for spots that want a remotely-editable, A/B-testable
+ * upsell without a app update. Nothing in the app calls this by default;
+ * it's here for whichever screen wants it.
+ */
+export async function presentPaywall(
+  offeringIdentifier: string = PLATINUM_OFFERING_ID
+): Promise<PresentPaywallResult> {
+  const RevenueCatUI = ui();
+  if (!RevenueCatUI || !configured) return NOT_PRESENTED;
+  try {
+    const offerings = await sdk()!.getOfferings();
+    const offering = offerings.all?.[offeringIdentifier] ?? offerings.current ?? undefined;
+    const result = await RevenueCatUI.presentPaywall({ offering });
+    return {
+      presented: true,
+      purchased: result === "PURCHASED",
+      restored: result === "RESTORED",
+    };
+  } catch (err) {
+    console.error("[purchases] presentPaywall failed:", err);
+    return NOT_PRESENTED;
+  }
+}
+
+/**
+ * Same as `presentPaywall`, but only actually shows the sheet when the
+ * driver doesn't already hold the `platinum` entitlement — useful for a
+ * "gate this screen" call site that shouldn't interrupt an existing
+ * subscriber.
+ */
+export async function presentPaywallIfNeeded(
+  offeringIdentifier: string = PLATINUM_OFFERING_ID
+): Promise<PresentPaywallResult> {
+  const RevenueCatUI = ui();
+  if (!RevenueCatUI || !configured) return NOT_PRESENTED;
+  try {
+    const offerings = await sdk()!.getOfferings();
+    const offering = offerings.all?.[offeringIdentifier] ?? offerings.current ?? undefined;
+    const result = await RevenueCatUI.presentPaywallIfNeeded({
+      requiredEntitlementIdentifier: PLATINUM_ENTITLEMENT_ID,
+      offering,
+    });
+    return {
+      presented: true,
+      purchased: result === "PURCHASED",
+      restored: result === "RESTORED",
+    };
+  } catch (err) {
+    console.error("[purchases] presentPaywallIfNeeded failed:", err);
+    return NOT_PRESENTED;
+  }
+}
+
+/**
+ * Presents RevenueCat's Customer Center — in-app subscription management,
+ * FAQs and support links, satisfying the same App Store 3.1.1 "reachable
+ * cancel path" requirement the store deep link (`manageSubscriptionUrl`)
+ * exists for. Preferred over the deep link when available, since the driver
+ * never leaves the app; falls back to the deep link when it isn't.
+ */
+export async function presentCustomerCenter(): Promise<boolean> {
+  const RevenueCatUI = ui();
+  if (!RevenueCatUI || !configured) return false;
+  try {
+    await RevenueCatUI.presentCustomerCenter();
+    return true;
+  } catch (err) {
+    console.error("[purchases] presentCustomerCenter failed:", err);
+    return false;
+  }
 }

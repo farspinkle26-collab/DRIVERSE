@@ -42,6 +42,8 @@ export const PLATINUM_OFFERING_ID = "platinum";
 export const PLATINUM_PRODUCTS = {
   monthly: "driveverse_platinum_monthly",
   yearly: "driveverse_platinum_yearly",
+  /** One-time, non-renewing. No expirationDate is how the app tells it apart from a subscription. */
+  lifetime: "driveverse_platinum_lifetime",
 } as const;
 
 /**
@@ -53,6 +55,7 @@ export const PLATINUM_PRODUCTS = {
 export const PLATINUM_FALLBACK_PRICE = {
   monthly: "Rp 49.000",
   yearly: "Rp 449.000",
+  lifetime: "Rp 1.999.000",
 } as const;
 
 /* ------------------------------------------------------------------ *

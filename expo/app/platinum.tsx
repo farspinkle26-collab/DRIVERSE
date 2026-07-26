@@ -113,10 +113,11 @@ export default function PlatinumPaywallScreen() {
     loadPackages,
     purchase,
     restore,
+    openCustomerCenter,
   } = usePlatinum();
 
   const [period, setPeriod] = useState<PlatinumPeriod>("yearly");
-  const [busy, setBusy] = useState<"purchase" | "restore" | null>(null);
+  const [busy, setBusy] = useState<"purchase" | "restore" | "manage" | null>(null);
 
   useEffect(() => {
     void loadPackages();
@@ -147,7 +148,9 @@ export default function PlatinumPaywallScreen() {
 
   const monthly = packages.find((p) => p.period === "monthly") ?? null;
   const yearly = packages.find((p) => p.period === "yearly") ?? null;
-  const selected = period === "yearly" ? yearly : monthly;
+  const lifetime = packages.find((p) => p.period === "lifetime") ?? null;
+  const selected =
+    period === "lifetime" ? lifetime : period === "yearly" ? yearly : monthly;
 
   /**
    * Yearly saving against twelve months at the monthly rate. Only shown when
@@ -163,7 +166,7 @@ export default function PlatinumPaywallScreen() {
   }, [monthly, yearly]);
 
   const priceFor = (p: PlatinumPeriod): string => {
-    const pkg = p === "yearly" ? yearly : monthly;
+    const pkg = p === "lifetime" ? lifetime : p === "yearly" ? yearly : monthly;
     return pkg?.product.priceString ?? PLATINUM_FALLBACK_PRICE[p];
   };
 
@@ -215,6 +218,20 @@ export default function PlatinumPaywallScreen() {
     }
     Alert.alert("Restore failed", result.message);
   }, [restore]);
+
+  /**
+   * Customer Center first — RevenueCat's in-app management sheet, so the
+   * driver never leaves Driveverse. Falls back to the store's own
+   * subscriptions page when the UI module can't be shown on this runtime.
+   */
+  const handleManage = useCallback(async () => {
+    setBusy("manage");
+    const presented = await openCustomerCenter();
+    setBusy(null);
+    if (!presented) {
+      Linking.openURL(manageSubscriptionUrl());
+    }
+  }, [openCustomerCenter]);
 
   /* ─── Render ────────────────────────────────────────────── */
 
@@ -304,9 +321,15 @@ export default function PlatinumPaywallScreen() {
               corners="topRight"
               contentStyle={styles.activeCard}
             >
-              <Text style={styles.overline}>SUBSCRIPTION</Text>
+              <Text style={styles.overline}>
+                {entitlement.isLifetime ? "LIFETIME" : "SUBSCRIPTION"}
+              </Text>
               <Text style={styles.activeState}>
-                {entitlement.willRenew ? "Renews automatically" : "Ends at period close"}
+                {entitlement.isLifetime
+                  ? "Never expires"
+                  : entitlement.willRenew
+                  ? "Renews automatically"
+                  : "Ends at period close"}
               </Text>
               {entitlement.expiresAt && (
                 <Text style={styles.activeDate}>
@@ -319,16 +342,19 @@ export default function PlatinumPaywallScreen() {
               )}
             </CutCornerSurface>
 
-            {/* Both stores forbid an in-app cancel flow, so this hands off to
-                the platform's own subscription screen rather than pretending. */}
-            <CutCornerButton
-              title="Manage Subscription"
-              variant="ghost"
-              size="md"
-              corners="topRight"
-              onPress={() => Linking.openURL(manageSubscriptionUrl())}
-              style={styles.cta}
-            />
+            {/* A lifetime purchase has nothing to manage or cancel — there is
+                no renewal, so this row would be a dead end for that driver. */}
+            {!entitlement.isLifetime && (
+              <CutCornerButton
+                title={busy === "manage" ? "Opening…" : "Manage Subscription"}
+                variant="ghost"
+                size="md"
+                corners="topRight"
+                disabled={busy !== null}
+                onPress={handleManage}
+                style={styles.cta}
+              />
+            )}
           </View>
         ) : (
           <View style={styles.block}>
@@ -347,6 +373,14 @@ export default function PlatinumPaywallScreen() {
                 badge={yearlySavingPercent ? `SAVE ${yearlySavingPercent}%` : undefined}
                 active={period === "yearly"}
                 onPress={() => setPeriod("yearly")}
+              />
+              <PeriodOption
+                label="Lifetime"
+                price={priceFor("lifetime")}
+                note="one-time"
+                badge="NEVER EXPIRES"
+                active={period === "lifetime"}
+                onPress={() => setPeriod("lifetime")}
               />
             </View>
 
@@ -374,8 +408,9 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <Text style={styles.terms}>
-              Billed through {STORE_NAME}. Renews automatically until cancelled;
-              manage or cancel any time in your {STORE_NAME} account.
+              {period === "lifetime"
+                ? `Billed once through ${STORE_NAME}. One-time purchase — never renews, nothing to cancel.`
+                : `Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
             </Text>
 
             {/* App Store guideline 3.1.1 requires restore to be reachable
