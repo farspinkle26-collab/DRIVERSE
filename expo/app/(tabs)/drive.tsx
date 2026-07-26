@@ -31,6 +31,7 @@ import {
   ChevronRight,
   Coffee,
   Route as RouteIcon,
+  Share2,
   Swords,
   Target,
   Users,
@@ -45,6 +46,7 @@ import {
   CutCornerSurface,
 } from "@/components/CutCorner";
 import HubStatStrip from "@/components/HubStatStrip";
+import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import { tripCode } from "@/lib/tripStats";
 import {
@@ -149,7 +151,7 @@ const FEATURES: Feature[] = [
  * it predates the palette and is where the purple and blue on this screen
  * used to come from.
  */
-function QuestCard({ quest }: { quest: DailyQuest }) {
+function QuestCard({ quest, onShare }: { quest: DailyQuest; onShare?: () => void }) {
   const done = quest.status === "completed";
   const ready = quest.status === "active" && isComplete(quest);
   const pct = done ? 100 : progressPercent(quest);
@@ -183,9 +185,22 @@ function QuestCard({ quest }: { quest: DailyQuest }) {
       </View>
 
       <View style={styles.questFooter}>
-        <Text style={styles.questProgress}>
-          {done ? "Completed" : ready ? "Finishing…" : progressLabel(quest)}
-        </Text>
+        {done && onShare ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Share ${quest.title}`}
+            onPress={onShare}
+            hitSlop={spacing.spacingSm}
+            style={styles.questShare}
+          >
+            <Share2 size={spacing.spacingLg} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+            <Text style={styles.questShareText}>SHARE</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.questProgress}>
+            {done ? "Completed" : ready ? "Finishing…" : progressLabel(quest)}
+          </Text>
+        )}
         <View style={styles.questRewards}>
           <Text style={styles.rewardValue}>+{quest.xp_reward}</Text>
           <Text style={styles.rewardUnit}>XP</Text>
@@ -244,6 +259,7 @@ export default function DriveHubScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
   const [view, setView] = useState<HubView>("trips");
+  const [shareQuest, setShareQuest] = useState<DailyQuest | null>(null);
 
   const {
     trips,
@@ -406,7 +422,11 @@ export default function DriveHubScreen() {
           ) : (
             <View style={styles.list}>
               {quests.map((quest) => (
-                <QuestCard key={quest.id} quest={quest} />
+                <QuestCard
+                  key={quest.id}
+                  quest={quest}
+                  onShare={() => setShareQuest(quest)}
+                />
               ))}
             </View>
           )
@@ -457,6 +477,21 @@ export default function DriveHubScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {shareQuest ? (
+        <ShareCardModal
+          visible={!!shareQuest}
+          onClose={() => setShareQuest(null)}
+          type="quest"
+          payload={{
+            title: shareQuest.title,
+            difficulty: shareQuest.difficulty,
+            xpReward: shareQuest.xp_reward,
+            coinReward: shareQuest.coin_reward,
+          }}
+          caption={`Quest complete: ${shareQuest.title} on Driveverse`}
+        />
+      ) : null}
     </View>
   );
 }
@@ -564,6 +599,18 @@ const styles = StyleSheet.create({
     ...textStyle("caption"),
     color: colors.textSecondary,
     flex: 1,
+  },
+  questShare: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+  },
+  questShareText: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    letterSpacing: 1,
+    color: colors.racingRed,
   },
   questRewards: {
     flexDirection: "row",
