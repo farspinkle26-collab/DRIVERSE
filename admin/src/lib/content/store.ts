@@ -107,6 +107,7 @@ function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
   if (raw.source != null) fm.source = str(raw.source) as PostFrontmatter["source"];
   if (raw.pillar_fit_flag != null) fm.pillar_fit_flag = str(raw.pillar_fit_flag);
   if (raw.enriched_at != null) fm.enriched_at = str(raw.enriched_at);
+  if (typeof raw.checked === "boolean") fm.checked = raw.checked;
   return fm;
 }
 
@@ -173,6 +174,7 @@ function frontmatterToEntries(
     "is_repost",
     "pillar_fit_flag",
     "enriched_at",
+    "checked",
   ] as const) {
     if (merged[optional] !== undefined) {
       entries.push([optional, merged[optional] as Scalar]);
@@ -281,6 +283,19 @@ export async function writePost(post: Post): Promise<void> {
   await fs.writeFile(file, serializePost(post), "utf8");
 }
 
+/**
+ * Flip the "checked" checklist tick for a post without touching any other
+ * field — used by the posts table's checkbox column, distinct from the full
+ * Edit form flow in buildPostFromForm.
+ */
+export async function setPostChecked(slug: string, checked: boolean): Promise<Post | null> {
+  const post = await readPost(slug);
+  if (!post) return null;
+  post.frontmatter.checked = checked;
+  await writePost(post);
+  return post;
+}
+
 function weekdayFromDate(date: string): string {
   const d = new Date(date + "T12:00:00Z");
   if (Number.isNaN(d.getTime())) return "";
@@ -361,6 +376,7 @@ export function buildPostFromForm(
     fm.pillar_fit_flag = existing.frontmatter.pillar_fit_flag;
   }
   if (existing?.frontmatter.enriched_at) fm.enriched_at = existing.frontmatter.enriched_at;
+  if (existing?.frontmatter.checked) fm.checked = existing.frontmatter.checked;
 
   const body: PostBody = {
     ...(existing?.body ?? {

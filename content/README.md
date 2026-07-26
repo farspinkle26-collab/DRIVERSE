@@ -63,6 +63,9 @@ Optional extension keys (not required):
 - `pillar_fit_flag: "..."` — set by the classifier when a post fits no pillar
   cleanly (we never auto-invent a new pillar).
 - `enriched_at` — ISO timestamp of the last enrichment run.
+- `checked: true` — manual "done" tick, toggled from the checkbox column in
+  the posts table / Upcoming list. Purely a personal execution checklist —
+  never affects status, metrics, or any ranking/aggregate.
 
 Body sections (level-2 headings; unknown sections round-trip untouched):
 
