@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.rork.towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
+      "bundleIdentifier": "app.rork.driverse",
       "config": {
         "googleMapsApiKey": "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628"
       },
