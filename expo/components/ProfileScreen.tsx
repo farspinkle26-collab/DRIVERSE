@@ -65,6 +65,7 @@ import {
   Radio,
   Route as RouteIcon,
   Search,
+  Share2,
   Shield,
   Sparkles,
   Star,
@@ -83,6 +84,7 @@ import { useEvents } from "@/hooks/useEventsStore";
 import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { rankForLevel, rankProgress } from "@/constants/ranks";
 import RankBadge from "@/components/RankBadge";
+import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import {
   chipContentColor,
@@ -382,6 +384,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [countryDraft, setCountryDraft] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [tripMenuTrip, setTripMenuTrip] = useState<TripItem | null>(null);
+  const [showShareRank, setShowShareRank] = useState(false);
 
   // ─── Add-car form ──────────────────────────────────────────
   const [showAddCar, setShowAddCar] = useState(false);
@@ -1000,7 +1003,9 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             )}
           </View>
 
-          {/* Current rank — the page's PRIMARY rank surface: filled card. */}
+          {/* Current rank — the page's PRIMARY rank surface: filled card,
+              with the on-demand "Share your rank" affordance stacked under it. */}
+          <View style={styles.rankColumn}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Current rank ${rank.name}`}
@@ -1022,6 +1027,21 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               <Info size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
             </CutCornerSurface>
           </Pressable>
+
+          {isSelf ? (
+            <CutCornerButton
+              title="Share"
+              variant="ghost"
+              size="sm"
+              corners="topRight"
+              onPress={() => setShowShareRank(true)}
+              style={styles.shareRankButton}
+              icon={
+                <Share2 size={ICON_SM} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+              }
+            />
+          ) : null}
+          </View>
         </View>
 
         {/* ═══ LEVEL / XP ═══ */}
@@ -1709,6 +1729,16 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           </Pressable>
         </Sheet>
       </Modal>
+
+      {isSelf ? (
+        <ShareCardModal
+          visible={showShareRank}
+          onClose={() => setShowShareRank(false)}
+          type="rank"
+          payload={{ rank, level, totalXp }}
+          caption={`${rank.name} on Driveverse`}
+        />
+      ) : null}
     </View>
   );
 }
@@ -2219,6 +2249,8 @@ const styles = StyleSheet.create({
   tagTextStrong: { color: colors.textPrimary },
 
   // Current rank card
+  rankColumn: { gap: spacing.spacingSm, alignItems: "stretch" },
+  shareRankButton: { width: 108 },
   rankCard: { width: 108 },
   rankCardContent: {
     alignItems: "center",

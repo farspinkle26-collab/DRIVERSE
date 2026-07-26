@@ -125,6 +125,8 @@ import {
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
+import ShareCardModal from "@/components/ShareCardModal";
+import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
@@ -807,6 +809,9 @@ export default function MapScreen() {
   const [xpEarned, setXpEarned] = useState<number | null>(null);
   const [wasFaster, setWasFaster] = useState(false);
   const [leveledUp, setLeveledUp] = useState(false);
+  // Rank-up celebration is a moment worth sharing — offered right where the
+  // level-up lands, in the trip-summary card.
+  const [showShareRank, setShowShareRank] = useState(false);
 
   // XP system
   const { level, totalXp, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
@@ -2781,10 +2786,19 @@ export default function MapScreen() {
             )}
 
             {leveledUp && (
-              <View style={styles.levelUpBanner}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Level ${level} reached. Share your rank.`}
+                onPress={() => setShowShareRank(true)}
+                style={styles.levelUpBanner}
+              >
                 <Trophy size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
                 <Text style={styles.levelUpText}>Level {level} reached</Text>
-              </View>
+                <View style={styles.levelUpShare}>
+                  <Share2 size={spacing.spacingLg - 2} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
+                  <Text style={styles.levelUpShareText}>SHARE</Text>
+                </View>
+              </Pressable>
             )}
 
             {/* Utility surface: a progress track stays a plain rectangle. */}
@@ -3872,6 +3886,15 @@ export default function MapScreen() {
             : ""
         }
         onSaved={(routeId) => router.push(`/route/${routeId}` as any)}
+      />
+
+      {/* --- Rank-up share (from the level-up moment) --- */}
+      <ShareCardModal
+        visible={showShareRank}
+        onClose={() => setShowShareRank(false)}
+        type="rank"
+        payload={{ rank: rankForLevel(level), level, totalXp }}
+        caption={`Just reached ${rankForLevel(level).name} on Driveverse`}
       />
     </View>
   );
@@ -5167,6 +5190,18 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     letterSpacing: 0.8,
     color: colors.textPrimary,
+  },
+  levelUpShare: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+    marginLeft: "auto",
+  },
+  levelUpShareText: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    letterSpacing: 1,
+    color: colors.racingRed,
   },
   levelBarContainer: {
     gap: spacing.spacingSm,

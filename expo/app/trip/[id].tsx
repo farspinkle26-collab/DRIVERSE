@@ -5,12 +5,14 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
-import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil } from "lucide-react-native";
+import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil, Share2 } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
+import ShareCardModal from "@/components/ShareCardModal";
+import type { Trip } from "@/components/TripCard";
 
 interface TripDetail {
   id: string;
@@ -50,6 +52,7 @@ export default function TripDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [showRename, setShowRename] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,9 +132,14 @@ export default function TripDetailScreen() {
         </TouchableOpacity>
         <Text style={styles.topTitle} numberOfLines={1}>{trip ? tripDisplayName : "Trip"}</Text>
         {trip ? (
-          <TouchableOpacity onPress={() => setShowRename(true)} style={styles.iconBtn} hitSlop={8}>
-            <Pencil size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          <View style={styles.topActions}>
+            <TouchableOpacity onPress={() => setShowShare(true)} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share this trip">
+              <Share2 size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowRename(true)} style={styles.iconBtn} hitSlop={8}>
+              <Pencil size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={{ width: 40 }} />
         )}
@@ -243,6 +251,16 @@ export default function TripDetailScreen() {
           onSave={handleRename}
         />
       )}
+
+      {trip && (
+        <ShareCardModal
+          visible={showShare}
+          onClose={() => setShowShare(false)}
+          type="trip"
+          payload={{ trip: trip as unknown as Trip }}
+          caption={`${tripDisplayName} · ${trip.distance_km.toFixed(1)} km on Driveverse`}
+        />
+      )}
     </View>
   );
 }
@@ -266,6 +284,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   topTitle: { flex: 1, fontSize: 17, fontWeight: "800", color: "#FFFFFF", textAlign: "center" },
+  topActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   mapWrap: {
     height: 300,
     marginHorizontal: 16,
