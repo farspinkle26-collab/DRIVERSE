@@ -30,18 +30,40 @@
 /** RevenueCat entitlement id. Must match the dashboard exactly. */
 export const PLATINUM_ENTITLEMENT_ID = "platinum";
 
-/** RevenueCat offering id that carries the monthly + yearly packages. */
+/**
+ * RevenueCat offering id carrying the monthly, yearly and lifetime packages.
+ * It is also the offering the RevenueCat-hosted paywall is attached to.
+ */
 export const PLATINUM_OFFERING_ID = "platinum";
 
 /**
  * Store product identifiers, registered in App Store Connect and Google
  * Play Console and attached to the offering above. Listed here for the
- * setup checklist in PLATINUM_REFERENCE.md — runtime code never hardcodes
+ * setup checklist in REVENUECAT_SETUP.md — runtime code never hardcodes
  * a product, it reads whatever the offering returns.
+ *
+ * `lifetime` is a NON-CONSUMABLE (iOS) / one-time product (Android), not an
+ * auto-renewing subscription. It grants the same `platinum` entitlement with
+ * no expiry, which is why `EntitlementSnapshot.isLifetime` exists: a lifetime
+ * holder and a cancelled subscriber both report `willRenew: false`, and only
+ * one of them is about to lose access.
  */
 export const PLATINUM_PRODUCTS = {
   monthly: "driveverse_platinum_monthly",
   yearly: "driveverse_platinum_yearly",
+  lifetime: "driveverse_platinum_lifetime",
+} as const;
+
+/**
+ * The RevenueCat package identifiers the offering uses. These are RevenueCat's
+ * own reserved ids for the Monthly / Annual / Lifetime slots — using them
+ * means `packageType` comes back as MONTHLY / ANNUAL / LIFETIME and the app
+ * never has to pattern-match a product name. See `periodOf` in `lib/purchases.ts`.
+ */
+export const PLATINUM_PACKAGE_IDS = {
+  monthly: "$rc_monthly",
+  yearly: "$rc_annual",
+  lifetime: "$rc_lifetime",
 } as const;
 
 /**
@@ -53,6 +75,7 @@ export const PLATINUM_PRODUCTS = {
 export const PLATINUM_FALLBACK_PRICE = {
   monthly: "Rp 49.000",
   yearly: "Rp 449.000",
+  lifetime: "Rp 1.499.000",
 } as const;
 
 /* ------------------------------------------------------------------ *

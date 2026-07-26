@@ -36,8 +36,10 @@ including `jsonb` sub-structures):
 - `platinum_subscribers` — Platinum entitlement **mirror**, written only by
   RevenueCat's webhook. Not the client's gate; the app reads entitlement from
   the RevenueCat SDK. The mirror backs the tier-cap triggers and the
-  AI-showcase cost gate. See `expo/database_migration_platinum.sql` and
-  `expo/PLATINUM_REFERENCE.md`.
+  AI-showcase cost gate. See `expo/database_migration_platinum.sql`,
+  `expo/PLATINUM_REFERENCE.md` (why the tier is built the way it is) and
+  `expo/REVENUECAT_SETUP.md` (the runbook: keys, products, offering, paywall,
+  Customer Center, testing).
 - `saved_places`, `ai_showcases` — Platinum-era tables (bookmarked places with
   a Regular cap; the AI-showcase generation ledger that bounds monthly spend).
 

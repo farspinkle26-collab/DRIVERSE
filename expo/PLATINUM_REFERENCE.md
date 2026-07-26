@@ -10,7 +10,12 @@ to Platinum.
 ## 1. Payment infrastructure
 
 **RevenueCat, wrapping native StoreKit and Google Play Billing.**
-`react-native-purchases` ^10.4, added to `package.json` in this change.
+`react-native-purchases` ^10.4 plus `react-native-purchases-ui` ^10.4, which
+adds the dashboard-configured Paywall and the Customer Center.
+
+> **Setup is now a runbook of its own: `REVENUECAT_SETUP.md`.** Products,
+> offering, dashboard steps, keys, testing and the pre-ship checklist all live
+> there. This section keeps only the reasoning.
 
 Apple requires digital subscriptions to be sold through In-App Purchase, so an
 external gateway on iOS is a rejection rather than a preference. RevenueCat
@@ -26,40 +31,35 @@ larger effort. It cannot replace IAP on iOS, so it is an addition, not a
 substitute. Nothing here blocks it: `isPlatinum` is the only entitlement
 question the app asks, and a second provider would answer the same question.
 
-### Setup checklist (not done by this change — needs dashboard access)
+### Three products, and why lifetime is not just a third price
 
-1. RevenueCat project → add the iOS and Android apps.
-2. App Store Connect / Play Console: create the subscription products
-   `driveverse_platinum_monthly` and `driveverse_platinum_yearly`
-   (`PLATINUM_PRODUCTS` in `constants/platinum.ts`).
-3. RevenueCat → entitlement id **`platinum`**, offering id **`platinum`**,
-   with both products attached as the monthly and annual packages.
-4. `.env`, next to the Supabase pair:
-   ```
-   EXPO_PUBLIC_REVENUECAT_IOS_KEY=appl_…
-   EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=goog_…
-   ```
-   These are *publishable* SDK keys and belong in the bundle. The secret key
-   never leaves the server.
-5. Deploy `supabase/functions/revenuecat-webhook`, set
-   `REVENUECAT_WEBHOOK_SECRET`, and point RevenueCat's webhook at it with that
-   value as the Authorization header.
-6. Run `database_migration_platinum.sql`.
-7. `react-native-purchases` has a native module, so Platinum purchasing needs
-   a dev/TestFlight/internal-track build. **In Expo Go and on web the app runs
-   normally and reports "not Platinum"** — see §7.
+Monthly and yearly are auto-renewing subscriptions in one subscription group.
+**Lifetime is a non-consumable**, and the difference is not cosmetic: it never
+renews, has no expiry, and cannot be cancelled.
 
-### Sandbox testing
+RevenueCat reports a lifetime holder as `willRenew: false` with
+`expirationDate: null` — which is *also* what a cancelled subscriber looks like
+apart from the null. A `willRenew ? … : …` would therefore tell someone who
+paid once, for good, that their access ends at period close.
+`EntitlementSnapshot.isLifetime` exists to stop exactly that, and it is derived
+from the null expiry rather than from the product id, so a renamed product
+can't break it.
 
-RevenueCat reports sandbox purchases through the same `customerInfo` shape as
-production; there is no separate code path.
+### Test Store
 
-- **iOS** — Sandbox Apple ID (App Store Connect → Users and Access → Sandbox),
-  purchases in a dev or TestFlight build.
-- **Android** — a licence-tester Google account on an internal-testing track.
+`EXPO_PUBLIC_REVENUECAT_TEST_KEY` (a `test_` key) routes purchases to
+RevenueCat's own sandbox, so the whole flow — offerings, paywall, purchase,
+entitlement, Customer Center — is exercisable before any store product exists.
 
-The paywall shows a small `SANDBOX` tag when RevenueCat flags the entitlement
-as sandbox, so a test purchase is never mistaken for a real one.
+`resolveKey()` in `lib/purchases.ts` refuses it when `__DEV__` is false.
+RevenueCat's rule is that a submitted app must never carry a `test_` key, and a
+config file is far too easy to forget; enforcing it in code means a release
+build cannot be wrong. A real platform key always wins over it, so adding the
+`appl_`/`goog_` pair switches a build to real billing with no code change.
+
+The paywall and subscription screens show a **TEST STORE** tag, next to the
+existing **SANDBOX** tag driven by RevenueCat's own `isSandbox` flag, so no
+simulated purchase is ever mistaken for a real one.
 
 ---
 
@@ -149,7 +149,7 @@ the values shipped; all four are one-line changes in `TIER_LIMITS` +
 | Saved places cap | **10** | Suggested in the brief. Enough for a driver's real regular spots; low enough that an enthusiast hits it. |
 | Convoy capacity | **2 → 8** | Top of the suggested 6–8. 8 is a plausible weekend convoy and makes the 4× jump legible. |
 | AI showcase allowance | **5 / month** | Real per-image cost. Uncapped is an uncapped bill; 5 covers a typical garage and bounds the worst case. |
-| Pricing | **Rp 49.000 / month, Rp 449.000 / year** (~24% off) | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store. |
+| Pricing | **Rp 49.000 / month, Rp 449.000 / year** (~24% off), **Rp 1.499.000 lifetime** | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store. Lifetime is ~3.3× the annual price — roughly the point where it beats a subscription for a driver who stays past year three, which is the horizon the tier is worth planning against. **Wants your confirmation.** |
 
 ### "Route Discovery" — needs your confirmation
 
@@ -235,23 +235,66 @@ choice returns intact on resubscribe.
 
 ## 6. Paywall
 
-`app/platinum.tsx`, presented as a modal — it is always raised on top of
-something the driver was in the middle of doing.
+**Two implementations, and both are real.**
+
+`openPaywall(benefit)` prefers the paywall configured in the RevenueCat
+dashboard (`lib/purchasesUi.tsx` → `RevenueCatUI.presentPaywall`), because
+pricing and copy experiments there ship in minutes instead of an app-review
+cycle — and a pricing test that needs a release to adjust is a pricing test
+nobody runs. It falls back to `app/platinum.tsx` when the UI module is absent
+(Expo Go, web) or when the offering has no paywall attached, and it remembers
+that answer for the session rather than paying for a failed present each time.
+
+The fallback is never removed and is never degraded. A RevenueCat project
+mid-setup is a normal state, and it must not leave a driver with no way to
+subscribe.
+
+The contextual trigger survives the handover: the blocked benefit's headline is
+passed to the hosted paywall as the custom variable `{{ custom.trigger_headline }}`,
+so a dashboard paywall can still open on "Your garage is full at 2 cars".
+
+### Post-purchase: the Customer Center
+
+`usePlatinum().openCustomerCenter()` presents RevenueCat's Customer Center —
+status, plan changes, restore, iOS refund requests, and cancellation with the
+dashboard's retention offer and survey. It falls back to `app/subscription.tsx`,
+which renders the embedded `CustomerCenterView` when it can and the app's own
+summary when it can't.
+
+Every path ends in a handoff to the App Store or Google Play, because neither
+store permits an in-app cancel flow. The profile's Platinum row routes by tier:
+paywall for Regular, Customer Center for a subscriber — sending an existing
+subscriber to a screen selling them what they already own is the most common
+way that row goes wrong.
+
+### `app/platinum.tsx`
+
+Presented as a modal — it is always raised on top of something the driver was
+in the middle of doing.
 
 - Header: hero badge, "DRIVEVERSE / PLATINUM" in Rajdhani.
 - Benefits: hairline-divided rows with a small icon. Not nine CutCorner cards —
   the cut on everything stops being a signature (`components/CutCorner.tsx`).
-- Pricing: monthly/yearly, prices in JetBrains Mono like every other number in
-  the app. The yearly saving is computed against 12× the monthly price and is
-  shown **only** when both prices came from the store; deriving a discount from
-  the fallback strings would advertise a number nobody is charging.
+- Pricing: monthly/yearly two-up, prices in JetBrains Mono like every other
+  number in the app. The yearly saving is computed against 12× the monthly price
+  and is shown **only** when both prices came from the store; deriving a discount
+  from the fallback strings would advertise a number nobody is charging.
+- Lifetime sits below the pair as a full-width row, not a third column. It is a
+  one-time purchase rather than a third subscription term, and a six-figure
+  rupiah price gets cropped at the width three cards leave. It is offered only
+  when the store returned a lifetime package, or when the store returned nothing
+  at all (the "explain the tier offline" state) — never when the store answered
+  and had no lifetime product, which would be advertising something unbuyable.
 - CTA: racingRed solid CutCorner. Platinum owns chrome, but "the button you
   press" is red everywhere in Driveverse and this is not the screen to break it.
+  It says "Start Free Trial" **only** when the store reported an intro offer at
+  price 0 on the selected product; the app never invents a trial.
 - "Restore Purchases": present as required by App Store guideline 3.1.1,
   deliberately not prominent.
-- Already subscribed: renewal state plus "Manage Subscription", which deep-links
-  to the platform's own screen. Both stores forbid an in-app cancel flow, so it
-  hands off rather than pretending.
+- Already subscribed: renewal state — which distinguishes lifetime, free trial,
+  renewing and cancelled, four states a `willRenew` boolean collapses into two
+  wrong ones — a grace-period notice when the store reports a failed charge, and
+  "Manage Subscription", which opens the Customer Center.
 
 **Contextual trigger.** Friction points call `openPaywall(benefit)`, which
 routes to `?trigger=<benefitId>`; that benefit is pinned at the top under a
@@ -263,15 +306,23 @@ still see they're also buying the badge.
 
 ## 7. Behaviour without the native module
 
-`react-native-purchases` is absent in Expo Go and on web, and this app runs in
-both. `lib/purchases.ts` loads it defensively (the same pattern
+`react-native-purchases` and `react-native-purchases-ui` are absent in Expo Go
+and on web, and this app runs in both. `lib/purchases.ts` and
+`lib/purchasesUi.tsx` load them defensively (the same pattern
 `lib/shareCard.ts` uses for `react-native-share`) and every export degrades to
 "no subscription, no store" rather than throwing.
 
+The rule extends to the SDKs' **enums**: importing `PURCHASES_ERROR_CODE`,
+`PACKAGE_TYPE` or `PAYWALL_RESULT` at module scope would pull the native module
+in on web, which is the exact thing the defensive loader exists to avoid. They
+are mirrored as plain string constants instead, matching the SDK's wire values.
+
 So on those runtimes: the app works, every driver is Regular, all caps apply,
-and the paywall still opens and explains the tier with fallback prices and a
-disabled CTA plus a line saying purchases need the store build. That is also
-what makes the rest of the app testable before the store products go live.
+the paywall still opens and explains the tier with fallback prices and a
+disabled CTA plus a line saying purchases need the store build, and
+`/subscription` shows the app's own manage screen in place of the Customer
+Center. That is also what makes the rest of the app testable before the store
+products go live.
 
 ---
 
@@ -345,8 +396,17 @@ whole integration.
   in the store and by the trigger, and `activeEventLimit` / `atEventLimit` are
   exported ready for the composer — but there is no screen on which to show the
   friction-point prompt. It will work the moment one is built.
-- The four product numbers in §4 and the "Route Discovery" interpretation want
-  your confirmation.
+- The four product numbers in §4, the lifetime price, and the "Route Discovery"
+  interpretation want your confirmation.
+- **The RevenueCat dashboard is still empty.** Products, the `platinum`
+  offering, the hosted paywall and the Customer Center all need creating before
+  any of this transacts — `REVENUECAT_SETUP.md` is the runbook. Until then the
+  app falls back to `app/platinum.tsx` with display-only prices, which is a
+  designed state rather than a broken one.
+- A purchase made inside the hosted paywall or the Customer Center does not
+  return through `openPaywall`/`openCustomerCenter`. It arrives on the
+  customer-info listener. Anything that must run "after the driver subscribes"
+  belongs on that listener, not after the await.
 - `platinum_limit()` in SQL duplicates `TIER_LIMITS` in TypeScript. Two files
   to change, with no compiler holding them together — the alternative was a
   round trip to the database for every cap check on every render.

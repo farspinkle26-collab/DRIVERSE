@@ -63,6 +63,10 @@ function RootLayoutNav() {
         name="platinum"
         options={{ headerShown: false, presentation: "modal" }}
       />
+      {/* Subscription management. A pushed screen, not a modal: it is a
+          destination the driver navigates to from Settings, and the Customer
+          Center brings its own scrolling body. */}
+      <Stack.Screen name="subscription" options={{ headerShown: false }} />
       <Stack.Screen name="saved-places" options={{ headerShown: false }} />
     </Stack>
   );

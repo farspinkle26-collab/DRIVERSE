@@ -44,6 +44,7 @@
         "react-native-gesture-handler": "~2.28.0",
         "react-native-maps": "1.20.1",
         "react-native-purchases": "^10.4.4",
+        "react-native-purchases-ui": "^10.4.4",
         "react-native-safe-area-context": "~5.6.0",
         "react-native-screens": "~4.16.0",
         "react-native-share": "^12.2.0",
@@ -1541,6 +1542,8 @@
     "react-native-maps": ["react-native-maps@1.20.1", "", { "dependencies": { "@types/geojson": "^7946.0.13" }, "peerDependencies": { "react": ">= 17.0.1", "react-native": ">= 0.64.3", "react-native-web": ">= 0.11" }, "optionalPeers": ["react-native-web"] }, "sha512-NZI3B5Z6kxAb8gzb2Wxzu/+P2SlFIg1waHGIpQmazDSCRkNoHNY4g96g+xS0QPSaG/9xRBbDNnd2f2/OW6t6LQ=="],
 
     "react-native-purchases": ["react-native-purchases@10.4.4", "", { "dependencies": { "@revenuecat/purchases-js-hybrid-mappings": "18.22.2", "@revenuecat/purchases-typescript-internal": "18.22.2" }, "peerDependencies": { "react": ">= 16.6.3", "react-native": ">= 0.73.0", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-cvOF75u8Q48fkmEgE5tSTGiTyZwIFBR72owdZJgGCkC6xoHOBnAJ3VvXO+DG+VfGeySgleUmdT9PUPj+86ftMg=="],
+
+    "react-native-purchases-ui": ["react-native-purchases-ui@10.4.4", "", { "dependencies": { "@revenuecat/purchases-typescript-internal": "18.22.2" }, "peerDependencies": { "react": "*", "react-native": ">= 0.73.0", "react-native-purchases": "10.4.4", "react-native-web": "*" }, "optionalPeers": ["react-native-web"] }, "sha512-ziykTvsKkwOWWsg5Tm5/YhiaSmQdkLSF59F2WMa4kw1iMXhIhykQ8jdmvZlJ3nqbAd7xEk7tq41t8DA0gt5L0Q=="],
 
     "react-native-safe-area-context": ["react-native-safe-area-context@5.6.2", "", { "peerDependencies": { "react": "*", "react-native": "*" } }, "sha512-4XGqMNj5qjUTYywJqpdWZ9IG8jgkS3h06sfVjfw5yZQZfWnRFXczi0GnYyFyCc2EBps/qFmoCH8fez//WumdVg=="],
 
