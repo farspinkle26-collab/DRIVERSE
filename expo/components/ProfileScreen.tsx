@@ -92,7 +92,7 @@ import { PlatinumNameBadge, PlatinumWordmark } from "@/components/platinum/Plati
 import { FounderNameBadge, FounderWordmark } from "@/components/founder/FounderBadge";
 import PlatinumAura from "@/components/platinum/PlatinumAura";
 import PlatinumPageGlow from "@/components/platinum/PlatinumPageGlow";
-import ProfileFrame from "@/components/platinum/ProfileFrame";
+import AvatarFrame from "@/components/frames/AvatarFrame";
 import PremiumVehicleIcon from "@/components/platinum/PremiumVehicleIcon";
 import ShowcaseModal from "@/components/platinum/ShowcaseModal";
 import CosmeticsPicker from "@/components/platinum/CosmeticsPicker";
@@ -1050,20 +1050,26 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             disabled={!isSelf || uploadingAvatar}
             style={({ pressed }) => [styles.avatarWrap, pressed && isSelf && styles.pressed]}
           >
-            {/* Aura outside, frame inside, avatar innermost. Both render as
-                nothing for a Regular driver, and both draw past the avatar
-                box without moving the level badge — `avatarWrap` is pinned to
-                AVATAR_SIZE and the overlay is centred inside it. */}
+            {/* Aura outside, frame inside, avatar innermost. The aura renders
+                as nothing for a Regular driver; the frame never does — every
+                driver has a rank, so every driver has a frame. Both draw past
+                the avatar box without moving the level badge — `avatarWrap`
+                is pinned to AVATAR_SIZE and the overlay is centred inside it.
+
+                `AvatarFrame` resolves Platinum-over-rank itself, so this call
+                site passes both inputs and never branches on entitlement. */}
             <PlatinumAura
               show={viewedIsPlatinum}
               size={AVATAR_SIZE}
               emphasis
               style={styles.avatarAura}
             >
-              <ProfileFrame
-                frame={isSelf ? cosmetics.selectedProfileFrame : otherProfileFrame}
+              <AvatarFrame
+                level={level}
+                platinumFrame={isSelf ? cosmetics.selectedProfileFrame : otherProfileFrame}
                 isPlatinum={viewedIsPlatinum}
                 size={AVATAR_SIZE}
+                detail="full"
               >
                 <View style={styles.avatarRing}>
                   <View style={styles.avatarInner}>
@@ -1076,7 +1082,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     )}
                   </View>
                 </View>
-              </ProfileFrame>
+              </AvatarFrame>
             </PlatinumAura>
             <View style={styles.levelBadge}>
               <Text style={styles.levelBadgeText}>{level}</Text>

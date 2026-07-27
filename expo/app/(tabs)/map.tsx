@@ -46,6 +46,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
+import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import { usePlaces } from "@/hooks/usePlaces";
 import { PLACE_CATEGORY_LABELS } from "@/constants/placesCategories";
 import type { NormalizedPlace } from "@/lib/placesApi";
@@ -571,6 +572,15 @@ const CAT_GLYPHS: Record<LandmarkCategory, MapGlyphComponent> = {
   charging: MAP_GLYPHS.charging,
   workshop: MAP_GLYPHS.workshop,
 };
+
+/**
+ * The rank frame on a driver marker fills the same 42pt outer slot the
+ * convoy and distress rings use, inside the 46pt `playerRingBox`. Keeping
+ * all three on one diameter means the marker's bounds never change with
+ * rank — which matters because the native marker snapshot is taken from
+ * those bounds, and a taller marker would clip.
+ */
+const PLAYER_RANK_RING_SIZE = 42;
 
 // ─── SettledMarker ───────────────────────────────────────
 // Android draws custom marker views by snapshotting them into a bitmap.
@@ -2265,11 +2275,26 @@ export default function MapScreen() {
                     absolutely-positioned children with negative offsets get
                     clipped out of the native marker snapshot. */}
                 <View style={styles.playerRingBox}>
+                  {/* Outer slot precedence: distress → convoy → rank frame.
+                      The first two are live operational state and have to
+                      win; rank is cosmetic and yields. The inner `playerRing`
+                      keeps carrying the livery colour either way, so adding
+                      rank never costs the marker its identity hue.
+
+                      Marker frames are always static — see `RankFrameRing`.
+                      Android snapshots markers to a bitmap, so an animated
+                      frame would freeze mid-lap rather than animate. */}
                   {problem ? (
                     <View style={styles.problemOuterRing} />
                   ) : isPartyMate ? (
                     <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
-                  ) : null}
+                  ) : (
+                    <RankFrameRing
+                      box={PLAYER_RANK_RING_SIZE}
+                      level={onlineUser.level}
+                      style={styles.playerRankRing}
+                    />
+                  )}
                   <View style={[
                     styles.playerRing,
                     { borderColor: ringColor },
@@ -5735,6 +5760,10 @@ const styles = StyleSheet.create({
   },
   playerRingParty: {
     borderWidth: 3,
+  },
+  // Same 2pt top offset as the convoy/distress rings it shares the slot with.
+  playerRankRing: {
+    top: 2,
   },
   partyOuterRing: {
     position: "absolute",

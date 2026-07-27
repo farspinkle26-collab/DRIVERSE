@@ -17,6 +17,7 @@ import { supabase } from "@/lib/supabase";
 import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
 import PlatinumAura from "@/components/platinum/PlatinumAura";
+import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
 import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, cut, fontFamily, onRacingRed, radius, spacing, textStyle } from "@/constants/theme";
@@ -136,15 +137,22 @@ export default function ConvoyDetailScreen() {
           {roster.map((m) => (
             <View key={m.id} style={styles.memberRow}>
               {/* The aura marks a Platinum member's avatar here the same way
-                  it does on their profile — one signal, one place it can be. */}
+                  it does on their profile — one signal, one place it can be.
+                  The rank frame sits inside the aura and outside the convoy
+                  border, so a row shows all three without any of them moving:
+                  subscription, rank, convoy membership. `list` detail keeps
+                  shape and colour but phase-locks every row's animation to
+                  one clock. */}
               <PlatinumAura show={platinumMembers.has(m.user_id)} size={40}>
-                <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
-                  {m.avatar ? (
-                    <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
-                  ) : (
-                    <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
-                  )}
-                </View>
+                <ListAvatarFrame level={m.level} size={40}>
+                  <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
+                    {m.avatar ? (
+                      <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
+                    ) : (
+                      <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
+                    )}
+                  </View>
+                </ListAvatarFrame>
               </PlatinumAura>
               <View style={{ flex: 1 }}>
                 <View style={styles.rowNameLine}>

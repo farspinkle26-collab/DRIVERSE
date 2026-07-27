@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
 import {
   StyleSheet,
   View,
@@ -36,6 +37,7 @@ export default function DirectChatScreen() {
 
   const [partnerName, setPartnerName] = useState("Driver");
   const [partnerAvatar, setPartnerAvatar] = useState<string | undefined>(undefined);
+  const [partnerLevel, setPartnerLevel] = useState(1);
   const [messages, setMessages] = useState<DirectMessageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
@@ -55,15 +57,18 @@ export default function DirectChatScreen() {
   const load = useCallback(async () => {
     if (!user || !partnerId) return;
     setLoading(true);
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, name, avatar")
-      .eq("id", partnerId)
-      .single();
+    // Level lives in `user_xp`, so the header's rank frame needs its own
+    // read. Fired alongside the profile read rather than after it, so the
+    // avatar does not paint bare and then gain a frame a beat later.
+    const [{ data: profile }, { data: xp }] = await Promise.all([
+      supabase.from("profiles").select("id, name, avatar").eq("id", partnerId).single(),
+      supabase.from("user_xp").select("level").eq("user_id", partnerId).maybeSingle(),
+    ]);
     if (profile) {
       setPartnerName(profile.name ?? "Driver");
       setPartnerAvatar(profile.avatar ?? undefined);
     }
+    if (xp) setPartnerLevel((xp as { level: number }).level ?? 1);
     const { data } = await supabase
       .from("direct_messages")
       .select("*")
@@ -141,13 +146,15 @@ export default function DirectChatScreen() {
           style={styles.identity}
           onPress={() => router.push(`/user/${partnerId}` as any)}
         >
-          <View style={styles.avatar}>
-            {partnerAvatar ? (
-              <Image source={{ uri: partnerAvatar }} style={styles.avatarImg} />
-            ) : (
-              <Text style={styles.avatarText}>{partnerName[0]?.toUpperCase() ?? "?"}</Text>
-            )}
-          </View>
+          <ListAvatarFrame level={partnerLevel} size={34}>
+            <View style={styles.avatar}>
+              {partnerAvatar ? (
+                <Image source={{ uri: partnerAvatar }} style={styles.avatarImg} />
+              ) : (
+                <Text style={styles.avatarText}>{partnerName[0]?.toUpperCase() ?? "?"}</Text>
+              )}
+            </View>
+          </ListAvatarFrame>
           <Text style={styles.topTitle} numberOfLines={1}>{partnerName}</Text>
         </Pressable>
         <View style={{ width: 40 }} />
