@@ -84,6 +84,7 @@ import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
 import { useCarDriveStats, CarDriveStats } from "@/hooks/useCarDriveStats";
 import { rankForLevel, rankProgress } from "@/constants/ranks";
+import { flagForCountry } from "@/constants/countries";
 import RankBadge from "@/components/RankBadge";
 import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
@@ -388,6 +389,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [otherStreak, setOtherStreak] = useState(0);
   const [otherVehicleIcon, setOtherVehicleIcon] = useState<string | null>(null);
   const [otherProfileFrame, setOtherProfileFrame] = useState<string | null>(null);
+  const [otherCountry, setOtherCountry] = useState<string | null>(null);
 
   const [cars, setCars] = useState<CarItem[]>([]);
   const [trips, setTrips] = useState<TripItem[]>([]);
@@ -438,7 +440,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     }
     const { data } = await supabase
       .from("profiles")
-      .select("id, name, avatar, vehicle_icon, profile_frame")
+      .select("id, name, avatar, vehicle_icon, profile_frame, country")
       .eq("id", targetId)
       .single();
     if (data) {
@@ -448,6 +450,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       // holds the signed-in driver's own.
       setOtherVehicleIcon(data.vehicle_icon ?? null);
       setOtherProfileFrame(data.profile_frame ?? null);
+      setOtherCountry(data.country ?? null);
     }
     const { data: xp } = await supabase
       .from("user_xp")
@@ -1040,7 +1043,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
             <Text style={styles.rankSubtitle}>{rank.name}</Text>
 
-            {isSelf && (
+            {isSelf ? (
               <View style={styles.nameRow}>
                 {editingCountry ? (
                   <TextInput
@@ -1056,18 +1059,22 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 ) : (
                   <Tag
                     icon={
-                      <MapPin size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      user?.country ? (
+                        <Text style={styles.countryFlag}>{flagForCountry(user.country)}</Text>
+                      ) : (
+                        <MapPin size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      )
                     }
                   >
                     <Text style={styles.tagText} numberOfLines={1}>
-                      {user?.country || "Set your country"}
+                      {user?.country || "Set your nation"}
                     </Text>
                   </Tag>
                 )}
                 {!editingCountry && (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Edit country"
+                    accessibilityLabel="Edit nation"
                     onPress={() => { setCountryDraft(user?.country ?? ""); setEditingCountry(true); }}
                     hitSlop={spacing.spacingSm}
                   >
@@ -1075,7 +1082,15 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                   </Pressable>
                 )}
               </View>
-            )}
+            ) : otherCountry ? (
+              <View style={styles.nameRow}>
+                <Tag icon={<Text style={styles.countryFlag}>{flagForCountry(otherCountry)}</Text>}>
+                  <Text style={styles.tagText} numberOfLines={1}>
+                    {otherCountry}
+                  </Text>
+                </Tag>
+              </View>
+            ) : null}
 
             {primaryCar && (
               <Tag
@@ -2486,6 +2501,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.racingRed,
     flex: 1,
     paddingVertical: 0,
+  },
+  countryFlag: {
+    fontSize: 14,
   },
 
   // Tags — utility rectangles, never the cut

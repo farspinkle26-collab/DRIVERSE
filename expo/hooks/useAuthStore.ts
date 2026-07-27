@@ -101,6 +101,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           email: sessionData?.session?.user?.email ?? "",
           name: meta?.name ?? "Driver",
           phone: meta?.phone ?? null,
+          country: meta?.country?.trim() || null,
           role: "customer" as UserRole,
           account_status: "active",
           verification_status: "verified",
@@ -118,6 +119,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           accountStatus: "active",
           verificationStatus: "verified",
           canSwitchRoles: false,
+          country: defaultProfile.country ?? undefined,
         });
         return;
       }
@@ -181,7 +183,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   // ================================================================
   // SIGNUP
   // ================================================================
-  const signup = useCallback(async (email: string, password: string, name: string, phone?: string) => {
+  const signup = useCallback(async (email: string, password: string, name: string, phone?: string, country?: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -193,6 +195,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           data: {
             name,
             phone: phone ?? "",
+            country: country ?? "",
           },
         },
       });
@@ -215,6 +218,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           email: data.user.email || email,
           name: name || email.split("@")[0],
           phone: phone || null,
+          country: country?.trim() || null,
           role: "customer" as UserRole,
           account_status: "active",
           verification_status: "verified",
