@@ -162,7 +162,7 @@ export default function SaveRouteModal({
             <View style={styles.header}>
               <View style={styles.grabber} />
               <View style={styles.headerRow}>
-                <Text style={styles.headerTitle}>Save & Share Route</Text>
+                <Text style={styles.headerTitle}>Save Route</Text>
                 <TouchableOpacity onPress={onClose} hitSlop={10}>
                   <X size={22} color="#8A8A9A" />
                 </TouchableOpacity>

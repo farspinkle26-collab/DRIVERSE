@@ -126,6 +126,7 @@ import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import ShareCardModal from "@/components/ShareCardModal";
+import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
@@ -787,6 +788,11 @@ export default function MapScreen() {
   const scenicToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Save & Share Route modal
   const [showSaveRoute, setShowSaveRoute] = useState(false);
+  // Id of the just-recorded drive once it has been saved to the profile.
+  // Drives the Save button's "Saved" state and unlocks the Share button.
+  const [savedRouteId, setSavedRouteId] = useState<string | null>(null);
+  // Trip share-card sheet (only reachable after the drive is saved).
+  const [showShareTrip, setShowShareTrip] = useState(false);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const lastCoordTimeRef = useRef<number>(0);
@@ -1605,6 +1611,7 @@ export default function MapScreen() {
     setTripDistance(0);
     setRecordedPath([]);
     setXpEarned(null);
+    setSavedRouteId(null);
     setWasFaster(false);
     setLeveledUp(false);
     setCurrentSpeed(0);
@@ -2745,6 +2752,7 @@ export default function MapScreen() {
                   setTripDistance(0);
                   setElapsedMs(0);
                   setXpEarned(null);
+                  setSavedRouteId(null);
                   clearRoute();
                 }}
               >
@@ -2812,31 +2820,36 @@ export default function MapScreen() {
               </View>
             </View>
 
+            {/* Save first, then Share. The route must be stored to the
+                driver's profile before it can be shared, so the Save button
+                flips to a locked-in "Saved" state on success and only then
+                does the Share button come alive. */}
             <View style={styles.sheetActions}>
               <CutCornerButton
-                title="Save & Share Route"
+                title={savedRouteId ? "Saved" : "Save"}
                 corners="topRight"
+                disabled={savedRouteId != null}
                 onPress={() => setShowSaveRoute(true)}
                 style={styles.sheetPrimaryAction}
-                icon={<Bookmark size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />}
+                accessibilityLabel={savedRouteId ? "Route saved to your profile" : "Save this route to your profile"}
+                icon={
+                  savedRouteId ? (
+                    <Check size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />
+                  ) : (
+                    <Bookmark size={spacing.spacingLg} color={onRacingRed} strokeWidth={CHROME_ICON_STROKE} />
+                  )
+                }
               />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open my saved routes"
-                onPress={() => router.push("/routes" as any)}
-              >
-                <CutCornerSurface
-                  fill={colors.voidBlack}
-                  borderColor={colors.hairline}
-                  borderWidth={borderWidth.hairline}
-                  cutSize={cut.md}
-                  corners="topRight"
-                  style={styles.iconAction}
-                  contentStyle={styles.iconActionContent}
-                >
-                  <Share2 size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
-                </CutCornerSurface>
-              </Pressable>
+              <CutCornerButton
+                title="Share"
+                variant="ghost"
+                corners="topRight"
+                disabled={savedRouteId == null}
+                onPress={() => setShowShareTrip(true)}
+                style={styles.sheetPrimaryAction}
+                accessibilityLabel={savedRouteId ? "Share this drive" : "Save the route before sharing"}
+                icon={<Share2 size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+              />
             </View>
           </CutCornerSurface>
         </View>
@@ -3885,7 +3898,38 @@ export default function MapScreen() {
             ? selectedDestination.name ?? "Dropped Pin"
             : ""
         }
-        onSaved={(routeId) => router.push(`/route/${routeId}` as any)}
+        onSaved={(routeId) => setSavedRouteId(routeId)}
+      />
+
+      {/* --- Share the just-saved drive as a trip card --- */}
+      <ShareCardModal
+        visible={showShareTrip}
+        onClose={() => setShowShareTrip(false)}
+        type="trip"
+        payload={{
+          trip: {
+            id: savedRouteId ?? "recorded",
+            destination_name:
+              selectedDestination?.type === "cafe"
+                ? selectedDestination.data.name
+                : selectedDestination?.type === "location"
+                ? selectedDestination.name ?? "Dropped Pin"
+                : null,
+            origin_name: "Current Location",
+            route_polyline:
+              recordedPath.length > 1
+                ? encodePolyline(simplifyPath(recordedPath, 400))
+                : null,
+            distance_km: tripDistance / 1000,
+            duration_seconds: Math.round(elapsedMs / 1000),
+            avg_speed_kmh:
+              elapsedMs > 0 ? (tripDistance / 1000) / (elapsedMs / 1000 / 3600) : 0,
+            top_speed_kmh: tripTopSpeed,
+            xp_earned: xpEarned ?? 0,
+            completed_at: new Date().toISOString(),
+          },
+        }}
+        caption="Just recorded a drive on Driveverse"
       />
 
       {/* --- Rank-up share (from the level-up moment) --- */}
