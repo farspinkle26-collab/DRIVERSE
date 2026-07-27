@@ -179,9 +179,11 @@ export const SCORE_STANDOUT = 90;
  * XP for a recorded (or in-progress) drive, scaled off what actually
  * happened on the road — distance covered, time behind the wheel, and the
  * pace that implies — rather than a flat per-trip number. A quick errand
- * and a long highway run should not earn the same XP.
+ * and a long highway run should not earn the same XP. Distance is the
+ * dominant term, at hundreds of XP per km, so the total tracks the length
+ * of the drive rather than sitting near a flat per-trip floor.
  *
- *   distance   the primary driver: every km covered counts.
+ *   distance   the primary driver: every km covered counts, at 300 XP/km.
  *   time       a steady trickle for time spent driving.
  *   pace       average speed scales the total up (open-road driving) or
  *              down (crawling in traffic), clamped so neither a GPS blip
@@ -200,8 +202,8 @@ export function calculateDriveXP(params: {
 
   const avgSpeedKmh = clamp(distanceKm / (durationMin / 60), 0, 180);
 
-  const distanceXp = distanceKm * 25;
-  const timeXp = durationMin * 4;
+  const distanceXp = distanceKm * 300;
+  const timeXp = durationMin * 30;
   const paceMultiplier = clamp(avgSpeedKmh / 45, 0.6, 2.2);
 
   let xp = (distanceXp + timeXp) * paceMultiplier;
@@ -209,7 +211,7 @@ export function calculateDriveXP(params: {
   const estimatedSec = params.estimatedDurationSeconds ?? 0;
   if (estimatedSec > 60 && params.durationSeconds < estimatedSec) {
     const ratio = clamp((estimatedSec - params.durationSeconds) / estimatedSec, 0, 1);
-    xp += 50 + ratio * 150;
+    xp += 500 + ratio * 1500;
   }
 
   return Math.max(5, Math.round(xp));
