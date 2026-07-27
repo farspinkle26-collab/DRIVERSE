@@ -1,7 +1,7 @@
 import "server-only";
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { postsDir, accountJsonPath, whatWorksPath } from "./paths";
+import { readTextFile, writeTextFile, listDir } from "./gitFs";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -251,24 +251,17 @@ function parsePost(slug: string, raw: string): Post {
 }
 
 export async function listPostSlugs(): Promise<string[]> {
-  try {
-    const files = await fs.readdir(postsDir());
-    return files
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => f.replace(/\.md$/, ""))
-      .sort();
-  } catch {
-    return [];
-  }
+  const files = await listDir(postsDir());
+  return files
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.replace(/\.md$/, ""))
+    .sort();
 }
 
 export async function readPost(slug: string): Promise<Post | null> {
-  try {
-    const raw = await fs.readFile(path.join(postsDir(), `${slug}.md`), "utf8");
-    return parsePost(slug, raw);
-  } catch {
-    return null;
-  }
+  const raw = await readTextFile(path.join(postsDir(), `${slug}.md`));
+  if (raw == null) return null;
+  return parsePost(slug, raw);
 }
 
 export async function readAllPosts(): Promise<Post[]> {
@@ -277,10 +270,9 @@ export async function readAllPosts(): Promise<Post[]> {
   return posts.filter((p): p is Post => p !== null);
 }
 
-export async function writePost(post: Post): Promise<void> {
-  await fs.mkdir(postsDir(), { recursive: true });
+export async function writePost(post: Post, commitMessage?: string): Promise<void> {
   const file = path.join(postsDir(), `${post.slug}.md`);
-  await fs.writeFile(file, serializePost(post), "utf8");
+  await writeTextFile(file, serializePost(post), commitMessage ?? `content: update ${post.slug}`);
 }
 
 /**
@@ -292,7 +284,7 @@ export async function setPostChecked(slug: string, checked: boolean): Promise<Po
   const post = await readPost(slug);
   if (!post) return null;
   post.frontmatter.checked = checked;
-  await writePost(post);
+  await writePost(post, `content: mark ${slug} ${checked ? "done" : "not done"}`);
   return post;
 }
 
@@ -396,8 +388,9 @@ export function buildPostFromForm(
 
 // ── account.json ───────────────────────────────────────────────────────────
 export async function readAccount(): Promise<AccountData | null> {
+  const raw = await readTextFile(accountJsonPath());
+  if (raw == null) return null;
   try {
-    const raw = await fs.readFile(accountJsonPath(), "utf8");
     return JSON.parse(raw) as AccountData;
   } catch {
     return null;
@@ -405,8 +398,11 @@ export async function readAccount(): Promise<AccountData | null> {
 }
 
 export async function writeAccount(data: AccountData): Promise<void> {
-  await fs.mkdir(path.dirname(accountJsonPath()), { recursive: true });
-  await fs.writeFile(accountJsonPath(), JSON.stringify(data, null, 2) + "\n", "utf8");
+  await writeTextFile(
+    accountJsonPath(),
+    JSON.stringify(data, null, 2) + "\n",
+    "content: update account.json",
+  );
 }
 
 // ── what-works.md (fenced auto-section) ─────────────────────────────────────
@@ -414,11 +410,7 @@ export const AUTO_START = "<!-- AUTO:START -->";
 export const AUTO_END = "<!-- AUTO:END -->";
 
 export async function readWhatWorks(): Promise<string> {
-  try {
-    return await fs.readFile(whatWorksPath(), "utf8");
-  } catch {
-    return "";
-  }
+  return (await readTextFile(whatWorksPath())) ?? "";
 }
 
 /** Extract just the machine-managed section (between the fences). */
@@ -449,6 +441,5 @@ export async function writeWhatWorksAuto(autoBody: string): Promise<void> {
       `_Hand-written notes live outside the AUTO fence and are never overwritten by the pipeline._\n\n` +
       `${block}\n`;
   }
-  await fs.mkdir(path.dirname(whatWorksPath()), { recursive: true });
-  await fs.writeFile(whatWorksPath(), next, "utf8");
+  await writeTextFile(whatWorksPath(), next, "content: regenerate what-works.md auto section");
 }

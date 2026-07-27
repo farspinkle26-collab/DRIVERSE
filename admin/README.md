@@ -113,6 +113,14 @@ schedule runs.
 > `outputFileTracingRoot`/`outputFileTracingIncludes` so the `content/` files are
 > bundled into the serverless functions on Vercel. If you deploy with a
 > different root, set `CONTENT_DIR` to an absolute path.
+>
+> **Writes on Vercel** (the Done checkbox, Add/Edit Post, ingest, enrich, run)
+> need `GITHUB_TOKEN` + `GITHUB_REPO` set (see `.env.example`) — the deployed
+> filesystem is read-only/ephemeral outside `/tmp`, so without those vars a
+> plain file write there silently doesn't persist. When set, every write to
+> `content/` goes through the GitHub Contents API instead and shows up as a
+> commit on `GITHUB_BRANCH`. Local dev never needs this; the checked-out
+> filesystem is already writable.
 
 ---
 
