@@ -50,13 +50,23 @@ v2, saved routes, trip names, trip privacy. `expo/database_setup_complete.sql`
 is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
 Functions.
 
+**Online presence** — who each driver sees on the map — runs on two paths at
+once, both in `expo/hooks/useOnlineUsers.ts`: Supabase Realtime Presence on
+the `online-players` channel (instant), and a 10-second poll of the
+`user_locations` table each client already upserts its position into (the
+fallback, over HTTP, so a dead websocket degrades to "seconds late" instead of
+an empty map with no error). `expo/hooks/onlineUsersMerge.ts` holds the pure
+merge/staleness rule and its tests. Full detail — connection states, rejoin
+backoff, and how to verify it on two devices — in
+`expo/ONLINE_PRESENCE_REFERENCE.md`.
+
 The **problem signal** (`expo/database_migration_problem_signal.sql`,
 `expo/PROBLEM_SIGNAL_REFERENCE.md`) lets a driver in trouble broadcast a help
 signal — breakdown / accident / out-of-fuel / SOS — that every online driver
-on the map sees in real time, whether or not they share a convoy. The live
-path is Supabase Realtime Presence (the same `online-players` channel that
-carries positions, in `hooks/useOnlineUsers.ts`); the migration only adds the
-`problem_type` / `problem_since` mirror columns to `user_locations`.
+on the map sees in real time, whether or not they share a convoy. It rides the
+same two paths as position: the presence payload live, and the
+`problem_type` / `problem_since` mirror columns on `user_locations` (all the
+migration adds) on the fallback sweep.
 
 When asked about the schema, prefer reading `expo/database_schema.json` and
 the specific `expo/database_migration_*.sql` file for the feature in question
