@@ -6,6 +6,14 @@
  * app reads `isPlatinum` from here. There is deliberately no parallel
  * `profiles.is_platinum` the client writes — see `constants/platinum.ts`.
  *
+ * CONFIGURATION TIMING
+ *   The SDK is configured as soon as auth has answered once, with the Supabase
+ *   user id when there is one and `null` when there isn't. Configuring for
+ *   signed-out drivers too is what lets the paywall show real store prices
+ *   before anyone has an account; RevenueCat uses an anonymous id, and
+ *   `identify()` migrates it — along with anything bought under it — onto the
+ *   Supabase id at sign-in.
+ *
  * CACHING
  *   The RevenueCat call is a network round trip, so a cold start would paint
  *   every Platinum surface as Regular for a beat and then pop. The last known
@@ -22,9 +30,12 @@
  *
  * PAYWALL
  *   `openPaywall(trigger)` is how every friction point in the app raises the
- *   upgrade screen, passing the benefit that was blocked so the paywall can
- *   pin the relevant row. Keeping it on this hook means a screen needs one
- *   import to both check the gate and offer the way past it.
+ *   upgrade screen, passing the benefit that was blocked. It prefers
+ *   RevenueCat's dashboard-configured paywall and falls back to the
+ *   hand-built `app/platinum.tsx` — see `openPaywall` below. Keeping it on
+ *   this hook means a screen needs one import to both check the gate and offer
+ *   the way past it, and the two paywall implementations stay an
+ *   implementation detail of this file.
  */
 
 import createContextHook from "@nkzw/create-context-hook";
@@ -32,6 +43,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  benefitById,
   FEATURE_BENEFIT,
   isAtLimit,
   limitFor,
@@ -41,22 +53,38 @@ import {
 import {
   configurePurchases,
   forgetUser,
+  getCustomerSummary,
   getEntitlement,
+  getPlatinumOffering,
   getPlatinumPackages,
   identify,
   isPurchasesAvailable,
+  isTestStoreBuild,
   NO_ENTITLEMENT,
   onEntitlementChange,
   purchase as purchasePackage,
   restore as restorePurchases,
+  type CustomerSummary,
   type EntitlementSnapshot,
   type PlatinumPackage,
   type PurchaseResult,
   type RestoreResult,
 } from "@/lib/purchases";
+import {
+  isPurchasesUiAvailable,
+  presentCustomerCenter,
+  presentPaywall,
+} from "@/lib/purchasesUi";
 import { supabase } from "@/lib/supabase";
 
-const CACHE_KEY = "driveverse_platinum";
+/**
+ * Bumped from `driveverse_platinum` when the snapshot gained lifetime, trial
+ * and billing-issue fields. A cache entry written by the old shape would read
+ * back with those undefined, which is falsy in the right direction for all of
+ * them — but a lifetime holder briefly reading as "ends at period close" is
+ * exactly the confusion this whole change exists to remove.
+ */
+const CACHE_KEY = "driveverse_platinum_v2";
 
 /**
  * How long a cached snapshot may stand in for a live answer. A subscription
@@ -77,7 +105,8 @@ async function readCache(userId: string): Promise<EntitlementSnapshot | null> {
     const cached = JSON.parse(raw) as CachedEntitlement;
     if (Date.now() - cached.checkedAt > CACHE_TTL_MS) return null;
     // An expiry the store already passed means the cache is describing a
-    // subscription that has since lapsed — don't trust it.
+    // subscription that has since lapsed — don't trust it. A lifetime unlock
+    // has no expiry, so this check correctly never fires for one.
     if (cached.expiresAt && new Date(cached.expiresAt).getTime() < Date.now()) {
       return null;
     }
@@ -105,8 +134,20 @@ export type PlatinumStatus =
   /** No store on this runtime (Expo Go, web, missing SDK key). */
   | "unavailable";
 
+/**
+ * Whether RevenueCat's hosted paywall has been shown to work this session.
+ *
+ * `null` until first tried. Once a presentation comes back as "no paywall
+ * configured", every later `openPaywall` goes straight to the app's own screen
+ * instead of paying for an offerings round trip and a failed present each
+ * time. Module scope rather than state because it describes the RevenueCat
+ * project, not this component tree.
+ */
+let hostedPaywallWorks: boolean | null = null;
+
 export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
   const [userId, setUserId] = useState<string | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [entitlement, setEntitlement] =
     useState<EntitlementSnapshot>(NO_ENTITLEMENT);
   const [status, setStatus] = useState<PlatinumStatus>("loading");
@@ -123,16 +164,18 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUserId(session?.user?.id ?? null);
+      setAuthResolved(true);
     });
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) =>
-      setUserId(session?.user?.id ?? null)
-    );
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+      setAuthResolved(true);
+    });
     return () => subscription.unsubscribe();
   }, []);
 
-  /* ─── Configure + identify ──────────────────────────────── */
+  /* ─── Configure ─────────────────────────────────────────── */
 
   const applySnapshot = useCallback((snapshot: EntitlementSnapshot) => {
     setEntitlement(snapshot);
@@ -140,52 +183,80 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
     if (uid) void writeCache(uid, snapshot);
   }, []);
 
+  // Runs once, as soon as auth has an answer. Deliberately not keyed on
+  // `userId`: the SDK is configured for the whole process, and later sign-ins
+  // are handled by `identify()` in the effect below.
   useEffect(() => {
+    if (!authResolved) return;
     let active = true;
 
-    if (!userId) {
-      // Signed out: drop the entitlement immediately rather than letting the
-      // previous account's Platinum styling bleed into a guest session.
-      setEntitlement(NO_ENTITLEMENT);
-      setPackages([]);
-      setStatus(isPurchasesAvailable() ? "ready" : "unavailable");
-      void forgetUser();
-      return;
-    }
-
     (async () => {
+      const uid = userIdRef.current;
       // Paint from cache first so Platinum surfaces don't flash Regular.
-      const cached = await readCache(userId);
-      if (active && cached) setEntitlement(cached);
+      if (uid) {
+        const cached = await readCache(uid);
+        if (active && cached) setEntitlement(cached);
+      }
 
-      const ok = await configurePurchases(userId, {
-        debugLogs: __DEV__,
-      });
+      const ok = await configurePurchases(uid, { debugLogs: __DEV__ });
       if (!active) return;
       if (!ok) {
         setStatus("unavailable");
         return;
       }
 
-      const snapshot = await identify(userId);
+      applySnapshot(await getEntitlement());
       if (!active) return;
-      applySnapshot(snapshot);
       setStatus("ready");
     })();
 
     return () => {
       active = false;
     };
-  }, [userId, applySnapshot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authResolved, applySnapshot]);
+
+  /* ─── Identity ──────────────────────────────────────────── */
+
+  // Keeps RevenueCat's app user id pointed at the Supabase user, so a
+  // subscription follows the account across devices rather than the install.
+  const identifiedAs = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (identifiedAs.current === userId) return;
+    identifiedAs.current = userId;
+
+    let active = true;
+    (async () => {
+      if (!userId) {
+        // Signed out: drop the entitlement immediately rather than letting the
+        // previous account's Platinum styling bleed into a guest session.
+        await forgetUser();
+        if (!active) return;
+        setEntitlement(NO_ENTITLEMENT);
+        setPackages([]);
+        return;
+      }
+      const snapshot = await identify(userId);
+      if (!active) return;
+      applySnapshot(snapshot);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [userId, status, applySnapshot]);
 
   /* ─── Live entitlement updates ──────────────────────────── */
 
-  // Renewals, expirations, refunds and purchases made on another device all
-  // arrive through this listener, so nothing has to poll.
+  // Renewals, expirations, refunds, a deferred payment clearing, purchases
+  // made on another device, and purchases made inside RevenueCat's own paywall
+  // all arrive through this listener, so nothing has to poll.
   useEffect(() => {
-    if (status !== "ready" || !userId) return;
+    if (status !== "ready") return;
     return onEntitlementChange(applySnapshot);
-  }, [status, userId, applySnapshot]);
+  }, [status, applySnapshot]);
 
   const refresh = useCallback(async () => {
     if (!isPurchasesAvailable()) return;
@@ -214,7 +285,9 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
   const purchase = useCallback(
     async (pkg: PlatinumPackage): Promise<PurchaseResult> => {
       const result = await purchasePackage(pkg);
-      if (result.status === "purchased") applySnapshot(result.entitlement);
+      if (result.status === "purchased" || result.status === "already_owned") {
+        applySnapshot(result.entitlement);
+      }
       return result;
     },
     [applySnapshot]
@@ -226,17 +299,94 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
     return result;
   }, [applySnapshot]);
 
+  /** The full customer record, for a support or debug surface. Never a gate. */
+  const loadCustomerSummary = useCallback(
+    (): Promise<CustomerSummary | null> => getCustomerSummary(),
+    []
+  );
+
   /* ─── Paywall ───────────────────────────────────────────── */
 
   /**
-   * Raises the paywall, pinning `trigger`'s benefit row to the top so the
-   * screen speaks to whatever the driver was just blocked on.
+   * Raises the paywall on whichever implementation is actually available.
+   *
+   * 1. RevenueCat's dashboard-configured paywall, when the UI module is linked
+   *    and the offering has one attached. Pricing, copy and layout are then
+   *    editable without an app release, and the blocked benefit's headline is
+   *    handed over as a custom variable so the contextual trigger survives.
+   * 2. `app/platinum.tsx` otherwise — Expo Go, web, or a RevenueCat project
+   *    with no paywall configured yet. It is never removed: a dashboard that
+   *    isn't finished must not leave a driver with no way to subscribe.
+   *
+   * Stays synchronous for its ~15 call sites; the presentation happens in the
+   * background and either resolves in RevenueCat's own modal or navigates.
    */
-  const openPaywall = useCallback((trigger?: PlatinumBenefitId) => {
-    router.push(
-      (trigger ? `/platinum?trigger=${trigger}` : "/platinum") as never
-    );
-  }, []);
+  const openPaywall = useCallback(
+    (trigger?: PlatinumBenefitId) => {
+      const openFallbackScreen = () =>
+        router.push(
+          (trigger ? `/platinum?trigger=${trigger}` : "/platinum") as never
+        );
+
+      if (
+        hostedPaywallWorks === false ||
+        !isPurchasesUiAvailable() ||
+        !isPurchasesAvailable()
+      ) {
+        openFallbackScreen();
+        return;
+      }
+
+      void (async () => {
+        const outcome = await presentPaywall({
+          offering: await getPlatinumOffering(),
+          triggerHeadline: trigger
+            ? benefitById(trigger)?.triggerHeadline
+            : undefined,
+        });
+
+        if (outcome === "purchased" || outcome === "restored") {
+          hostedPaywallWorks = true;
+          // The listener will deliver this too; refreshing makes the caller's
+          // next render correct without waiting on the round trip.
+          await refresh();
+          return;
+        }
+        if (outcome === "cancelled" || outcome === "not_presented") {
+          hostedPaywallWorks = true;
+          return;
+        }
+        // "error" or "unavailable": no paywall attached to the offering, or the
+        // view failed. Remember it, and show the screen the app owns.
+        hostedPaywallWorks = false;
+        openFallbackScreen();
+      })();
+    },
+    [refresh]
+  );
+
+  /* ─── Customer Center ───────────────────────────────────── */
+
+  /**
+   * The post-purchase surface: status, plan changes, restore, refund requests
+   * (iOS) and cancellation with whatever retention offer the dashboard
+   * defines.
+   *
+   * Presents RevenueCat's Customer Center modally when the native module is
+   * there, and falls back to `app/subscription.tsx` — the app's own manage
+   * screen, which ends in a handoff to the store — when it isn't. Both stores
+   * forbid an in-app cancel flow, so every path here hands off rather than
+   * pretending it can cancel anything itself.
+   */
+  const openCustomerCenter = useCallback(async () => {
+    const shown = await presentCustomerCenter({
+      // A restore or a plan change inside the Customer Center changes the
+      // entitlement, and the app's gates must not lag behind the sheet.
+      onRestoreCompleted: () => void refresh(),
+      onManagementOptionSelected: () => void refresh(),
+    });
+    if (!shown) router.push("/subscription" as never);
+  }, [refresh]);
 
   const isPlatinum = entitlement.isPlatinum;
 
@@ -278,13 +428,19 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
       status,
       /** True when purchases can actually happen on this runtime. */
       canPurchase: isPurchasesAvailable() && status === "ready",
+      /** True when RevenueCat's own paywall / Customer Center can render. */
+      hasPurchasesUi: isPurchasesUiAvailable(),
+      /** True when this build talks to RevenueCat's Test Store. Dev banner only. */
+      isTestStore: isTestStoreBuild(),
       packages,
       loadingPackages,
       loadPackages,
       purchase,
       restore,
       refresh,
+      loadCustomerSummary,
       openPaywall,
+      openCustomerCenter,
       limit,
       atLimit,
       blockAtLimit,
@@ -299,7 +455,9 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
       purchase,
       restore,
       refresh,
+      loadCustomerSummary,
       openPaywall,
+      openCustomerCenter,
       limit,
       atLimit,
       blockAtLimit,

@@ -367,7 +367,12 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   // gate); another driver's comes from the narrow display lookup. Two sources
   // because only one of them is answerable on the client — see
   // `hooks/usePlatinumDirectory.ts`.
-  const { isPlatinum: selfIsPlatinum, limit: platinumLimit, openPaywall } = usePlatinum();
+  const {
+    isPlatinum: selfIsPlatinum,
+    limit: platinumLimit,
+    openPaywall,
+    openCustomerCenter,
+  } = usePlatinum();
   const otherIsPlatinum = useIsDriverPlatinum(isSelf ? null : targetId);
   const viewedIsPlatinum = isSelf ? selfIsPlatinum : otherIsPlatinum;
   const cosmetics = useCosmetics();
@@ -1724,16 +1729,23 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         {isSelf && (
           <View style={styles.settings}>
             <Text style={styles.settingsTitle}>SETTINGS</Text>
-            {/* The dedicated upgrade entry point. Chrome, not racingRed —
-                it is a status row, not the screen's primary action. */}
+            {/* The dedicated Platinum entry point. Chrome, not racingRed —
+                it is a status row, not the screen's primary action.
+
+                It changes destination with the driver's tier: a Regular driver
+                gets the paywall, a subscriber gets the Customer Center. Sending
+                an existing subscriber to a screen selling them what they
+                already own is the single most common way this row goes wrong. */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
                 selfIsPlatinum
-                  ? "Driveverse Platinum, subscription active"
+                  ? "Manage your Driveverse Platinum subscription"
                   : "Upgrade to Driveverse Platinum"
               }
-              onPress={() => openPaywall()}
+              onPress={() =>
+                selfIsPlatinum ? void openCustomerCenter() : openPaywall()
+              }
               style={({ pressed }) => [styles.settingRow, pressed && styles.pressed]}
             >
               <View style={styles.settingLeft}>

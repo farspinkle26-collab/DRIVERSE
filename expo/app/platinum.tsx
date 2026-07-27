@@ -21,13 +21,20 @@
  *   Expo Go, web, and any build without RevenueCat keys can still open this
  *   screen. It renders in full with fallback prices and a disabled CTA rather
  *   than 404ing, because half the value of the paywall is explaining the tier.
+ *
+ * RELATIONSHIP TO REVENUECAT'S HOSTED PAYWALL
+ *   `openPaywall()` prefers the paywall configured in the RevenueCat dashboard
+ *   (`lib/purchasesUi.tsx`), because pricing and copy experiments there ship in
+ *   minutes instead of an app review cycle. This screen is the fallback, and it
+ *   is deliberately a complete one: Expo Go, web, and a RevenueCat project with
+ *   no paywall attached yet all land here, and none of them may leave a driver
+ *   without a way to subscribe.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -70,7 +77,11 @@ import {
   textStyle,
 } from "@/constants/theme";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
-import { manageSubscriptionUrl, type PlatinumPeriod } from "@/lib/purchases";
+import {
+  type EntitlementSnapshot,
+  type PlatinumPeriod,
+  type StoreProduct,
+} from "@/lib/purchases";
 
 const ICON_MD = spacing.spacingLg; // 16
 const ICON_STROKE = 1.75;
@@ -100,6 +111,36 @@ const BENEFIT_ICONS: Record<string, React.FC<{ size: number; color: string; stro
   Users,
 };
 
+/**
+ * What the driver's Platinum access is actually doing right now.
+ *
+ * Four states that a naive `willRenew ? … : …` collapses into two wrong ones:
+ * a lifetime holder and a cancelled subscriber both report `willRenew: false`,
+ * and a driver mid-trial has not been charged yet.
+ */
+function renewalState(entitlement: EntitlementSnapshot): string {
+  if (entitlement.isLifetime) return "Lifetime access";
+  if (entitlement.isTrial) {
+    return entitlement.willRenew
+      ? "Free trial — converts at period end"
+      : "Free trial — ends at period close";
+  }
+  return entitlement.willRenew ? "Renews automatically" : "Ends at period close";
+}
+
+/**
+ * The CTA. Says "start free trial" only when the store actually reported an
+ * introductory offer on the selected product, and says "get" rather than
+ * "upgrade to" for lifetime, which is a purchase and not a subscription.
+ */
+function ctaTitle(
+  period: PlatinumPeriod,
+  introOffer: StoreProduct["introPrice"]
+): string {
+  if (introOffer && introOffer.price === 0) return "Start Free Trial";
+  return period === "lifetime" ? "Get Platinum for Life" : "Upgrade to Platinum";
+}
+
 export default function PlatinumPaywallScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -108,11 +149,13 @@ export default function PlatinumPaywallScreen() {
     isPlatinum,
     entitlement,
     canPurchase,
+    isTestStore,
     packages,
     loadingPackages,
     loadPackages,
     purchase,
     restore,
+    openCustomerCenter,
   } = usePlatinum();
 
   const [period, setPeriod] = useState<PlatinumPeriod>("yearly");
@@ -147,7 +190,25 @@ export default function PlatinumPaywallScreen() {
 
   const monthly = packages.find((p) => p.period === "monthly") ?? null;
   const yearly = packages.find((p) => p.period === "yearly") ?? null;
-  const selected = period === "yearly" ? yearly : monthly;
+  const lifetime = packages.find((p) => p.period === "lifetime") ?? null;
+
+  const packageFor = useCallback(
+    (p: PlatinumPeriod) =>
+      p === "yearly" ? yearly : p === "lifetime" ? lifetime : monthly,
+    [monthly, yearly, lifetime]
+  );
+  const selected = packageFor(period);
+
+  /**
+   * Whether to offer lifetime at all.
+   *
+   * Shown when the store returned a lifetime package, or when the store
+   * returned nothing whatsoever — the latter being the "explain the tier with
+   * fallback prices" state this screen is built for. Deliberately NOT shown
+   * when the store answered and had no lifetime product: advertising a
+   * one-time unlock that cannot be bought is worse than not mentioning it.
+   */
+  const showLifetime = lifetime !== null || packages.length === 0;
 
   /**
    * Yearly saving against twelve months at the monthly rate. Only shown when
@@ -162,10 +223,15 @@ export default function PlatinumPaywallScreen() {
     return saving > 0.01 ? Math.round(saving * 100) : null;
   }, [monthly, yearly]);
 
-  const priceFor = (p: PlatinumPeriod): string => {
-    const pkg = p === "yearly" ? yearly : monthly;
-    return pkg?.product.priceString ?? PLATINUM_FALLBACK_PRICE[p];
-  };
+  const priceFor = (p: PlatinumPeriod): string =>
+    packageFor(p)?.product.priceString ?? PLATINUM_FALLBACK_PRICE[p];
+
+  /**
+   * A free trial or intro offer attached to the selected product, in the
+   * store's own words. Never invented locally — if the store didn't report an
+   * intro price, the CTA says nothing about one.
+   */
+  const introOffer = selected?.product.introPrice ?? null;
 
   /* ─── Actions ───────────────────────────────────────────── */
 
@@ -183,6 +249,27 @@ export default function PlatinumPaywallScreen() {
     }
     // A cancelled purchase is the driver's decision, not an error.
     if (result.status === "cancelled") return;
+    if (result.status === "pending") {
+      // Google Play prepaid/deferred, or Apple's Ask to Buy. The purchase is
+      // real and unfinished; the entitlement lands on the customer-info
+      // listener when payment clears. Calling this a failure would be a lie.
+      Alert.alert(
+        "Waiting on payment",
+        "Your payment is still being processed. Platinum unlocks automatically as soon as it goes through."
+      );
+      router.back();
+      return;
+    }
+    if (result.status === "already_owned") {
+      // Owned on this store account but not yet attached here — a restore is
+      // the fix, and the entitlement has already been applied by the store.
+      Alert.alert(
+        "Already yours",
+        "This store account already owns Platinum, so it's been restored rather than charged again."
+      );
+      router.back();
+      return;
+    }
     if (result.status === "unavailable") {
       Alert.alert(
         "Not available",
@@ -252,11 +339,14 @@ export default function PlatinumPaywallScreen() {
               : "Everything in Driveverse, uncapped — plus the things only Platinum drivers get."}
           </Text>
 
-          {entitlement.isSandbox && (
-            // Dev/QA only: a sandbox purchase looks identical to a real one,
-            // so surface RevenueCat's own flag rather than have anyone guess.
+          {(entitlement.isSandbox || isTestStore) && (
+            // Dev/QA only: a sandbox or Test Store purchase looks identical to
+            // a real one from inside the app, so surface RevenueCat's own flags
+            // rather than have anyone guess whether money moved.
             <View style={styles.sandboxTag}>
-              <Text style={styles.sandboxText}>SANDBOX</Text>
+              <Text style={styles.sandboxText}>
+                {isTestStore ? "TEST STORE" : "SANDBOX"}
+              </Text>
             </View>
           )}
         </View>
@@ -304,11 +394,13 @@ export default function PlatinumPaywallScreen() {
               corners="topRight"
               contentStyle={styles.activeCard}
             >
-              <Text style={styles.overline}>SUBSCRIPTION</Text>
-              <Text style={styles.activeState}>
-                {entitlement.willRenew ? "Renews automatically" : "Ends at period close"}
+              <Text style={styles.overline}>
+                {entitlement.isLifetime ? "PURCHASE" : "SUBSCRIPTION"}
               </Text>
-              {entitlement.expiresAt && (
+              <Text style={styles.activeState}>{renewalState(entitlement)}</Text>
+              {/* A lifetime unlock has no expiry, so there is no date to show
+                  and no "ends on" to imply. */}
+              {entitlement.expiresAt && !entitlement.isLifetime && (
                 <Text style={styles.activeDate}>
                   {new Date(entitlement.expiresAt).toLocaleDateString(undefined, {
                     year: "numeric",
@@ -317,16 +409,30 @@ export default function PlatinumPaywallScreen() {
                   })}
                 </Text>
               )}
+              {entitlement.billingIssueDetectedAt && (
+                // The store reported a failed charge. Access usually continues
+                // through a grace period, so this is a prompt to fix billing —
+                // not a revocation, and not phrased as one.
+                <Text style={styles.billingIssue}>
+                  {STORE_NAME} couldn&apos;t take the last payment. Update your
+                  payment method to keep Platinum.
+                </Text>
+              )}
             </CutCornerSurface>
 
-            {/* Both stores forbid an in-app cancel flow, so this hands off to
-                the platform's own subscription screen rather than pretending. */}
+            {/* RevenueCat's Customer Center: status, plan changes, restore,
+                refund requests (iOS) and cancellation. Both stores forbid an
+                in-app cancel flow, so the cancel path hands off to the store —
+                which is exactly what the Customer Center does. Without the
+                native module this falls back to the store's own screen. */}
             <CutCornerButton
-              title="Manage Subscription"
+              title={
+                entitlement.isLifetime ? "Manage Purchase" : "Manage Subscription"
+              }
               variant="ghost"
               size="md"
               corners="topRight"
-              onPress={() => Linking.openURL(manageSubscriptionUrl())}
+              onPress={() => void openCustomerCenter()}
               style={styles.cta}
             />
           </View>
@@ -350,6 +456,20 @@ export default function PlatinumPaywallScreen() {
               />
             </View>
 
+            {/* Lifetime is a one-time purchase, not a third subscription, so it
+                sits apart from the monthly/yearly pair rather than squeezing a
+                third column that would crop a six-figure rupiah price. */}
+            {showLifetime && (
+              <PeriodOption
+                wide
+                label="Lifetime"
+                price={priceFor("lifetime")}
+                note="one payment, yours for good"
+                active={period === "lifetime"}
+                onPress={() => setPeriod("lifetime")}
+              />
+            )}
+
             {loadingPackages && (
               <View style={styles.pricesLoading}>
                 <ActivityIndicator color={platinum.chrome} />
@@ -358,7 +478,7 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <CutCornerButton
-              title={busy === "purchase" ? "Opening store…" : "Upgrade to Platinum"}
+              title={busy === "purchase" ? "Opening store…" : ctaTitle(period, introOffer)}
               variant="primary"
               size="lg"
               corners="topRight"
@@ -374,8 +494,9 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <Text style={styles.terms}>
-              Billed through {STORE_NAME}. Renews automatically until cancelled;
-              manage or cancel any time in your {STORE_NAME} account.
+              {period === "lifetime"
+                ? `A single payment through ${STORE_NAME}. Nothing renews and there is nothing to cancel.`
+                : `Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
             </Text>
 
             {/* App Store guideline 3.1.1 requires restore to be reachable
@@ -443,13 +564,21 @@ function BenefitRow({
  * Period option
  * ------------------------------------------------------------------ */
 
-/** Monthly / yearly selector. The price is a number, so JetBrains Mono. */
+/**
+ * Period selector. The price is a number, so JetBrains Mono.
+ *
+ * `wide` lays the same content out horizontally for a full-width row. It
+ * exists for lifetime: a third column would crop a six-figure rupiah price at
+ * the width three cards leave, and lifetime is categorically a different thing
+ * from the two subscription terms anyway.
+ */
 function PeriodOption({
   label,
   price,
   note,
   badge,
   active,
+  wide = false,
   onPress,
 }: {
   label: string;
@@ -457,6 +586,7 @@ function PeriodOption({
   note: string;
   badge?: string;
   active: boolean;
+  wide?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -465,7 +595,10 @@ function PeriodOption({
       accessibilityState={{ selected: active }}
       accessibilityLabel={`${label}, ${price}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.periodPressable, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        wide ? styles.periodPressableWide : styles.periodPressable,
+        pressed && styles.pressed,
+      ]}
     >
       <CutCornerSurface
         fill={active ? alpha(platinum.chrome, 0.1) : colors.carbonSurface}
@@ -473,15 +606,22 @@ function PeriodOption({
         borderWidth={active ? borderWidth.emphasis : borderWidth.hairline}
         cutSize={cut.md}
         corners="topRight"
-        contentStyle={styles.periodContent}
+        contentStyle={wide ? styles.periodContentWide : styles.periodContent}
       >
-        <Text style={[styles.periodLabel, active && styles.periodLabelActive]}>
-          {label.toUpperCase()}
-        </Text>
-        <Text style={styles.periodPrice} numberOfLines={1} adjustsFontSizeToFit>
+        <View style={wide ? styles.periodWideText : undefined}>
+          <Text style={[styles.periodLabel, active && styles.periodLabelActive]}>
+            {label.toUpperCase()}
+          </Text>
+          {wide && <Text style={styles.periodNote}>{note}</Text>}
+        </View>
+        <Text
+          style={[styles.periodPrice, wide && styles.periodPriceWide]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+        >
           {price}
         </Text>
-        <Text style={styles.periodNote}>{note}</Text>
+        {!wide && <Text style={styles.periodNote}>{note}</Text>}
         {badge && (
           <View style={styles.periodBadge}>
             <Text style={styles.periodBadgeText}>{badge}</Text>
@@ -621,10 +761,28 @@ const styles = StyleSheet.create({
   periodPressable: {
     flex: 1,
   },
+  periodPressableWide: {
+    alignSelf: "stretch",
+  },
   periodContent: {
     padding: spacing.spacingLg,
     alignItems: "flex-start",
     gap: spacing.spacingXs,
+  },
+  periodContentWide: {
+    padding: spacing.spacingLg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.spacingMd,
+  },
+  periodWideText: {
+    flex: 1,
+    gap: spacing.spacingXs,
+  },
+  periodPriceWide: {
+    flexShrink: 1,
+    textAlign: "right",
   },
   periodLabel: {
     fontFamily: fontFamily.displaySemiBold,
@@ -706,5 +864,10 @@ const styles = StyleSheet.create({
   activeDate: {
     ...textStyle("dataSm"),
     color: colors.textSecondary,
+  },
+  billingIssue: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
+    marginTop: spacing.spacingXs,
   },
 });
