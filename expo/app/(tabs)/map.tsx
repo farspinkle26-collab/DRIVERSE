@@ -544,16 +544,18 @@ const PLACES_STATUS_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
 const TURN_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingSm; // 56
 /** Below the speed-limit sign and compass. */
 const NEARBY_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
-/** Below the greeting card, so the landmark-loading pill never lands on it. */
-const LANDMARK_STATUS_OFFSET = spacing.spacingXxxl * 2 + spacing.spacingLg; // 112
+/** Below the greeting card and the Signal button under it, so the
+ *  landmark-loading pill never lands on either. */
+const LANDMARK_STATUS_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 + spacing.spacingLg; // 184
 /** Below the turn card, which is the tallest panel in the left column. */
 const ACHIEVEMENT_STACK_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 + spacing.spacingLg; // 184
 /** Clearance for the floating tab bar, matching the Drive Hub. */
 const TAB_BAR_CLEARANCE = spacing.spacingXxxl * 2; // 96
 /** Below the right-hand chrome column, which is four labelled buttons tall. */
 const FILTERS_POPOVER_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXs; // 148
-/** Clears the top chrome so the hint never lands on the greeting card. */
-const DROP_PIN_HINT_OFFSET = spacing.spacingXxxl * 2 + spacing.spacingLg; // 112
+/** Clears the top chrome so the hint never lands on the greeting card or the
+ *  Signal button under it. */
+const DROP_PIN_HINT_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 + spacing.spacingLg; // 184
 /** Where the idle bottom stack (live feed, action stack) sits above the bar. */
 const BOTTOM_STACK_OFFSET = spacing.spacingXxxl * 4; // 192
 
@@ -2997,46 +2999,66 @@ export default function MapScreen() {
               carries the supporting date line; the temperature is a
               measurement, so it is JetBrains Mono with the degree sign
               split out into Inter beside it. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={greetingExpanded ? "Hide today's date" : "Show today's date"}
-            onPress={() => setGreetingExpanded((v) => !v)}
-          >
-            <CutCornerSurface
-              fill={colors.carbonSurface}
-              borderColor={colors.hairline}
-              borderWidth={borderWidth.hairline}
-              cutSize={cut.md}
-              corners="topRight"
-              style={styles.greetingCard}
-              contentStyle={styles.greetingCardContent}
+          <View style={styles.greetingColumn}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={greetingExpanded ? "Hide today's date" : "Show today's date"}
+              onPress={() => setGreetingExpanded((v) => !v)}
             >
-              <View style={styles.greetingTempRow}>
-                <WeatherGlyph code={weather?.code ?? 0} size={spacing.spacingLg} />
-                {weather && (
-                  <View style={styles.greetingTempValueRow}>
-                    <Text style={styles.greetingTemp}>{weather.temp}</Text>
-                    <Text style={styles.greetingTempUnit}>°C</Text>
-                  </View>
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.hairline}
+                borderWidth={borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                style={styles.greetingCard}
+                contentStyle={styles.greetingCardContent}
+              >
+                <View style={styles.greetingTempRow}>
+                  <WeatherGlyph code={weather?.code ?? 0} size={spacing.spacingLg} />
+                  {weather && (
+                    <View style={styles.greetingTempValueRow}>
+                      <Text style={styles.greetingTemp}>{weather.temp}</Text>
+                      <Text style={styles.greetingTempUnit}>°C</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.greetingLabel}>{greeting}</Text>
+                <View style={styles.greetingNameRow}>
+                  <Text style={styles.greetingName} numberOfLines={1}>{firstName}</Text>
+                  <ChevronDown
+                    size={spacing.spacingMd}
+                    color={colors.textSecondary}
+                    strokeWidth={CHROME_ICON_STROKE}
+                    style={greetingExpanded ? { transform: [{ rotate: "180deg" }] } : undefined}
+                  />
+                </View>
+                {greetingExpanded && (
+                  <Text style={styles.greetingDate}>
+                    {fmtFeaturedDate(new Date().toISOString())}
+                  </Text>
                 )}
-              </View>
-              <Text style={styles.greetingLabel}>{greeting}</Text>
-              <View style={styles.greetingNameRow}>
-                <Text style={styles.greetingName} numberOfLines={1}>{firstName}</Text>
-                <ChevronDown
-                  size={spacing.spacingMd}
-                  color={colors.textSecondary}
-                  strokeWidth={CHROME_ICON_STROKE}
-                  style={greetingExpanded ? { transform: [{ rotate: "180deg" }] } : undefined}
-                />
-              </View>
-              {greetingExpanded && (
-                <Text style={styles.greetingDate}>
-                  {fmtFeaturedDate(new Date().toISOString())}
-                </Text>
-              )}
-            </CutCornerSurface>
-          </Pressable>
+              </CutCornerSurface>
+            </Pressable>
+
+            {/* Signal a problem to every driver on the map. Neutral until my
+                own signal is up, then it takes the accent border and label —
+                the one live-state that earns red here — so standing it down
+                is one obvious tap. Sits under the greeting card so it's the
+                first thing reachable from the upper-left, not buried in the
+                bottom-right action stack. */}
+            <MapChromeButton
+              label={myProblem ? "Clear" : "Signal"}
+              accessibilityLabel={myProblem ? "Stand down your problem signal" : "Signal a problem to nearby drivers"}
+              active={!!myProblem}
+              onPress={handleSignalPress}
+            >
+              <ProblemGlyph
+                size={spacing.spacingLg}
+                color={myProblem ? colors.racingRed : colors.textPrimary}
+              />
+            </MapChromeButton>
+          </View>
 
           {/* Featured event banner */}
           {featuredEvent && (() => {
@@ -3460,22 +3482,6 @@ export default function MapScreen() {
             onPress={() => router.push("/messages" as any)}
           >
             <MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
-          </MapChromeButton>
-
-          {/* Signal a problem to every driver on the map. Neutral until my
-              own signal is up, then it takes the accent border and label —
-              the one live-state that earns red here — so standing it down is
-              one obvious tap. */}
-          <MapChromeButton
-            label={myProblem ? "Clear" : "Signal"}
-            accessibilityLabel={myProblem ? "Stand down your problem signal" : "Signal a problem to nearby drivers"}
-            active={!!myProblem}
-            onPress={handleSignalPress}
-          >
-            <ProblemGlyph
-              size={spacing.spacingLg}
-              color={myProblem ? colors.racingRed : colors.textPrimary}
-            />
           </MapChromeButton>
         </Animated.View>
       )}
@@ -4498,6 +4504,10 @@ const styles = StyleSheet.create({
     gap: spacing.spacingMd,
     zIndex: 120,
     alignItems: "flex-start",
+  },
+  greetingColumn: {
+    alignItems: "flex-start",
+    gap: spacing.spacingMd,
   },
   greetingCard: {
     minWidth: spacing.spacingXxxl * 2 + spacing.spacingMd,
