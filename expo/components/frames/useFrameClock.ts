@@ -19,6 +19,15 @@
  *   map falls back to static frames (`FrameDetail === "marker"`) and why
  *   trails run on a 7–9 second lap: one shared interpolation at that rate is
  *   cheap, thirty independent ones at spinner speed would not be.
+ *
+ *   The rank aura (`components/auras/ProfileAura.tsx`) animates only `opacity`
+ *   and `transform`, both of which *can* run natively, so it asks for a native
+ *   clock via `useFrameClock(period, enabled, true)`. A value started with
+ *   `useNativeDriver: true` cannot be read back into a JS-driven style and
+ *   vice versa — RN throws if you mix them — so native and JS clocks at the
+ *   same period are kept as separate values rather than shared. That is one
+ *   extra loop per period at worst, and it buys the aura an animation that
+ *   keeps running through a busy JS thread.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -30,15 +39,23 @@ interface Clock {
   subscribers: number;
 }
 
-/** Keyed by lap duration, so tier 8's 9s trail and King's 7s trail each get
- *  their own clock but every tier-8 avatar on screen shares one. */
-const clocks = new Map<number, Clock>();
+/**
+ * Keyed by `period:native`, so tier 8's 9s trail and King's 7s trail each get
+ * their own clock but every tier-8 avatar on screen shares one. The `native`
+ * half of the key exists because the two driver modes cannot share a value.
+ */
+const clocks = new Map<string, Clock>();
 
-function acquire(periodSeconds: number): Animated.Value {
-  let clock = clocks.get(periodSeconds);
+function keyFor(periodSeconds: number, native: boolean): string {
+  return `${periodSeconds}:${native ? "n" : "j"}`;
+}
+
+function acquire(periodSeconds: number, native: boolean): Animated.Value {
+  const key = keyFor(periodSeconds, native);
+  let clock = clocks.get(key);
   if (!clock) {
     clock = { value: new Animated.Value(0), loop: null, subscribers: 0 };
-    clocks.set(periodSeconds, clock);
+    clocks.set(key, clock);
   }
   clock.subscribers += 1;
   if (!clock.loop) {
@@ -48,7 +65,7 @@ function acquire(periodSeconds: number): Animated.Value {
         toValue: 1,
         duration: periodSeconds * 1000,
         easing: Easing.linear,
-        useNativeDriver: false,
+        useNativeDriver: native,
       })
     );
     clock.loop.start();
@@ -56,8 +73,8 @@ function acquire(periodSeconds: number): Animated.Value {
   return clock.value;
 }
 
-function release(periodSeconds: number) {
-  const clock = clocks.get(periodSeconds);
+function release(periodSeconds: number, native: boolean) {
+  const clock = clocks.get(keyFor(periodSeconds, native));
   if (!clock) return;
   clock.subscribers -= 1;
   if (clock.subscribers <= 0) {
@@ -74,10 +91,14 @@ function release(periodSeconds: number) {
  * clock is acquired at all, so a screen of static frames schedules nothing.
  * The returned value is still a valid `Animated.Value` pinned at 0, so
  * callers never have to branch on null.
+ *
+ * Pass `native: true` only if every style you drive from the returned value
+ * is native-driver-safe (`opacity` and `transform`). SVG props are not.
  */
 export function useFrameClock(
   periodSeconds: number,
-  enabled: boolean
+  enabled: boolean,
+  native: boolean = false
 ): Animated.Value {
   const active = enabled && periodSeconds > 0;
 
@@ -96,13 +117,13 @@ export function useFrameClock(
       setClock(null);
       return;
     }
-    const value = acquire(periodSeconds);
+    const value = acquire(periodSeconds, native);
     setClock(value);
     return () => {
-      release(periodSeconds);
+      release(periodSeconds, native);
       setClock(null);
     };
-  }, [active, periodSeconds]);
+  }, [active, periodSeconds, native]);
 
   return clock ?? parked.current;
 }

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
+import { ListAvatarAura } from "@/components/auras/ProfileAura";
 import {
   StyleSheet,
   View,
@@ -146,15 +147,17 @@ export default function DirectChatScreen() {
           style={styles.identity}
           onPress={() => router.push(`/user/${partnerId}` as any)}
         >
-          <ListAvatarFrame level={partnerLevel} size={34}>
-            <View style={styles.avatar}>
-              {partnerAvatar ? (
-                <Image source={{ uri: partnerAvatar }} style={styles.avatarImg} />
-              ) : (
-                <Text style={styles.avatarText}>{partnerName[0]?.toUpperCase() ?? "?"}</Text>
-              )}
-            </View>
-          </ListAvatarFrame>
+          <ListAvatarAura level={partnerLevel} size={34}>
+            <ListAvatarFrame level={partnerLevel} size={34}>
+              <View style={styles.avatar}>
+                {partnerAvatar ? (
+                  <Image source={{ uri: partnerAvatar }} style={styles.avatarImg} />
+                ) : (
+                  <Text style={styles.avatarText}>{partnerName[0]?.toUpperCase() ?? "?"}</Text>
+                )}
+              </View>
+            </ListAvatarFrame>
+          </ListAvatarAura>
           <Text style={styles.topTitle} numberOfLines={1}>{partnerName}</Text>
         </Pressable>
         <View style={{ width: 40 }} />

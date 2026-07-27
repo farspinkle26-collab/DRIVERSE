@@ -18,6 +18,7 @@ import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
 import PlatinumAura from "@/components/platinum/PlatinumAura";
 import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
+import { ListAvatarAura } from "@/components/auras/ProfileAura";
 import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, cut, fontFamily, onRacingRed, radius, spacing, textStyle } from "@/constants/theme";
@@ -143,17 +144,25 @@ export default function ConvoyDetailScreen() {
                   subscription, rank, convoy membership. `list` detail keeps
                   shape and colour but phase-locks every row's animation to
                   one clock. */}
-              <PlatinumAura show={platinumMembers.has(m.user_id)} size={40}>
-                <ListAvatarFrame level={m.level} size={40}>
-                  <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
-                    {m.avatar ? (
-                      <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
-                    ) : (
-                      <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
-                    )}
-                  </View>
-                </ListAvatarFrame>
-              </PlatinumAura>
+              {/* The rank aura is the outermost layer, and in a roster it is
+                  static and only drawn from tier 8 up — the point is that a
+                  top-ranked driver stands out *against* rows that have no
+                  glow, so most rows having none is the mechanism, not a gap.
+                  Passing `isPlatinum` keeps it mutually exclusive with the
+                  chrome aura below it. */}
+              <ListAvatarAura level={m.level} isPlatinum={platinumMembers.has(m.user_id)} size={40}>
+                <PlatinumAura show={platinumMembers.has(m.user_id)} size={40}>
+                  <ListAvatarFrame level={m.level} size={40}>
+                    <View style={[styles.avatar, m.status === "accepted" && { borderColor: convoy.color, borderWidth: borderWidth.emphasis }]}>
+                      {m.avatar ? (
+                        <Image source={{ uri: m.avatar }} style={styles.avatarImg} />
+                      ) : (
+                        <Text style={styles.avatarText}>{m.name[0]?.toUpperCase()}</Text>
+                      )}
+                    </View>
+                  </ListAvatarFrame>
+                </PlatinumAura>
+              </ListAvatarAura>
               <View style={{ flex: 1 }}>
                 <View style={styles.rowNameLine}>
                   <Text style={styles.rowName}>{m.name}{m.user_id === user?.id ? " (You)" : ""}</Text>

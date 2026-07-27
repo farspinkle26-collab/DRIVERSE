@@ -93,6 +93,8 @@ import { FounderNameBadge, FounderWordmark } from "@/components/founder/FounderB
 import PlatinumAura from "@/components/platinum/PlatinumAura";
 import PlatinumPageGlow from "@/components/platinum/PlatinumPageGlow";
 import AvatarFrame from "@/components/frames/AvatarFrame";
+import ProfileAura from "@/components/auras/ProfileAura";
+import RankPageWash from "@/components/auras/RankPageWash";
 import PremiumVehicleIcon from "@/components/platinum/PremiumVehicleIcon";
 import ShowcaseModal from "@/components/platinum/ShowcaseModal";
 import CosmeticsPicker from "@/components/platinum/CosmeticsPicker";
@@ -1000,6 +1002,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           visitor opens both get it, since it marks the profile, not the
           viewer. See PlatinumPageGlow for why it stops at the header. */}
       <PlatinumPageGlow show={viewedIsPlatinum} height={420} />
+      {/* The rank equivalent, for a high-tier driver without Platinum. The two
+          are mutually exclusive by construction — `resolveAura` reports no
+          wash for a Platinum driver — so they can never tint the header at
+          once. Renders null below tier 8; see RankPageWash. */}
+      <RankPageWash level={level} isPlatinum={viewedIsPlatinum} height={420} />
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
@@ -1050,40 +1057,56 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             disabled={!isSelf || uploadingAvatar}
             style={({ pressed }) => [styles.avatarWrap, pressed && isSelf && styles.pressed]}
           >
-            {/* Aura outside, frame inside, avatar innermost. The aura renders
-                as nothing for a Regular driver; the frame never does — every
-                driver has a rank, so every driver has a frame. Both draw past
-                the avatar box without moving the level badge — `avatarWrap`
-                is pinned to AVATAR_SIZE and the overlay is centred inside it.
+            {/* Glow outside, frame inside, avatar innermost. The frame never
+                renders as nothing — every driver has a rank, so every driver
+                has a frame — but both glows can: the Platinum aura only for a
+                subscriber, the rank aura only from tier 2 up. All of them draw
+                past the avatar box without moving the level badge, because
+                `avatarWrap` is pinned to AVATAR_SIZE and every overlay is
+                centred inside it.
+
+                Exactly one of the two auras is ever drawn. `ProfileAura`
+                resolves to nothing for a Platinum driver and `PlatinumAura` to
+                nothing for everyone else, so a subscriber gets chrome and a
+                free driver gets their tier colour — never both rings stacked
+                in the same 72pt circle.
 
                 `AvatarFrame` resolves Platinum-over-rank itself, so this call
                 site passes both inputs and never branches on entitlement. */}
-            <PlatinumAura
-              show={viewedIsPlatinum}
+            <ProfileAura
+              level={level}
+              isPlatinum={viewedIsPlatinum}
               size={AVATAR_SIZE}
-              emphasis
+              detail="full"
               style={styles.avatarAura}
             >
-              <AvatarFrame
-                level={level}
-                platinumFrame={isSelf ? cosmetics.selectedProfileFrame : otherProfileFrame}
-                isPlatinum={viewedIsPlatinum}
+              <PlatinumAura
+                show={viewedIsPlatinum}
                 size={AVATAR_SIZE}
-                detail="full"
+                emphasis
+                style={styles.avatarAura}
               >
-                <View style={styles.avatarRing}>
-                  <View style={styles.avatarInner}>
-                    {uploadingAvatar ? (
-                      <ActivityIndicator color={colors.racingRed} />
-                    ) : profileAvatar ? (
-                      <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
-                    ) : (
-                      <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
-                    )}
+                <AvatarFrame
+                  level={level}
+                  platinumFrame={isSelf ? cosmetics.selectedProfileFrame : otherProfileFrame}
+                  isPlatinum={viewedIsPlatinum}
+                  size={AVATAR_SIZE}
+                  detail="full"
+                >
+                  <View style={styles.avatarRing}>
+                    <View style={styles.avatarInner}>
+                      {uploadingAvatar ? (
+                        <ActivityIndicator color={colors.racingRed} />
+                      ) : profileAvatar ? (
+                        <Image source={{ uri: profileAvatar }} style={styles.avatarImage} />
+                      ) : (
+                        <Text style={styles.avatarLetter}>{(profileName ?? "D")[0]?.toUpperCase()}</Text>
+                      )}
+                    </View>
                   </View>
-                </View>
-              </AvatarFrame>
-            </PlatinumAura>
+                </AvatarFrame>
+              </PlatinumAura>
+            </ProfileAura>
             <View style={styles.levelBadge}>
               <Text style={styles.levelBadgeText}>{level}</Text>
             </View>

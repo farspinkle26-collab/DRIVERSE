@@ -20,6 +20,7 @@ import { supabase } from "@/lib/supabase";
 import { CutCornerBadge, CutCornerButton } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
 import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
+import { ListAvatarAura } from "@/components/auras/ProfileAura";
 import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
@@ -325,15 +326,17 @@ export default function MessagesScreen() {
                   <Users size={20} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 </View>
               ) : (
-                <ListAvatarFrame level={item.level ?? 1} size={50}>
-                  <View style={styles.avatar}>
-                    {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
-                    ) : (
-                      <Text style={styles.avatarText}>{item.name[0]?.toUpperCase() ?? "?"}</Text>
-                    )}
-                  </View>
-                </ListAvatarFrame>
+                <ListAvatarAura level={item.level ?? 1} size={50}>
+                  <ListAvatarFrame level={item.level ?? 1} size={50}>
+                    <View style={styles.avatar}>
+                      {item.avatar ? (
+                        <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                      ) : (
+                        <Text style={styles.avatarText}>{item.name[0]?.toUpperCase() ?? "?"}</Text>
+                      )}
+                    </View>
+                  </ListAvatarFrame>
+                </ListAvatarAura>
               )}
               <View style={{ flex: 1 }}>
                 <View style={styles.rowNameLine}>
