@@ -39,16 +39,29 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  ScrollView,
   TextInput,
   Keyboard,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
-import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
+import { PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import { usePlaces } from "@/hooks/usePlaces";
-import { PLACE_CATEGORY_LABELS } from "@/constants/placesCategories";
+import { useMapFilters } from "@/hooks/useMapFilters";
+import {
+  PLACE_CATEGORIES,
+  PLACE_CATEGORY_LABELS,
+  type PlaceCategory,
+} from "@/constants/placesCategories";
+import {
+  boundsOf,
+  clusterPlaceMarkers,
+  type ClusterNode,
+  type Region,
+} from "@/lib/mapClustering";
+import { allLayersVisible } from "@/lib/mapFilters";
 import type { NormalizedPlace } from "@/lib/placesApi";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -111,8 +124,10 @@ import {
   CHROME_ICON_STROKE,
   DestinationMark,
   DriverMark,
+  HeadingChevron,
   MAP_GLYPHS,
   MAP_GLYPH_STROKE,
+  PLACE_CATEGORY_GLYPHS,
   ProblemGlyph,
   VisibilityGlyph,
   type MapGlyphComponent,
@@ -135,6 +150,7 @@ import ShareCardModal from "@/components/ShareCardModal";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { calculateDriveXP } from "@/lib/tripStats";
 import { rankForLevel } from "@/constants/ranks";
+import { frameForLevel } from "@/constants/rankFrames";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
@@ -147,36 +163,32 @@ import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
 import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
-import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
+import { getDirectionsWithSteps } from "@/lib/mapboxApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// --- Major Indonesian cities for nationwide search ---
-const INDONESIAN_CITIES = [
-  { name: "Jakarta", lat: -6.2088, lng: 106.8456 },
-  { name: "Bandung", lat: -6.9175, lng: 107.6191 },
-  { name: "Surabaya", lat: -7.2575, lng: 112.7521 },
-  { name: "Yogyakarta", lat: -7.7956, lng: 110.3695 },
-  { name: "Medan", lat: 3.5952, lng: 98.6722 },
-  { name: "Semarang", lat: -6.9932, lng: 110.4203 },
-  { name: "Denpasar", lat: -8.6705, lng: 115.2126 },
-  { name: "Makassar", lat: -5.1477, lng: 119.4327 },
-  { name: "Palembang", lat: -2.9761, lng: 104.7754 },
-  { name: "Batam", lat: 1.1301, lng: 104.0527 },
-  { name: "Balikpapan", lat: -1.2379, lng: 116.8529 },
-  { name: "Manado", lat: 1.4748, lng: 124.8421 },
-  { name: "Pontianak", lat: -0.0263, lng: 109.3425 },
-  { name: "Banjarmasin", lat: -3.3186, lng: 114.5944 },
-  { name: "Lombok", lat: -8.5833, lng: 116.1067 },
-  { name: "Malang", lat: -7.9839, lng: 112.6214 },
-  { name: "Padang", lat: -0.9471, lng: 100.4172 },
-  { name: "Pekanbaru", lat: 0.5071, lng: 101.4478 },
-  { name: "Ambon", lat: -3.6954, lng: 128.1814 },
-  { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
-];
 
-type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "charging" | "workshop";
-
+/**
+ * A POI marker on the map.
+ *
+ * The category ids are the shared taxonomy in
+ * `constants/placesCategories.ts`, not a set of this screen's own. There
+ * used to be two: `LandmarkCategory` here (cafe / restaurant / spbu /
+ * shopping / carwash / charging / workshop, populated by seven Mapbox
+ * Geocoding keyword searches per city across 24 cities — 168 requests on
+ * every cold start, capped at 200 results nationwide) and `PlaceCategory`
+ * in the Places layer (populated by Overpass, server-cached, with a
+ * community submission flow, and unreachable in the shipping build).
+ *
+ * They are one taxonomy now, on the Overpass ids, and this layer is fed by
+ * `usePlaces` — nine cached requests around the driver instead of 168
+ * keyword searches across the country, and the community submissions land
+ * on the same markers.
+ *
+ * `rating` and `types` are kept because the destination card reads them;
+ * neither Overpass nor the community table supplies a rating today, so it
+ * is always undefined and the card already handles that.
+ */
 interface CafePOI {
   id: string;
   name: string;
@@ -185,19 +197,29 @@ interface CafePOI {
   rating?: number;
   vicinity?: string;
   types: string[];
-  category: LandmarkCategory;
+  category: PlaceCategory;
+  source?: "osm" | "user";
 }
 
-// --- Mapbox Geocoding search terms used to populate each landmark category ---
-const LANDMARK_CATEGORY_QUERIES: { category: LandmarkCategory; query: string }[] = [
-  { category: "cafe", query: "cafe" },
-  { category: "restaurant", query: "restaurant" },
-  { category: "spbu", query: "gas station" },
-  { category: "shopping", query: "shopping mall" },
-  { category: "carwash", query: "car wash" },
-  { category: "workshop", query: "car repair" },
-  { category: "charging", query: "ev charging station" },
-];
+/** Street/area line for the destination card, from whatever OSM tags exist. */
+function vicinityFromTags(tags: Record<string, string> | undefined): string | undefined {
+  if (!tags) return undefined;
+  const street = [tags["addr:street"], tags["addr:housenumber"]].filter(Boolean).join(" ");
+  return tags["addr:full"] ?? (street || undefined) ?? tags["addr:city"] ?? tags.operator;
+}
+
+function placeToPoi(place: NormalizedPlace): CafePOI {
+  return {
+    id: place.id,
+    name: place.name,
+    lat: place.lat,
+    lng: place.lng,
+    vicinity: vicinityFromTags(place.tags),
+    types: [],
+    category: place.category,
+    source: place.source,
+  };
+}
 
 type SelectedDestination =
   | { type: "cafe"; data: CafePOI }
@@ -463,6 +485,25 @@ function playerColor(id: string): string {
 }
 
 /**
+ * Rounds a driver's bearing to a 15° step, or returns null when there is no
+ * usable heading.
+ *
+ * Two reasons for the bucketing. A stationary phone reports a heading that
+ * wanders by a few degrees on every fix, and a marker that re-renders on
+ * every wander is a marker Android re-snapshots to a bitmap on every wander.
+ * And a chevron on a 46pt marker cannot express finer than about 15°
+ * anyway — the extra precision is invisible and costs a redraw.
+ *
+ * `expo-location` reports -1 when it has no course; presence payloads from
+ * older clients may omit the field entirely.
+ */
+const HEADING_BUCKET_DEGREES = 15;
+function headingBucket(heading: number | null | undefined): number | null {
+  if (typeof heading !== "number" || !Number.isFinite(heading) || heading < 0) return null;
+  return (Math.round((heading % 360) / HEADING_BUCKET_DEGREES) * HEADING_BUCKET_DEGREES) % 360;
+}
+
+/**
  * Problem-signal catalogue. Four kinds, each mapping to a different sort of
  * help — a tow, the emergency services, fuel, or "anyone at all". The label
  * is what the raiser picks; `alert` is the terse verb that lands on other
@@ -506,15 +547,10 @@ function problemAge(since: string): string {
 // HUD mockup visually. Do not treat it as a real regulatory speed limit.
 const PLACEHOLDER_SPEED_LIMIT_KMH = 50;
 
-const CAT_LABELS: Record<LandmarkCategory, string> = {
-  cafe: "Cafes",
-  restaurant: "Food",
-  spbu: "Fuel",
-  shopping: "Shops",
-  carwash: "Car Wash",
-  charging: "Charging",
-  workshop: "Workshop",
-};
+// Labels and glyphs come from the shared taxonomy so this screen, the
+// Filters panel, the Places callout and the submit flow can never disagree
+// about what a category is called or what it looks like.
+const CAT_LABELS = PLACE_CATEGORY_LABELS;
 
 /**
  * Landmark category → glyph.
@@ -539,8 +575,6 @@ const CAT_LABELS: Record<LandmarkCategory, string> = {
  * chrome cannot use the scale for its own positions the way a scrolling
  * layout can, because the panels overlap each other rather than stack.
  */
-/** Below the filter chip row (one chip tall plus its margin). */
-const PLACES_STATUS_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
 /** Below the driving-mode profile pill. */
 const TURN_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingSm; // 56
 /** Below the speed-limit sign and compass. */
@@ -554,6 +588,9 @@ const ACHIEVEMENT_STACK_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl /
 const TAB_BAR_CLEARANCE = spacing.spacingXxxl * 2; // 96
 /** Below the right-hand chrome column, which is four labelled buttons tall. */
 const FILTERS_POPOVER_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXs; // 148
+/** Cap on the scrolling toggle list inside the Filters popover, chosen so
+ *  the popover still clears the bottom stack on a 390×844 screen. */
+const FILTERS_LIST_MAX_HEIGHT = spacing.spacingXxxl * 7 + spacing.spacingXl; // 360
 /** Clears the top chrome so the hint never lands on the greeting card or the
  *  Signal button under it. */
 const DROP_PIN_HINT_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 + spacing.spacingLg; // 184
@@ -563,15 +600,7 @@ const BOTTOM_STACK_OFFSET = spacing.spacingXxxl * 4; // 192
 const ROUTE_CASING_WIDTH = 8;
 const ROUTE_CORE_WIDTH = 4;
 
-const CAT_GLYPHS: Record<LandmarkCategory, MapGlyphComponent> = {
-  cafe: MAP_GLYPHS.cafe,
-  restaurant: MAP_GLYPHS.food,
-  spbu: MAP_GLYPHS.fuel,
-  shopping: MAP_GLYPHS.shopping,
-  carwash: MAP_GLYPHS.carwash,
-  charging: MAP_GLYPHS.charging,
-  workshop: MAP_GLYPHS.workshop,
-};
+const CAT_GLYPHS: Record<PlaceCategory, MapGlyphComponent> = PLACE_CATEGORY_GLYPHS;
 
 /**
  * The rank frame on a driver marker fills the same 42pt outer slot the
@@ -793,12 +822,27 @@ export default function MapScreen() {
   const [locating, setLocating] = useState(true);
   const [locError, setLocError] = useState<string | null>(null);
 
-  // Cafe state
-  const [cafes, setCafes] = useState<CafePOI[]>([]);
-  const [loadingCafes, setLoadingCafes] = useState(false);
-
-  // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass)
+  // POI markers, derived from the shared Places source rather than held in
+  // their own state — one fetch feeds the markers, the nearby cards, the
+  // search results and the destination card.
+  //
+  // The nine OSM + community categories, via Overpass behind the
+  // /places-nearby edge function (7-day server cache, ~1km buckets).
   const places = usePlaces();
+  // The GPS watcher effect is mount-once and reads live state through refs
+  // so it never restarts; the first-fix POI fetch needs the same treatment.
+  // Assigned in an effect rather than during render — this effect is
+  // declared above the GPS one, so it has already run by the time that
+  // effect's async body reaches the fetch.
+  const placesRef = useRef(places);
+  useEffect(() => {
+    placesRef.current = places;
+  }, [places]);
+  const cafes = useMemo<CafePOI[]>(() => places.places.map(placeToPoi), [places.places]);
+  const loadingCafes = places.loading;
+  // The Places *mode* — the long-press-to-submit affordance and the submit
+  // FAB. The markers themselves are no longer gated on it: they are the
+  // map's POI layer now, always drawn, filtered by the Filters panel.
   const [placesLayerOpen, setPlacesLayerOpen] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<NormalizedPlace | null>(null);
   const [submitPlaceCoord, setSubmitPlaceCoord] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -889,6 +933,9 @@ export default function MapScreen() {
   // The raise-a-signal chooser sheet, and a tick that re-renders the age
   // labels ("3 min ago") on active signals once a minute.
   const [problemChooserOpen, setProblemChooserOpen] = useState(false);
+  // Opened from the body of the status card. See the sheet's own note for
+  // why it explains the current audience rather than letting you pick one.
+  const [visibilitySettingsOpen, setVisibilitySettingsOpen] = useState(false);
   const [, setProblemClock] = useState(0);
   const [addingFriend, setAddingFriend] = useState(false);
   const [askingMeetup, setAskingMeetup] = useState(false);
@@ -899,17 +946,17 @@ export default function MapScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [visibleCats, setVisibleCats] = useState<Record<LandmarkCategory, boolean>>({
-    cafe: true,
-    restaurant: true,
-    spbu: true,
-    shopping: true,
-    carwash: true,
-    charging: true,
-    workshop: true,
-  });
-  const [showEventsLayer, setShowEventsLayer] = useState(true);
-  const [showDriversLayer, setShowDriversLayer] = useState(true);
+  // Layer toggles, persisted to AsyncStorage: a driver who hides parking
+  // and shopping every session should not have to redo it. All eleven
+  // toggles are render-time only — every category's data is already
+  // fetched, so flipping one never waits on the network.
+  const { filters, toggleCategory, toggleEvents, toggleDrivers, resetFilters } = useMapFilters();
+  const visibleCats = filters.categories;
+  const showEventsLayer = filters.events;
+  const showDriversLayer = filters.drivers;
+  // The visible region, kept for the marker clusterer. Set from
+  // onRegionChangeComplete, which the Places fetch already listens to.
+  const [mapRegion, setMapRegion] = useState<Region | null>(null);
   const weatherFetchedRef = useRef(false);
 
   // POI badges no longer load a bitmap — the category glyphs are drawn in
@@ -942,60 +989,14 @@ export default function MapScreen() {
   const onlinePulse = useRef(new Animated.Value(1)).current;
   const onlineSlide = useRef(new Animated.Value(0)).current;
 
-  // --- Fetch cafes from a specific city ---
-  const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
-    if (!MAPBOX_ACCESS_TOKEN) return [];
-    const allResults: CafePOI[] = [];
-    const seen = new Set<string>();
-
-    for (const { category, query } of LANDMARK_CATEGORY_QUERIES) {
-      try {
-        const places = await searchPlaces(query, { latitude: lat, longitude: lng });
-        for (const place of places) {
-          if (seen.has(place.id)) continue;
-          seen.add(place.id);
-          allResults.push({
-            id: place.id,
-            name: place.name,
-            lat: place.latitude,
-            lng: place.longitude,
-            vicinity: place.fullAddress ?? cityName,
-            types: [],
-            category,
-          });
-        }
-      } catch {
-        // Skip failed category
-      }
-    }
-    return allResults;
-  }, []);
-
-  // --- Fetch cafes from ALL Indonesian cities ---
-  const fetchAllIndonesiaCafes = useCallback(async () => {
-    if (!MAPBOX_ACCESS_TOKEN) return;
-    setLoadingCafes(true);
-
-    const seen = new Set<string>();
-    const allResults: CafePOI[] = [];
-
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < INDONESIAN_CITIES.length; i += BATCH_SIZE) {
-      const batch = INDONESIAN_CITIES.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map((city) => fetchCityCafes(city.lat, city.lng, city.name));
-      const batchResults = await Promise.all(batchPromises);
-      for (const results of batchResults) {
-        for (const cafe of results) {
-          if (seen.has(cafe.id)) continue;
-          seen.add(cafe.id);
-          allResults.push(cafe);
-        }
-      }
-    }
-
-    setCafes(allResults.slice(0, 200));
-    setLoadingCafes(false);
-  }, [fetchCityCafes]);
+  // --- POI markers ---
+  // The nationwide Mapbox-Geocoding crawl this replaced ran seven keyword
+  // searches per city across 24 cities on every cold start — 168 requests
+  // to fill a list capped at 200 markers for the whole country, which meant
+  // a driver outside a listed city saw nothing nearby. `usePlaces` asks the
+  // /places-nearby edge function for the nine categories around wherever
+  // the driver actually is, served from a 7-day server-side cache and
+  // merged with community submissions. See hooks/usePlaces.ts.
 
   // --- Fetch directions from user location to destination ---
   const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
@@ -1108,8 +1109,10 @@ export default function MapScreen() {
 
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
 
-        // Load ALL Indonesia cafes
-        fetchAllIndonesiaCafes();
+        // Load the POI layer around the first fix. Panning keeps it topped
+        // up via onRegionChangeComplete; `usePlaces` skips buckets it has
+        // already fetched, so neither path refetches ground already covered.
+        placesRef.current.fetchForRegion(coords.latitude, coords.longitude);
 
         // Watch GPS position for real-time tracking
         sub = await Location.watchPositionAsync(
@@ -1494,6 +1497,51 @@ export default function MapScreen() {
     );
   }, []);
 
+  /**
+   * The POI markers actually handed to the MapView: filtered by the Filters
+   * panel, then clustered for the visible region.
+   *
+   * Filtering happens here rather than in the fetch so a toggle is a
+   * re-render and never a network round-trip — the panel's whole promise.
+   */
+  const poiNodes = useMemo<ClusterNode<CafePOI>[]>(() => {
+    const selectedId =
+      selectedDestination?.type === "cafe" ? selectedDestination.data.id : null;
+    const visible = cafes.filter(
+      (poi) => visibleCats[poi.category] && poi.id !== selectedId
+    );
+    const nodes = clusterPlaceMarkers(visible, mapRegion);
+    // The chosen destination is never clustered. It is the one marker the
+    // driver is actively looking at, and letting it vanish into a badge on
+    // zoom-out would hide the thing they just picked.
+    const selected = selectedId ? cafes.find((poi) => poi.id === selectedId) : null;
+    if (selected) {
+      nodes.push({
+        kind: "leaf",
+        id: selected.id,
+        latitude: selected.lat,
+        longitude: selected.lng,
+        item: selected,
+      });
+    }
+    return nodes;
+  }, [cafes, visibleCats, mapRegion, selectedDestination]);
+
+  const openVisibilitySettings = useCallback(() => {
+    setVisibilitySettingsOpen(true);
+  }, []);
+
+  /** Drives whether the Filters popover offers a "Show all" action. */
+  const allLayersOn = useMemo(() => allLayersVisible(filters), [filters]);
+
+  /** Tapping a cluster zooms the camera to fit what is inside it. */
+  const handleClusterPress = useCallback((node: ClusterNode<CafePOI>) => {
+    if (node.kind !== "cluster") return;
+    const bounds = boundsOf(node.items);
+    if (!bounds) return;
+    mapRef.current?.animateToRegion(bounds, 400);
+  }, []);
+
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
     if (selectedDestination.type === "cafe") {
@@ -1574,18 +1622,36 @@ export default function MapScreen() {
     setShowDropPinHint(false);
   }, [showDropPinHint]);
 
-  // --- Nearby places (OSM + community): fetch on category change or map pan ---
-  useEffect(() => {
-    if (!placesLayerOpen || !userLocation) return;
-    places.fetchForRegion(userLocation.latitude, userLocation.longitude, places.category);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placesLayerOpen, places.category, userLocation]);
-
-  const handlePlacesRegionChange = useCallback((region: { latitude: number; longitude: number }) => {
-    if (!placesLayerOpen) return;
-    places.fetchForRegion(region.latitude, region.longitude, places.category);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placesLayerOpen, places.category]);
+  /**
+   * Region changes drive two things: the POI top-up and the clusterer.
+   *
+   * The fetch is not gated on the Places mode any more — POIs are the map's
+   * own layer now, so they load wherever the driver is. `fetchForRegion`
+   * de-dupes by ~1km bucket, so a pan inside one bucket costs nothing and
+   * only crossing into new ground spends a request.
+   */
+  const handlePlacesRegionChange = useCallback(
+    (region: Region) => {
+      // Only the *span* is stored, and only when it actually changes.
+      //
+      // Cluster cells are absolute (`floor(lat / cellSize)`), not relative
+      // to the camera, so panning at a fixed zoom cannot change which
+      // markers group together — only zooming can. Storing the centre too
+      // would re-render this screen and recompute the whole cluster set on
+      // every frame of a pan, for an identical result.
+      setMapRegion((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.latitudeDelta - region.latitudeDelta) < prev.latitudeDelta * 0.02
+        ) {
+          return prev;
+        }
+        return region;
+      });
+      placesRef.current.fetchForRegion(region.latitude, region.longitude);
+    },
+    []
+  );
 
   // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
   const handleMapLongPress = useCallback((event: any) => {
@@ -1832,7 +1898,7 @@ export default function MapScreen() {
 
   // Nearest POI per category — same haversine approach as `nearestPoi` below,
   // fixed to the 4 categories the driving HUD's "Nearby" card shows.
-  const nearestOfCategory = (cat: LandmarkCategory): (CafePOI & { dist: number }) | null => {
+  const nearestOfCategory = (cat: PlaceCategory): (CafePOI & { dist: number }) | null => {
     if (!userLocation) return null;
     let best: (CafePOI & { dist: number }) | null = null;
     for (const c of cafes) {
@@ -1844,7 +1910,7 @@ export default function MapScreen() {
   };
   const nearbyCafe = nearestOfCategory("cafe") ?? nearestOfCategory("restaurant");
   const nearbyWorkshop = nearestOfCategory("workshop");
-  const nearbyFuel = nearestOfCategory("spbu");
+  const nearbyFuel = nearestOfCategory("gas_station");
   let nearbyMeet: (DriveEvent & { dist: number }) | null = null;
   if (userLocation) {
     for (const e of events) {
@@ -1949,13 +2015,42 @@ export default function MapScreen() {
     // the callout renders underneath the Drive/Convoy/Chat stack and its
     // close control sits behind a button.
     !selectedPlace &&
+    // Same reason for the two sheets that open from the status card and
+    // the Signal button — both own the bottom slot while they are up.
+    !visibilitySettingsOpen &&
+    !problemChooserOpen &&
     recordedPath.length === 0;
 
   const firstName = (user?.name ?? "Driver").split(" ")[0];
   const greeting = greetingForHour(new Date().getHours());
 
-  // Featured event for the top banner: live first, else next upcoming
-  const featuredEvent = events.find((e) => e.is_live) ?? events[0] ?? null;
+  /**
+   * The event pinned to the top of the screen — the "nearby/upcoming"
+   * highlight the reference design shows above the map, alongside the
+   * in-place marker+card every other event gets.
+   *
+   * Was `events.find(is_live) ?? events[0]`, which took whatever the store
+   * happened to list first. Relevance is now explicit and in priority
+   * order: something happening now beats something happening later, and
+   * between two events at the same stage the nearer one wins. A driver
+   * three cities away from the soonest meet is not the audience for it.
+   *
+   * Hidden when the Events layer is filtered off — a pinned card for a
+   * layer the driver has switched off is the toggle not working.
+   */
+  const featuredEvent = useMemo<DriveEvent | null>(() => {
+    if (!showEventsLayer || events.length === 0) return null;
+    const distanceTo = (ev: DriveEvent) =>
+      userLocation
+        ? haversineMeters(userLocation, { latitude: ev.latitude, longitude: ev.longitude })
+        : 0;
+    return [...events].sort((a, b) => {
+      if (a.is_live !== b.is_live) return a.is_live ? -1 : 1;
+      const startDelta = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+      if (startDelta !== 0) return startDelta;
+      return distanceTo(a) - distanceTo(b);
+    })[0];
+  }, [events, showEventsLayer, userLocation]);
 
   // Nearest landmark (fills the "trending" slot of the live feed)
   let nearestPoi: (CafePOI & { dist: number }) | null = null;
@@ -2067,22 +2162,58 @@ export default function MapScreen() {
       >
         <MapboxTileLayer dark={mapStyleDark} />
 
-        {placesLayerOpen && (
-          <PlacesMarkers
-            places={places.places}
-            onSelect={setSelectedPlace}
-            selectedId={selectedPlace?.id ?? null}
-          />
-        )}
-
-        {/* Landmark markers — cut-corner badge + hand-drawn category glyph +
-            name + distance. Always rendered, regardless of recording/online/
-            party/chat state, so the map's POI layer never disappears
-            mid-session.
+        {/* POI markers — cut-corner badge + hand-drawn category glyph +
+            name + distance, the anatomy the reference design shows. Always
+            rendered, regardless of recording/online/party/chat state, so
+            the map's POI layer never disappears mid-session.
 
             Category is carried by the glyph; colour only says whether the
-            marker is idle, selected, or the confirmed destination. */}
-        {cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
+            marker is idle, selected, or the confirmed destination
+            (MAP_SCREEN_REFERENCE rule 10). Nine categories therefore cost
+            the palette nothing.
+
+            The list is clustered before it gets here: a city centre with
+            every category on is several hundred markers, and on Android
+            each one is a view snapshotted into a bitmap. See
+            lib/mapClustering.ts for the two clustering modes and which
+            reads better where. */}
+        {poiNodes.map((node) => {
+          if (node.kind === "cluster") {
+            // A cluster keeps its category glyph while one is shared, so it
+            // still reads as "twelve fuel stations here" rather than as an
+            // anonymous count. Past the wide-zoom threshold the clusterer
+            // merges categories and `groupKey` is null, and the badge
+            // becomes the count alone.
+            const ClusterGlyph = node.groupKey ? CAT_GLYPHS[node.groupKey as PlaceCategory] : null;
+            return (
+              <SettledMarker
+                key={node.id}
+                coordinate={{ latitude: node.latitude, longitude: node.longitude }}
+                onPress={() => handleClusterPress(node)}
+                settleKey={`cluster-${node.count}-${node.groupKey ?? ""}`}
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <View style={styles.poiBadgeBox} collapsable={false}>
+                  <CutCornerSurface
+                    fill={colors.carbonSurface}
+                    borderColor={colors.hairline}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={spacing.spacingSm}
+                    corners="topRight"
+                    style={styles.clusterMarker}
+                    contentStyle={styles.clusterMarkerContent}
+                  >
+                    {ClusterGlyph && (
+                      <ClusterGlyph size={spacing.spacingMd} color={colors.textSecondary} />
+                    )}
+                    <Text style={styles.clusterCount}>{node.count}</Text>
+                  </CutCornerSurface>
+                </View>
+              </SettledMarker>
+            );
+          }
+
+          const poi = node.item;
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const Glyph = CAT_GLYPHS[poi.category];
           const isChosen = isSelected && locationChosen;
@@ -2104,7 +2235,17 @@ export default function MapScreen() {
                 <View style={styles.poiBadgeBox}>
                   <CutCornerSurface
                     fill={isSelected ? colors.racingRed : colors.carbonSurface}
-                    borderColor={isSelected ? colors.racingRed : colors.hairline}
+                    /* A community submission keeps the faint accent outline
+                       the Places layer gave it, so "a driver put this here"
+                       survives the merge into one POI layer. One bit of
+                       information, one colour step — not a hue. */
+                    borderColor={
+                      isSelected
+                        ? colors.racingRed
+                        : poi.source === "user"
+                          ? alpha(colors.racingRed, 0.55)
+                          : colors.hairline
+                    }
                     borderWidth={isChosen ? borderWidth.emphasis : borderWidth.hairline}
                     cutSize={spacing.spacingSm}
                     corners="topRight"
@@ -2261,13 +2402,22 @@ export default function MapScreen() {
             : isPartyMate && party
               ? party.color
               : playerColor(onlineUser.user_id);
+          // Rank colour comes from `frameForLevel` — the same table the
+          // Profile Frame system reads (constants/rankFrames.ts, generated
+          // from constants/ranks.ts). There is deliberately no second
+          // rank→colour mapping on this screen.
+          const rankColor = frameForLevel(onlineUser.level).color;
+          // Bearing of travel. Bucketed to 15° so a marker re-snapshots on
+          // a real change of direction rather than on every GPS jitter —
+          // each re-snapshot is an Android bitmap capture.
+          const bearing = headingBucket(onlineUser.heading);
           return (
             <SettledMarker
               key={`online-${onlineUser.user_id}`}
               coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
               anchor={{ x: 0.5, y: 0.36 }}
               onPress={() => setSelectedOnlineUser(onlineUser)}
-              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}`}
+              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}-${bearing ?? "still"}`}
               ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
             >
               <View style={styles.playerMarkerWrap} collapsable={false}>
@@ -2308,11 +2458,28 @@ export default function MapScreen() {
                         onLoadEnd={() => handleAvatarLoaded(onlineUser.user_id)}
                       />
                     ) : (
-                      <Text style={styles.playerAvatarInitial}>
-                        {(onlineUser.name?.[0] ?? "D").toUpperCase()}
-                      </Text>
+                      /* No photo — a car in the driver's rank colour rather
+                         than an initial. The reference design asks for a car
+                         symbol on driver markers; where a driver has a photo
+                         the photo is strictly more identifying, so the car is
+                         the fallback rather than a replacement. */
+                      <MAP_GLYPHS.driver size={spacing.spacingLg} color={rankColor} />
                     )}
                   </View>
+                  {/* Direction of travel. The chevron sits at the top of a
+                      wrapper the size of the ring well and the wrapper is
+                      rotated, so the mark orbits the ring and points the way
+                      the driver is going. Static, like everything else on a
+                      marker — Android snapshots the view to a bitmap, so an
+                      animated version would freeze rather than animate. */}
+                  {bearing != null && (
+                    <View
+                      pointerEvents="none"
+                      style={[styles.playerHeadingOrbit, { transform: [{ rotate: `${bearing}deg` }] }]}
+                    >
+                      <HeadingChevron size={spacing.spacingMd} color={rankColor} />
+                    </View>
+                  )}
                   <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
                     <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
                   </View>
@@ -2446,31 +2613,12 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
       {/* ===================================================== */}
+      {/* The category chips are gone: choosing what to show is the Filters
+          panel's job now, and it does it for all nine categories with real
+          on/off state instead of one active selection. What is left of the
+          Places *mode* is the thing the panel cannot do — adding a place. */}
       {placesLayerOpen && !isRecording && (
         <>
-          <PlacesFilterBar
-            active={places.category}
-            onChange={(cat) => {
-              places.setCategory(cat);
-              setSelectedPlace(null);
-            }}
-            style={[styles.placesFilterBar, { top: insets.top + spacing.spacingMd }]}
-          />
-          {places.loading && (
-            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
-              <ActivityIndicator size="small" color={colors.racingRed} />
-              <Text style={styles.placesStatusText}>
-                Loading {PLACE_CATEGORY_LABELS[places.category].toLowerCase()} spots near you…
-              </Text>
-            </View>
-          )}
-          {places.error && !places.loading && (
-            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
-              <Text style={styles.placesStatusText}>
-                {places.error} Pan the map to retry this area.
-              </Text>
-            </View>
-          )}
           {/* Yields the bottom-left slot to the place callout. */}
           {!selectedPlace && (
           <SubmitPlaceFab
@@ -2545,13 +2693,38 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* --- Landmark search progress --- */}
+      {/* --- POI layer progress ---
+              The copy no longer says "across Indonesia": the layer used to
+              crawl a fixed list of 24 cities, and now loads whatever is
+              around the driver, wherever that is. --- */}
       {loadingCafes && !locating && !isRecording && (
         <Animated.View style={[styles.cafeLoading, { top: insets.top + LANDMARK_STATUS_OFFSET, opacity: fadeIn }]}>
           <View style={styles.statusPill}>
             <ActivityIndicator size="small" color={colors.racingRed} />
-            <Text style={styles.statusPillText}>Loading landmarks across Indonesia…</Text>
+            <Text style={styles.statusPillText}>Loading places near you…</Text>
           </View>
+        </Animated.View>
+      )}
+
+      {/* --- POI layer failure.
+              Only shown when nothing at all came back — one category
+              failing out of nine leaves eight categories of markers on
+              screen, which is not a state worth interrupting for. Names the
+              control that fixes it, per the voice rule. --- */}
+      {places.error && !loadingCafes && !locating && !isRecording && (
+        <Animated.View style={[styles.cafeLoading, { top: insets.top + LANDMARK_STATUS_OFFSET, opacity: fadeIn }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading nearby places"
+            onPress={() => {
+              if (userLocation) places.retry(userLocation.latitude, userLocation.longitude);
+            }}
+            style={({ pressed }) => [styles.statusPill, pressed && styles.pressed]}
+          >
+            <Text style={styles.statusPillText}>
+              {places.error} Tap to try this area again.
+            </Text>
+          </Pressable>
         </Animated.View>
       )}
 
@@ -2670,7 +2843,7 @@ export default function MapScreen() {
                 <NearbyRow
                   glyph={MAP_GLYPHS.charging}
                   label="Charging"
-                  meters={nearestOfCategory("charging")?.dist}
+                  meters={nearestOfCategory("ev_charger")?.dist}
                 />
               </>
             )}
@@ -3335,37 +3508,66 @@ export default function MapScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.filtersTitle}>MAP LAYERS</Text>
-          {/* The coloured dot per row is gone — it repeated the seven POI
-              hues the marker set just dropped. The category glyph says
-              which layer it is; the tick says whether it is on. */}
-          {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => {
-            const Glyph = CAT_GLYPHS[cat];
-            return (
-              <FilterRow
-                key={cat}
-                label={CAT_LABELS[cat]}
-                checked={visibleCats[cat]}
-                onToggle={() => setVisibleCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
+          <View style={styles.filtersHeadingRow}>
+            <Text style={styles.filtersTitle}>PLACES</Text>
+            {/* Only offered once something is off, so the row is not a
+                permanent control that does nothing most of the time. */}
+            {!allLayersOn && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Turn every layer back on"
+                onPress={resetFilters}
+                hitSlop={spacing.spacingSm}
+                style={({ pressed }) => [pressed && styles.pressed]}
               >
-                <Glyph size={spacing.spacingLg} color={colors.textSecondary} />
-              </FilterRow>
-            );
-          })}
-          <FilterRow
-            label="Events"
-            checked={showEventsLayer}
-            onToggle={() => setShowEventsLayer((v) => !v)}
+                <Text style={styles.filtersReset}>Show all</Text>
+              </Pressable>
+            )}
+          </View>
+          {/* Nine categories plus events plus drivers overflow a phone
+              screen, so the list scrolls inside the popover rather than
+              running off the bottom of it — a filter the driver cannot
+              reach is not a filter.
+
+              The coloured dot per row is gone — it repeated the seven POI
+              hues the marker set dropped. The category glyph says which
+              layer it is; the tick says whether it is on. */}
+          <ScrollView
+            style={styles.filtersScroll}
+            contentContainerStyle={styles.filtersScrollContent}
+            showsVerticalScrollIndicator={false}
           >
-            <MAP_GLYPHS.event size={spacing.spacingLg} color={colors.textSecondary} />
-          </FilterRow>
-          <FilterRow
-            label="Drivers"
-            checked={showDriversLayer}
-            onToggle={() => setShowDriversLayer((v) => !v)}
-          >
-            <MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textSecondary} />
-          </FilterRow>
+            {PLACE_CATEGORIES.map((cat) => {
+              const Glyph = CAT_GLYPHS[cat];
+              return (
+                <FilterRow
+                  key={cat}
+                  label={CAT_LABELS[cat]}
+                  checked={visibleCats[cat]}
+                  onToggle={() => toggleCategory(cat)}
+                >
+                  <Glyph size={spacing.spacingLg} color={colors.textSecondary} />
+                </FilterRow>
+              );
+            })}
+
+            <Text style={[styles.filtersTitle, styles.filtersTitleSpaced]}>PEOPLE & EVENTS</Text>
+            <FilterRow label="Events" checked={showEventsLayer} onToggle={toggleEvents}>
+              <MAP_GLYPHS.event size={spacing.spacingLg} color={colors.textSecondary} />
+            </FilterRow>
+            {/* Kept apart from the place categories because it is not the
+                same kind of switch. Hiding other drivers is how you get a
+                quiet map; it does not hide *you*, which is the visibility
+                switch on the status card and has real consequences. The
+                note below says so, because the two are easy to confuse. */}
+            <FilterRow label="Other drivers" checked={showDriversLayer} onToggle={toggleDrivers}>
+              <MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textSecondary} />
+            </FilterRow>
+            <Text style={styles.filtersNote}>
+              This only clears your map. To hide yourself, use the visibility switch on
+              the status card.
+            </Text>
+          </ScrollView>
         </CutCornerSurface>
       )}
 
@@ -3564,7 +3766,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   PROBLEM SIGNAL CHOOSER — pick what's wrong           */}
       {/* ===================================================== */}
-      {problemChooserOpen && !isRecording && !selectedOnlineUser && (
+      {problemChooserOpen && !isRecording && !selectedOnlineUser && !visibilitySettingsOpen && (
         <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
           <CutCornerSurface
             fill={colors.carbonSurface}
@@ -3610,9 +3812,90 @@ export default function MapScreen() {
       )}
 
       {/* ===================================================== */}
+      {/*   VISIBILITY SETTINGS SHEET                            */}
+      {/* ===================================================== */}
+      {/* Opened by tapping the body of the status card, as distinct from
+          its switch, which goes offline outright.
+
+          KNOWN GAP — there is no per-audience visibility in the app. Live
+          position is broadcast on one Supabase Realtime Presence channel
+          (`online-players`, hooks/useOnlineUsers.ts), which every signed-in
+          client subscribes to; there is no server-side filter that could
+          enforce "friends only", so offering that switch here would be a
+          promise the transport cannot keep. This sheet therefore states
+          exactly what is shared and with whom, and offers only the two
+          controls that are real. Audience granularity is a follow-up and
+          needs a presence-layer change, not a UI one. */}
+      {visibilitySettingsOpen && !isRecording && !selectedOnlineUser && (
+        <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
+          >
+            <View style={styles.sheetHeaderRow}>
+              <View style={styles.sheetGlyphBox}>
+                <VisibilityGlyph
+                  visible={isUserOnline}
+                  size={spacing.spacingLg}
+                  color={colors.textPrimary}
+                />
+              </View>
+              <View style={styles.sheetHeaderText}>
+                <Text style={styles.sheetTitle}>Who can see you</Text>
+                <Text style={styles.sheetBodyText}>
+                  {isUserOnline
+                    ? "While you're online, every signed-in driver can see your position, name and level on the map. Your trips, garage and messages are not shared here."
+                    : "You're offline, so no one can see your position. You also can't see other drivers."}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.driverSheetActions}>
+              <ActionRow
+                label={isUserOnline ? "Go offline" : "Go online"}
+                icon={
+                  <VisibilityGlyph
+                    visible={!isUserOnline}
+                    size={spacing.spacingLg}
+                    color={colors.textPrimary}
+                  />
+                }
+                onPress={() => {
+                  if (isUserOnline) goOffline();
+                  else goOnline();
+                  setVisibilitySettingsOpen(false);
+                }}
+              />
+              <ActionRow
+                label={showDriversLayer ? "Hide other drivers" : "Show other drivers"}
+                icon={<MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textPrimary} />}
+                onPress={toggleDrivers}
+              />
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close visibility settings"
+              style={styles.sheetDismiss}
+              onPress={() => setVisibilitySettingsOpen(false)}
+            >
+              <Text style={styles.sheetDismissText}>Done</Text>
+            </Pressable>
+          </CutCornerSurface>
+        </View>
+      )}
+
+      {/* ===================================================== */}
       {/*   ONLINE STATUS BANNER — compact, above the tab bar    */}
       {/* ===================================================== */}
-      {!isRecording && !routeInfo && !selectedDestination && !selectedPlace && recordedPath.length === 0 && (() => {
+      {/* Yields the bottom slot to the visibility sheet the card itself
+          opens — otherwise the sheet lands on top of its own trigger. */}
+      {!isRecording && !routeInfo && !selectedDestination && !selectedPlace
+        && !visibilitySettingsOpen && !problemChooserOpen && recordedPath.length === 0 && (() => {
         const onlineCount = onlineUsers.length;
         return (
           <Animated.View
@@ -3661,21 +3944,26 @@ export default function MapScreen() {
                 corners="topRight"
                 contentStyle={styles.onlineBanner}
               >
-                <View style={styles.onlineBannerLeft}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open visibility settings"
+                  onPress={openVisibilitySettings}
+                  style={({ pressed }) => [styles.onlineBannerLeft, pressed && styles.pressed]}
+                >
                   <View style={styles.onlineBannerDot} />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={styles.onlineBannerTitle}>VISIBILITY OFF</Text>
+                    <Text style={styles.onlineBannerTitle}>YOU'RE OFFLINE</Text>
                     <Text style={styles.onlineBannerSub}>
-                      Other drivers can't see you. Flip the switch to share your position.
+                      Your location isn't visible to anyone. Tap for visibility settings.
                     </Text>
                   </View>
-                </View>
+                </Pressable>
                 <Pressable
                   style={styles.visibilitySwitchTrack}
                   onPress={goOnline}
                   accessibilityRole="switch"
                   accessibilityState={{ checked: false }}
-                  accessibilityLabel="Turn visibility on"
+                  accessibilityLabel="Go online"
                 >
                   <View style={styles.visibilitySwitchKnob}>
                     <VisibilityGlyph visible={false} color={colors.voidBlack} size={spacing.spacingMd} />
@@ -3697,7 +3985,17 @@ export default function MapScreen() {
                 corners="topRight"
                 contentStyle={styles.onlineBanner}
               >
-                <View style={styles.onlineBannerLeft}>
+                {/* Tapping the card body opens visibility settings;
+                    the control on the right goes offline. Two different
+                    actions, so they are two different hit areas — the
+                    reference design's pattern, and the reason the body is a
+                    Pressable rather than the whole card being one. */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open visibility settings"
+                  onPress={openVisibilitySettings}
+                  style={({ pressed }) => [styles.onlineBannerLeft, pressed && styles.pressed]}
+                >
                   <Animated.View
                     style={[
                       styles.onlineBannerDot,
@@ -3706,20 +4004,24 @@ export default function MapScreen() {
                     ]}
                   />
                   <View style={styles.onlineBannerTextWrap}>
-                    <Text style={styles.onlineBannerTitle}>VISIBILITY ON</Text>
+                    <Text style={styles.onlineBannerTitle}>YOU'RE ONLINE</Text>
+                    {/* Says what is being shared and with whom, not just
+                        that a switch is on — this card is the only place a
+                        driver is told their position is public. */}
                     <Text style={styles.onlineBannerSub}>
+                      Your location is visible to other drivers.
                       {onlineCount > 0
-                        ? `Position shared. ${onlineCount} other driver${onlineCount !== 1 ? "s" : ""} on the map now.`
-                        : "Position shared. No other drivers near you yet."}
+                        ? ` ${onlineCount} nearby right now.`
+                        : " None nearby right now."}
                     </Text>
                   </View>
-                </View>
+                </Pressable>
                 <Pressable
                   style={[styles.visibilitySwitchTrack, styles.visibilitySwitchTrackOn]}
                   onPress={goOffline}
                   accessibilityRole="switch"
                   accessibilityState={{ checked: true }}
-                  accessibilityLabel="Turn visibility off"
+                  accessibilityLabel="Go offline"
                 >
                   <View style={styles.visibilitySwitchKnob}>
                     <VisibilityGlyph visible color={colors.voidBlack} size={spacing.spacingMd} />
@@ -4274,42 +4576,12 @@ const styles = StyleSheet.create({
   },
 
   /* ---------------- Places layer (OSM + community) ---------------- */
-  placesFilterBar: {
-    position: "absolute",
-    left: SCREEN_MARGIN,
-    // Same gutter as the top chrome, so the chip row never scrolls under
-    // the search / locate / filters column.
-    right: spacing.spacingXxxl + spacing.spacingXl,
-    zIndex: 5,
-  },
   // The submit-a-place action takes the bottom-left slot the live feed
   // vacates while this layer is open.
   placesFabSlot: {
     position: "absolute",
     left: SCREEN_MARGIN,
     zIndex: 5,
-  },
-
-  placesStatusPill: {
-    position: "absolute",
-    left: SCREEN_MARGIN,
-    // Same gutter as the chip row above it.
-    right: spacing.spacingXxxl + spacing.spacingXl,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.spacingSm,
-    backgroundColor: colors.carbonSurface,
-    borderWidth: borderWidth.hairline,
-    borderColor: colors.hairline,
-    borderRadius: radius.sharp,
-    paddingHorizontal: spacing.spacingMd,
-    paddingVertical: spacing.spacingSm,
-    zIndex: 5,
-  },
-  placesStatusText: {
-    ...textStyle("caption"),
-    color: colors.textSecondary,
-    flexShrink: 1,
   },
 
   /* ---------------- Status pills and banners ---------------- */
@@ -4407,6 +4679,26 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  /* Cluster badge. Fixed bounds like every other marker (D-5): the count
+     changes as the driver pans, and a marker that grows after the native
+     snapshot is taken is the "icons cropped to half size" bug. Wide enough
+     for a glyph plus three digits — past 999 in one cell the map is far
+     enough out that the clusterer has already merged categories. */
+  clusterMarker: {
+    width: 58,
+    height: 34,
+  },
+  clusterMarkerContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.spacingXs,
+  },
+  clusterCount: {
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
   },
   poiMarkerName: {
     ...textStyle("caption"),
@@ -4712,7 +5004,10 @@ const styles = StyleSheet.create({
   filtersPopover: {
     position: "absolute",
     right: spacing.spacingXxxl + spacing.spacingXl + spacing.spacingSm,
-    width: spacing.spacingXxxl * 4,
+    /* Widened from 192 when the panel went from seven rows to eleven:
+       "Other drivers" and "Car Wash" clipped their labels at the old width
+       once the glyph and the tick had taken their columns. */
+    width: spacing.spacingXxxl * 4 + spacing.spacingXl, // 216
     zIndex: 240,
   },
   filtersContent: {
@@ -4727,6 +5022,35 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.spacingSm,
     marginBottom: spacing.spacingXs,
+  },
+  filtersTitleSpaced: {
+    marginTop: spacing.spacingLg,
+  },
+  filtersHeadingRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+  },
+  filtersReset: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    textDecorationLine: "underline",
+    marginBottom: spacing.spacingXs,
+  },
+  /* Eleven toggles plus two section headers overflow the popover on a
+     390pt screen once the top chrome is subtracted, so the list scrolls.
+     The height is a named cap rather than a flex bound: the popover
+     floats over the map with nothing to flex against. */
+  filtersScroll: {
+    maxHeight: FILTERS_LIST_MAX_HEIGHT,
+  },
+  filtersScrollContent: {
+    paddingBottom: spacing.spacingXs,
+  },
+  filtersNote: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    marginTop: spacing.spacingSm,
   },
   filterRow: {
     flexDirection: "row",
@@ -5747,6 +6071,15 @@ const styles = StyleSheet.create({
     height: 46,
     alignItems: "center",
     justifyContent: "center",
+  },
+  /* The heading chevron's orbit. Fills the ring well exactly so rotating it
+     turns the chevron around the ring's centre; the chevron itself sits at
+     the top edge. Stays inside `playerRingBox`'s fixed 46pt bounds, so the
+     marker's snapshot size is unchanged whether a driver has a heading or
+     not (D-5). */
+  playerHeadingOrbit: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
   },
   playerRing: {
     width: 34,

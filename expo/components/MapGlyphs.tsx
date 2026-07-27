@@ -39,6 +39,7 @@
 import React from "react";
 import Svg, { Circle, Path, Polyline } from "react-native-svg";
 import { colors } from "@/constants/theme";
+import type { PlaceCategory } from "@/constants/placesCategories";
 
 /** The one stroke weight for everything drawn on the map surface. */
 export const MAP_GLYPH_STROKE = 2;
@@ -78,7 +79,7 @@ function Glyph({
 }
 
 /* ------------------------------------------------------------------ *
- * The eight categories
+ * The nine place categories, plus events and drivers
  * ------------------------------------------------------------------ */
 
 /** Cafe — tapered cup, bracket handle, one steam stroke. */
@@ -195,6 +196,24 @@ export function DriverGlyph(props: GlyphProps) {
   );
 }
 
+/**
+ * Parking — the regulatory "P" as a plate, not a letterform.
+ *
+ * The one glyph in the set that is a character rather than an object,
+ * because the P on a parking sign is understood everywhere and drawing a
+ * car in a bay instead would collide with the driver glyph at 12pt. It is
+ * built from strokes like the rest so it takes the same weight and mitred
+ * joins, rather than being set in a typeface that isn't Rajdhani.
+ */
+export function ParkingGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <Path d="M4 3h16v18H4z" />
+      <Path d="M9.5 17V7h3.5a3 3 0 0 1 0 6H9.5" />
+    </Glyph>
+  );
+}
+
 /** Charging — plug body with the bolt cut through it. */
 export function ChargeGlyph(props: GlyphProps) {
   return (
@@ -293,6 +312,39 @@ export function DriverMark({ size = 36 }: { size?: number }) {
 }
 
 /**
+ * Direction-of-travel chevron, drawn pointing north.
+ *
+ * Rides on another driver's marker to say which way they are heading. The
+ * caller rotates it — a wrapper the size of the marker's ring well, turned
+ * by the driver's bearing, so the chevron orbits the ring rather than
+ * spinning on its own centre.
+ *
+ * Solid rather than stroked: at 10pt on a photographic map tile a two-stroke
+ * outline closes up into a smudge, and this mark has to be readable at a
+ * glance from a moving car. It carries the driver's rank colour, so it is
+ * also the marker's only tinted element besides the rings.
+ */
+export function HeadingChevron({
+  size = 10,
+  color = colors.textPrimary,
+}: {
+  size?: number;
+  color?: string;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 12 12" fill="none">
+      <Path
+        d="M6 0.5 11 11 6 8.5 1 11Z"
+        fill={color}
+        stroke={colors.voidBlack}
+        strokeWidth={1}
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
+/**
  * Visibility toggle glyph: open eye when the driver is on the map,
  * slashed when hidden.
  */
@@ -351,10 +403,33 @@ export type MapGlyphKey =
   | "shopping"
   | "carwash"
   | "charging"
+  | "parking"
   | "event"
   | "driver";
 
 export type MapGlyphComponent = (props: GlyphProps) => React.JSX.Element;
+
+/**
+ * Place category → glyph.
+ *
+ * The binding lives here rather than in `constants/placesCategories.ts`
+ * because the taxonomy is data — it is shared with the Supabase edge
+ * functions and must stay free of React imports so it can be unit-tested
+ * and read from non-render code. The glyphs are components, and this file
+ * already owns them.
+ */
+export const PLACE_CATEGORY_GLYPHS: Record<PlaceCategory, MapGlyphComponent> = {
+  cafe: CafeGlyph,
+  restaurant: FoodGlyph,
+  gas_station: FuelGlyph,
+  workshop: WorkshopGlyph,
+  shopping: ShopGlyph,
+  parking: ParkingGlyph,
+  ev_charger: ChargeGlyph,
+  car_wash: WashGlyph,
+  // Was lucide's `MapPin` — a generic map pin standing in for a category.
+  hangout: HangoutGlyph,
+};
 
 export const MAP_GLYPHS: Record<MapGlyphKey, MapGlyphComponent> = {
   cafe: CafeGlyph,
@@ -365,6 +440,7 @@ export const MAP_GLYPHS: Record<MapGlyphKey, MapGlyphComponent> = {
   shopping: ShopGlyph,
   carwash: WashGlyph,
   charging: ChargeGlyph,
+  parking: ParkingGlyph,
   event: EventGlyph,
   driver: DriverGlyph,
 };
