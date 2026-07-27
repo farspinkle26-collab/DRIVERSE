@@ -89,7 +89,9 @@ import RankBadge from "@/components/RankBadge";
 import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import { PlatinumNameBadge, PlatinumWordmark } from "@/components/platinum/PlatinumBadge";
+import { FounderNameBadge, FounderWordmark } from "@/components/founder/FounderBadge";
 import PlatinumAura from "@/components/platinum/PlatinumAura";
+import PlatinumPageGlow from "@/components/platinum/PlatinumPageGlow";
 import ProfileFrame from "@/components/platinum/ProfileFrame";
 import PremiumVehicleIcon from "@/components/platinum/PremiumVehicleIcon";
 import ShowcaseModal from "@/components/platinum/ShowcaseModal";
@@ -391,6 +393,16 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [otherProfileFrame, setOtherProfileFrame] = useState<string | null>(null);
   const [otherCountry, setOtherCountry] = useState<string | null>(null);
 
+  // ─── Founder ───────────────────────────────────────────────
+  // Unlike Platinum, `is_founder` lives on the profile row itself and IS the
+  // source of truth (see database_migration_founder.sql), so the same fetch
+  // covers self and other — no RevenueCat-style split needed.
+  const [viewedIsFounder, setViewedIsFounder] = useState(false);
+  const [redeemOpen, setRedeemOpen] = useState(false);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemError, setRedeemError] = useState<string | null>(null);
+
   const [cars, setCars] = useState<CarItem[]>([]);
   const [trips, setTrips] = useState<TripItem[]>([]);
   const [friends, setFriends] = useState<FriendItem[]>([]);
@@ -469,6 +481,16 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       .single();
     if (stats) setOtherStreak(stats.current_streak ?? 0);
   }, [targetId, isSelf, user]);
+
+  const loadFounderStatus = useCallback(async () => {
+    if (!targetId) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("is_founder")
+      .eq("id", targetId)
+      .single();
+    setViewedIsFounder(!!data?.is_founder);
+  }, [targetId]);
 
   const loadCars = useCallback(async () => {
     if (!targetId) return;
@@ -560,6 +582,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     setLoading(true);
     await Promise.all([
       loadTargetProfile(),
+      loadFounderStatus(),
       loadCars(),
       loadTrips(),
       loadFriends(),
@@ -569,7 +592,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       loadInboxes(),
     ]);
     setLoading(false);
-  }, [loadTargetProfile, loadCars, loadTrips, loadFriends, loadFriendState, loadInboxes]);
+  }, [loadTargetProfile, loadFounderStatus, loadCars, loadTrips, loadFriends, loadFriendState, loadInboxes]);
 
   useEffect(() => {
     if (isAuthenticated) loadAll();
@@ -672,6 +695,31 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     if (!user || !next) return;
     await updateCountry(next);
   }, [countryDraft, user, updateCountry]);
+
+  // ─── Actions: Founder redeem ─────────────────────────────────
+  //
+  // The code itself is never checked on the client — `redeem_founder_code`
+  // is `security definer` and does the comparison server-side, so a modified
+  // client can't just flip the flag. This handler only reflects the result.
+  const redeemFounderStatus = useCallback(async () => {
+    const code = redeemCode.trim();
+    if (!code) return;
+    setRedeeming(true);
+    setRedeemError(null);
+    const { data, error } = await supabase.rpc("redeem_founder_code", { code });
+    setRedeeming(false);
+    if (error) {
+      setRedeemError("Something went wrong. Try again.");
+      return;
+    }
+    if (!data) {
+      setRedeemError("That code isn't valid.");
+      return;
+    }
+    setViewedIsFounder(true);
+    setRedeemCode("");
+    setRedeemOpen(false);
+  }, [redeemCode]);
 
   // ─── Actions: garage ───────────────────────────────────────
   //
@@ -925,6 +973,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
   return (
     <View style={styles.container}>
+      {/* Ambient wash behind the header, only for a Platinum profile — the
+          signed-in driver's own page and any Platinum driver's page a
+          visitor opens both get it, since it marks the profile, not the
+          viewer. See PlatinumPageGlow for why it stops at the header. */}
+      <PlatinumPageGlow show={viewedIsPlatinum} height={420} />
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
@@ -1023,8 +1076,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               ) : (
                 <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
               )}
-              {/* Subscription status, next to the name. Distinct from the
-                  rank badge below it, which is progression. */}
+              {/* Founder and Platinum, next to the name. Distinct from the
+                  rank badge below it, which is progression — these two are
+                  status marks: one-time redemption, one subscription. */}
+              <FounderNameBadge
+                show={viewedIsFounder && !editingName}
+                name={profileName}
+              />
               <PlatinumNameBadge
                 show={viewedIsPlatinum && !editingName}
                 name={profileName}
@@ -1773,6 +1831,29 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
               </View>
             </Pressable>
+            {/* Founder redeem entry — a one-time code, not a purchase, so it
+                stays a plain row rather than borrowing Platinum's wordmark
+                treatment. Once redeemed it's a status readout, not a link. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                viewedIsFounder ? "Founder driver" : "Redeem a Founder code"
+              }
+              onPress={() => !viewedIsFounder && setRedeemOpen(true)}
+              style={({ pressed }) => [styles.settingRow, pressed && !viewedIsFounder && styles.pressed]}
+            >
+              <View style={styles.settingLeft}>
+                <FounderWordmark size={ICON_MD} label="FOUNDER" />
+              </View>
+              <View style={styles.settingRight}>
+                <Text style={styles.platinumStatus}>
+                  {viewedIsFounder ? "REDEEMED" : "REDEEM CODE"}
+                </Text>
+                {!viewedIsFounder && (
+                  <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                )}
+              </View>
+            </Pressable>
             <SettingRow
               icon={<MessageCircle size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Messages"
@@ -1852,6 +1933,59 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               ))
             )}
           </ScrollView>
+        </Sheet>
+      </Modal>
+
+      {/* ═══ FOUNDER REDEEM ═══ */}
+      <Modal
+        visible={redeemOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !redeeming && setRedeemOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => !redeeming && setRedeemOpen(false)}
+        />
+        <Sheet bottomInset={insets.bottom}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>REDEEM FOUNDER CODE</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={() => !redeeming && setRedeemOpen(false)}
+              hitSlop={spacing.spacingSm}
+            >
+              <X size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+            </Pressable>
+          </View>
+          <Text style={styles.premiumBody}>
+            Have a launch code? Redeem it for the Founder badge — a permanent
+            mark next to your name, everywhere you appear.
+          </Text>
+          <TextInput
+            style={styles.redeemInput}
+            value={redeemCode}
+            onChangeText={(t) => { setRedeemCode(t); setRedeemError(null); }}
+            placeholder="Enter code"
+            placeholderTextColor={colors.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!redeeming}
+            onSubmitEditing={redeemFounderStatus}
+          />
+          {redeemError && <Text style={styles.redeemError}>{redeemError}</Text>}
+          <CutCornerButton
+            title={redeeming ? "Redeeming…" : "Redeem"}
+            variant="primary"
+            size="lg"
+            corners="topRight"
+            disabled={redeeming || !redeemCode.trim()}
+            onPress={redeemFounderStatus}
+            icon={
+              redeeming ? <ActivityIndicator size="small" color={colors.voidBlack} /> : undefined
+            }
+          />
         </Sheet>
       </Modal>
 
@@ -2990,5 +3124,21 @@ const styles = StyleSheet.create({
     ...textStyle("body"),
     color: colors.textSecondary,
     textAlign: "center",
+  },
+
+  // Founder redeem sheet
+  redeemInput: {
+    ...textStyle("body"),
+    color: colors.textPrimary,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingMd,
+  },
+  redeemError: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
   },
 });
