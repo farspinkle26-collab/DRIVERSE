@@ -8,9 +8,12 @@ version control alongside the code, so history is auditable and diffs are human
 
 ```
 content/
-  posts/*.md        one Markdown file per post (frontmatter + body sections)
-  account.json      per-platform followers + 30-day funnel + demographics
-  what-works.md     learned playbook (machine section fenced; prose is yours)
+  posts/*.md              one Markdown file per post (frontmatter + body sections)
+  account.json            per-platform followers + 30-day funnel + demographics
+  what-works.md           learned playbook (machine section fenced; prose is yours)
+  marketing/schedule.json product build order, weekly content calendar, 4-week
+                          rollout plan, and the results log — see /marketing
+                          in the admin app
 ```
 
 ## Post files (`posts/*.md`)

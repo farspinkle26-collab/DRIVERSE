@@ -666,7 +666,7 @@ function Heatmap({ heat }: { heat: ReturnType<typeof weekdayDaypartHeat> }) {
               {DAYPARTS.map((dp) => {
                 const cell = map.get(`${wd}|${dp}`);
                 const intensity = cell ? cell.saveRateMedian / maxRate : 0;
-                const bg = cell ? `rgba(57,135,229,${0.15 + intensity * 0.75})` : "transparent";
+                const bg = cell ? `rgba(224,38,58,${0.15 + intensity * 0.75})` : "transparent";
                 return (
                   <td
                     key={dp}

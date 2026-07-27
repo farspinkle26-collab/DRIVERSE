@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/garage", label: "Garage" },
   { href: "/monetization", label: "Monetization" },
   { href: "/content", label: "Content" },
+  { href: "/marketing", label: "Marketing" },
 ];
 
 export function Nav() {
