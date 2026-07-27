@@ -85,6 +85,31 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Car not found" }, 404);
   }
 
+  // Service-role client: reads the entitlement mirror (no client has select
+  // rights over it beyond their own row) and owns the storage write below.
+  const adminClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  // ── Gate: entitlement ──────────────────────────────────────
+  // AI car generation is a Platinum benefit; the client checks this too, but
+  // the function is what actually bounds the OpenRouter bill.
+  const { data: isPlatinum, error: entitlementError } = await adminClient.rpc(
+    "is_platinum",
+    { uid: userId }
+  );
+  if (entitlementError) {
+    console.error(`[generate-car-image] entitlement check failed: ${entitlementError.message}`);
+    return jsonResponse({ error: "Couldn't verify your subscription." }, 500);
+  }
+  if (!isPlatinum) {
+    return jsonResponse(
+      { error: "AI car generation is a Platinum feature.", code: "not_platinum" },
+      403
+    );
+  }
+
   const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
   if (!openRouterKey) {
     console.error("[generate-car-image] OPENROUTER_API_KEY is not configured");
@@ -139,13 +164,6 @@ Deno.serve(async (req) => {
   }
   const outBytes = Uint8Array.from(atob(outBase64), (c) => c.charCodeAt(0));
   const outExt = outMime === "image/png" ? "png" : outMime === "image/webp" ? "webp" : "jpg";
-
-  // Service-role client to write the result: storage + table update happen
-  // after ownership was already verified above via the user-scoped client.
-  const adminClient = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  );
 
   const path = `${userId}/${carId}.${outExt}`;
   const { error: uploadError } = await adminClient.storage
