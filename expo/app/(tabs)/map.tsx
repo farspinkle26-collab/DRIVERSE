@@ -27,7 +27,7 @@
  * pass — the handlers, refs and effects below are the originals.
  */
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -96,6 +96,10 @@ import {
   Leaf,
   Mountain,
   ChevronUp,
+  AlertTriangle,
+  Wrench,
+  Fuel,
+  LifeBuoy,
 } from "lucide-react-native";
 import {
   CutCornerBadge,
@@ -108,6 +112,7 @@ import {
   DriverMark,
   MAP_GLYPHS,
   MAP_GLYPH_STROKE,
+  ProblemGlyph,
   VisibilityGlyph,
   type MapGlyphComponent,
 } from "@/components/MapGlyphs";
@@ -129,7 +134,7 @@ import ShareCardModal from "@/components/ShareCardModal";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
-import { useOnlineUsers, OnlineUser } from "@/hooks/useOnlineUsers";
+import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
 import { EventTypeIcon, eventTypeLabel } from "@/components/EventMeta";
@@ -453,6 +458,45 @@ function playerColor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return PLAYER_COLORS[hash % PLAYER_COLORS.length];
+}
+
+/**
+ * Problem-signal catalogue. Four kinds, each mapping to a different sort of
+ * help — a tow, the emergency services, fuel, or "anyone at all". The label
+ * is what the raiser picks; `alert` is the terse verb that lands on other
+ * drivers' screens ("<name> broke down"). The glyph is a lucide icon here
+ * (chrome), while the marker itself carries the single `ProblemGlyph`
+ * warning triangle so category is one shape and never a hue-per-type.
+ *
+ * A problem signal is the one thing on the map allowed to spend the accent
+ * on someone else's marker: a driver in trouble is exactly the "live, act on
+ * this now" state red is reserved for (MAP_SCREEN_REFERENCE §3).
+ */
+const PROBLEM_TYPES: {
+  key: ProblemType;
+  label: string;
+  sub: string;
+  alert: string;
+  Icon: typeof Wrench;
+}[] = [
+  { key: "breakdown", label: "Broke down", sub: "Mechanical fault — stopped", alert: "broke down", Icon: Wrench },
+  { key: "accident", label: "Accident", sub: "Crash or collision", alert: "had an accident", Icon: AlertTriangle },
+  { key: "fuel", label: "Out of fuel", sub: "Need a top-up to move", alert: "is out of fuel", Icon: Fuel },
+  { key: "sos", label: "Need help", sub: "Urgent — send anyone near", alert: "needs help", Icon: LifeBuoy },
+];
+
+function problemMeta(type: ProblemType) {
+  return PROBLEM_TYPES.find((p) => p.key === type) ?? PROBLEM_TYPES[0];
+}
+
+/** "3 min ago" style age for a raised signal. */
+function problemAge(since: string): string {
+  const secs = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs}h ago`;
 }
 
 // NOTE: no speed-limit data source is wired up anywhere in this app (no Roads
@@ -823,12 +867,16 @@ export default function MapScreen() {
   const { level, totalXp, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
 
   // Online users system
-  const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline } = useOnlineUsers();
+  const { onlineUsers, isOnline: isUserOnline, goOnline, goOffline, myProblem, raiseProblem, clearProblem } = useOnlineUsers();
   const { user } = useAuth();
   const { activeCar } = useActiveCar();
   const { party, partyMemberIds, inviteFriend } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
+  // The raise-a-signal chooser sheet, and a tick that re-renders the age
+  // labels ("3 min ago") on active signals once a minute.
+  const [problemChooserOpen, setProblemChooserOpen] = useState(false);
+  const [, setProblemClock] = useState(0);
   const [addingFriend, setAddingFriend] = useState(false);
   const [askingMeetup, setAskingMeetup] = useState(false);
 
@@ -1808,6 +1856,67 @@ export default function MapScreen() {
     }
   }
 
+  // ─── Drivers in distress ─────────────────────────────────
+  // Every online user who has a problem signal up. Convoy-mates come first
+  // (the request's headline case — signal the others in your convoy), then
+  // by distance, so the alert banner always leads with the person you're
+  // most likely able to reach. This is what makes a problem visible to
+  // everyone on the map, in a convoy or not.
+  const distressUsers = useMemo(() => {
+    const flagged = onlineUsers.filter((u) => u.problem);
+    return flagged.sort((a, b) => {
+      const am = partyMemberIds.has(a.user_id) ? 0 : 1;
+      const bm = partyMemberIds.has(b.user_id) ? 0 : 1;
+      if (am !== bm) return am - bm;
+      if (userLocation) {
+        return haversineMeters(userLocation, a) - haversineMeters(userLocation, b);
+      }
+      return 0;
+    });
+  }, [onlineUsers, partyMemberIds, userLocation]);
+
+  // Re-render the age labels ("3 min ago") on live signals once a minute,
+  // but only while there's a signal on screen to keep fresh.
+  const hasLiveSignals = distressUsers.length > 0 || !!myProblem;
+  useEffect(() => {
+    if (!hasLiveSignals) return;
+    const id = setInterval(() => setProblemClock((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, [hasLiveSignals]);
+
+  // ─── Raise / clear my own signal ─────────────────────────
+  const handleRaiseProblem = useCallback(
+    async (type: ProblemType) => {
+      if (!user) {
+        Alert.alert(
+          "Signalling a problem needs an account",
+          "A problem signal is tied to your driver profile so others know who to help. Sign in from the banner above the tab bar, then raise it again."
+        );
+        return;
+      }
+      setProblemChooserOpen(false);
+      await raiseProblem(type);
+      const meta = problemMeta(type);
+      Alert.alert(
+        "Signal raised",
+        `Every driver on the map can now see that you ${meta.alert}. Tap the red Signal button again to stand it down once you're sorted.`
+      );
+    },
+    [user, raiseProblem]
+  );
+
+  const handleClearProblem = useCallback(async () => {
+    await clearProblem();
+  }, [clearProblem]);
+
+  const handleSignalPress = useCallback(() => {
+    if (myProblem) {
+      handleClearProblem();
+    } else {
+      setProblemChooserOpen(true);
+    }
+  }, [myProblem, handleClearProblem]);
+
   // One-time "Scenic Road" bonus toast partway through a sufficiently long
   // drive. There's no real scenic-route detection in this app (no terrain/
   // greenery signal to draw on) — this is a lightweight gamification flourish,
@@ -2134,14 +2243,25 @@ export default function MapScreen() {
             brighter, because a shadow-based "glow" is not in the system. */}
         {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
-          const ringColor = isPartyMate && party ? party.color : playerColor(onlineUser.user_id);
+          // A raised problem takes the accent and overrides the livery/party
+          // colour: distress has to win the marker outright, or it competes
+          // with an identity hue it's more important than. Static red (not an
+          // animated pulse) because Android snapshots the marker to a bitmap
+          // and would freeze mid-animation — the `eventMarkerLiveRing` does
+          // "live" the same static way.
+          const problem = onlineUser.problem ?? null;
+          const ringColor = problem
+            ? colors.racingRed
+            : isPartyMate && party
+              ? party.color
+              : playerColor(onlineUser.user_id);
           return (
             <SettledMarker
               key={`online-${onlineUser.user_id}`}
               coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
               anchor={{ x: 0.5, y: 0.36 }}
               onPress={() => setSelectedOnlineUser(onlineUser)}
-              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${onlineUser.avatar ?? ""}`}
+              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}`}
               ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
             >
               <View style={styles.playerMarkerWrap} collapsable={false}>
@@ -2149,13 +2269,15 @@ export default function MapScreen() {
                     absolutely-positioned children with negative offsets get
                     clipped out of the native marker snapshot. */}
                 <View style={styles.playerRingBox}>
-                  {isPartyMate && (
+                  {problem ? (
+                    <View style={styles.problemOuterRing} />
+                  ) : isPartyMate ? (
                     <View style={[styles.partyOuterRing, { borderColor: ringColor }]} />
-                  )}
+                  ) : null}
                   <View style={[
                     styles.playerRing,
                     { borderColor: ringColor },
-                    isPartyMate && styles.playerRingParty,
+                    (isPartyMate || problem) && styles.playerRingParty,
                   ]}>
                     {onlineUser.avatar ? (
                       <Image
@@ -2173,13 +2295,25 @@ export default function MapScreen() {
                   <View style={[styles.playerLevelBadge, { borderColor: ringColor }]}>
                     <Text style={styles.playerLevelBadgeText}>{onlineUser.level}</Text>
                   </View>
-                  {isPartyMate && (
+                  {/* Distress wins the badge slot from the convoy mark: a
+                      driver in trouble is more urgent than the fact they're
+                      in your convoy, which the alert banner still spells out. */}
+                  {problem ? (
+                    <View style={styles.problemBadge}>
+                      <ProblemGlyph size={spacing.spacingSm} color={onRacingRed} />
+                    </View>
+                  ) : isPartyMate ? (
                     <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
                       <Users size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
                     </View>
-                  )}
+                  ) : null}
                 </View>
                 <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
+                {problem && (
+                  <Text style={styles.playerProblemLabel} numberOfLines={1}>
+                    {problemMeta(problem.type).label}
+                  </Text>
+                )}
               </View>
             </SettledMarker>
           );
@@ -3333,7 +3467,121 @@ export default function MapScreen() {
           >
             <MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
           </MapChromeButton>
+
+          {/* Signal a problem to every driver on the map. Neutral until my
+              own signal is up, then it takes the accent border and label —
+              the one live-state that earns red here — so standing it down is
+              one obvious tap. */}
+          <MapChromeButton
+            label={myProblem ? "Clear" : "Signal"}
+            accessibilityLabel={myProblem ? "Stand down your problem signal" : "Signal a problem to nearby drivers"}
+            active={!!myProblem}
+            onPress={handleSignalPress}
+          >
+            <ProblemGlyph
+              size={spacing.spacingLg}
+              color={myProblem ? colors.racingRed : colors.textPrimary}
+            />
+          </MapChromeButton>
         </Animated.View>
+      )}
+
+      {/* ===================================================== */}
+      {/*   DISTRESS ALERT — a driver near you needs help        */}
+      {/* ===================================================== */}
+      {/* Kept off the driving HUD (`!isRecording`): while navigating, the
+          marker carries distress and a top banner would fight the turn card.
+          Idle, it's the loudest thing on screen — which for "someone needs
+          help" is the point. Leads with convoy-mates, then the nearest. */}
+      {!isRecording && !searchOpen && !placesLayerOpen && distressUsers.length > 0 && (() => {
+        const top = distressUsers[0];
+        const meta = problemMeta(top.problem!.type);
+        const mate = partyMemberIds.has(top.user_id);
+        const extra = distressUsers.length - 1;
+        const dist = userLocation ? Math.round(haversineMeters(userLocation, top)) : null;
+        return (
+          <View style={[styles.distressBannerSlot, { top: insets.top + spacing.spacingMd }]} pointerEvents="box-none">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${top.name} ${meta.alert}. Open their card.`}
+              onPress={() => setSelectedOnlineUser(top)}
+              style={({ pressed }) => [pressed && styles.pressed]}
+            >
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={colors.racingRed}
+                borderWidth={borderWidth.emphasis}
+                cutSize={cut.md}
+                corners="topRight"
+                contentStyle={styles.distressBanner}
+              >
+                <View style={styles.distressBadge}>
+                  <ProblemGlyph size={spacing.spacingLg} color={onRacingRed} />
+                </View>
+                <View style={styles.distressTextWrap}>
+                  <Text style={styles.distressTitle} numberOfLines={1}>
+                    {top.name} {meta.alert}
+                    {extra > 0 ? ` +${extra} more` : ""}
+                  </Text>
+                  <Text style={styles.distressSub} numberOfLines={1}>
+                    {mate ? "Convoy · " : ""}
+                    {dist !== null ? `${fmtMeters(dist)} away · ` : ""}
+                    {problemAge(top.problem!.since)}
+                  </Text>
+                </View>
+                <ChevronRight size={spacing.spacingXl} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
+              </CutCornerSurface>
+            </Pressable>
+          </View>
+        );
+      })()}
+
+      {/* ===================================================== */}
+      {/*   PROBLEM SIGNAL CHOOSER — pick what's wrong           */}
+      {/* ===================================================== */}
+      {problemChooserOpen && !isRecording && !selectedOnlineUser && (
+        <View style={[styles.bottomSheetSlot, { paddingBottom: insets.bottom + TAB_BAR_CLEARANCE }]}>
+          <CutCornerSurface
+            fill={colors.carbonSurface}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.md}
+            corners="topRight"
+            contentStyle={styles.sheetBody}
+          >
+            <View style={styles.sheetHeaderRow}>
+              <View style={styles.sheetGlyphBox}>
+                <ProblemGlyph size={spacing.spacingLg} color={colors.racingRed} />
+              </View>
+              <View style={styles.sheetHeaderText}>
+                <Text style={styles.sheetTitle}>What's wrong?</Text>
+                <Text style={styles.sheetBodyText}>
+                  Every driver on the map — in your convoy or not — will see it until you stand it down.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.driverSheetActions}>
+              {PROBLEM_TYPES.map((p) => (
+                <ActionRow
+                  key={p.key}
+                  label={p.label}
+                  icon={<p.Icon size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+                  onPress={() => handleRaiseProblem(p.key)}
+                />
+              ))}
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel raising a signal"
+              style={styles.sheetDismiss}
+              onPress={() => setProblemChooserOpen(false)}
+            >
+              <Text style={styles.sheetDismissText}>Cancel</Text>
+            </Pressable>
+          </CutCornerSurface>
+        </View>
       )}
 
       {/* ===================================================== */}
@@ -3521,6 +3769,28 @@ export default function MapScreen() {
               </View>
               <ChevronRight size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
             </Pressable>
+
+            {/* Distress notice — leads the card when this driver has a signal
+                up, so "they need help, here's what and how long" is read
+                before any of the routine social actions below it. */}
+            {(() => {
+              const problem = selectedOnlineUser.problem;
+              if (!problem) return null;
+              const meta = problemMeta(problem.type);
+              return (
+                <View style={styles.driverDistressNotice}>
+                  <View style={styles.distressBadge}>
+                    <ProblemGlyph size={spacing.spacingLg} color={onRacingRed} />
+                  </View>
+                  <View style={styles.distressTextWrap}>
+                    <Text style={styles.driverDistressTitle} numberOfLines={1}>{meta.label}</Text>
+                    <Text style={styles.distressSub} numberOfLines={1}>
+                      {meta.sub} · {problemAge(problem.since)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })()}
 
             <View style={styles.driverSheetActions}>
               <ActionRow
@@ -5313,6 +5583,61 @@ const styles = StyleSheet.create({
     right: spacing.spacingMd,
     zIndex: 155,
   },
+
+  /* ---------------- Distress alert + notice ---------------- */
+  // Occupies the greeting card's band (same right inset as `topChrome`) so it
+  // outranks the greeting for attention without ever covering the top-right
+  // search / filter / locate controls, which stay reachable during an alert.
+  distressBannerSlot: {
+    position: "absolute",
+    left: SCREEN_MARGIN,
+    right: spacing.spacingXxxl + spacing.spacingXl,
+    zIndex: 200,
+  },
+  distressBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+    paddingVertical: spacing.spacingMd,
+  },
+  distressBadge: {
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.circle,
+    backgroundColor: colors.racingRed,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  distressTextWrap: {
+    flex: 1,
+    gap: spacing.spacingXs,
+  },
+  distressTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 15,
+    lineHeight: 18,
+    letterSpacing: 0.5,
+    color: colors.textPrimary,
+  },
+  distressSub: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  driverDistressNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingMd,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.racingRed,
+    borderRadius: radius.sharp,
+    paddingVertical: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
+  },
+  driverDistressTitle: {
+    ...textStyle("displayMd"),
+    color: colors.racingRed,
+  },
   onlineBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -5462,6 +5787,40 @@ const styles = StyleSheet.create({
     ...textStyle("caption"),
     ...mapLabelShadow,
     color: colors.textPrimary,
+    textAlign: "center",
+    maxWidth: 92,
+  },
+  // Distress ring: same geometry as the party ring, but red and near-solid
+  // so a driver in trouble reads from across the map. Static, not pulsed —
+  // Android snapshots the marker to a bitmap (D-5).
+  problemOuterRing: {
+    position: "absolute",
+    top: 2,
+    width: 42,
+    height: 42,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.emphasis,
+    borderColor: colors.racingRed,
+    opacity: 0.9,
+  },
+  // Sits top-left, opposite the level badge, so both stay legible.
+  problemBadge: {
+    position: "absolute",
+    top: 1,
+    left: 1,
+    width: 18,
+    height: 18,
+    borderRadius: radius.circle,
+    backgroundColor: colors.racingRed,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.voidBlack,
+  },
+  playerProblemLabel: {
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    color: colors.racingRed,
     textAlign: "center",
     maxWidth: 92,
   },
