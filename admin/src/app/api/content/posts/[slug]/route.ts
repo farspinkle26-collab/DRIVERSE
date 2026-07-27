@@ -15,7 +15,7 @@ export async function PUT(req: NextRequest, { params }: { params: { slug: string
     }
     const input = parsePostFormInput(await req.json());
     const post = buildPostFromForm(input, existing, existing.slug);
-    await writePost(post);
+    await writePost(post, `content: edit ${post.slug}`);
     return NextResponse.json({ ok: true, slug: post.slug });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 400 });

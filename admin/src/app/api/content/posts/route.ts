@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const taken = new Set(await listPostSlugs());
     const slug = uniqueSlug(input, taken);
     const post = buildPostFromForm(input, null, slug);
-    await writePost(post);
+    await writePost(post, `content: add ${post.slug}`);
     return NextResponse.json({ ok: true, slug: post.slug });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 400 });
