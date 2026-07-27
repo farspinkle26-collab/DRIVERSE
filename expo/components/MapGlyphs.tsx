@@ -321,6 +321,23 @@ export function VisibilityGlyph({
   );
 }
 
+/**
+ * Problem signal — a warning triangle with an exclamation, drawn in the
+ * same mitred register as the category glyphs. Sits on a driver's marker
+ * (and in the raise-a-signal chooser) to say "this driver has a problem".
+ * The triangle is the one shape on the map that means "stop and look",
+ * which is exactly what a driver in distress needs from everyone near them.
+ */
+export function ProblemGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <Path d="M12 3 L22 20 L2 20 Z" />
+      <Path d="M12 9 V14" />
+      <Path d="M12 16.5 V17.5" />
+    </Glyph>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Registry
  * ------------------------------------------------------------------ */

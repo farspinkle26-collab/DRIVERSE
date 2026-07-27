@@ -4,6 +4,19 @@ import { supabase } from "@/lib/supabase";
 import * as Location from "expo-location";
 
 // ─── Types ─────────────────────────────────────────────────
+
+// A driver in trouble raises one of these. The set is deliberately small:
+// each type maps to a different kind of help, so a driver reading a marker
+// or the alert banner knows at a glance what the person needs — a tow, the
+// emergency services, a jerry can, or just anyone at all.
+export type ProblemType = "breakdown" | "accident" | "fuel" | "sos";
+
+export interface ProblemSignal {
+  type: ProblemType;
+  /** When the signal was raised, so the UI can show how long it's been up. */
+  since: string;
+}
+
 export interface OnlineUser {
   user_id: string;
   name: string;
@@ -13,6 +26,8 @@ export interface OnlineUser {
   longitude: number;
   heading: number;
   updated_at: string;
+  /** Set while this driver has an active problem signal raised. */
+  problem?: ProblemSignal | null;
 }
 
 const LOCATION_BROADCAST_MS = 4000; // how often we push our own position
@@ -27,9 +42,13 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [isOnline, setIsOnline] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [myProblem, setMyProblem] = useState<ProblemSignal | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const profileRef = useRef<{ name: string; level: number; avatar?: string }>({ name: "Driver", level: 1 });
+  // Held in a ref so the periodic broadcaster and goOnline's first publish
+  // both pick up the current signal without re-creating those callbacks.
+  const problemRef = useRef<ProblemSignal | null>(null);
 
   // ─── Listen for auth state ───────────────────────────────
   useEffect(() => {
@@ -66,6 +85,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
         longitude: latest.longitude,
         heading: latest.heading ?? 0,
         updated_at: latest.updated_at ?? new Date().toISOString(),
+        problem: latest.problem ?? null,
       });
     }
     setOnlineUsers(users);
@@ -95,6 +115,7 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
         longitude: pos.longitude,
         heading: pos.heading,
         updated_at: new Date().toISOString(),
+        problem: problemRef.current,
       };
 
       // Realtime: everyone on the channel sees this move instantly
@@ -104,7 +125,9 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
         // Silent
       }
 
-      // Persistence: survives reconnects and feeds stale-cleanup
+      // Persistence: survives reconnects and feeds stale-cleanup. The problem
+      // columns are new (database_migration_problem_signal.sql); an older DB
+      // without them just ignores the extra keys on the presence path.
       try {
         await supabase.from("user_locations").upsert({
           user_id: uid,
@@ -112,6 +135,8 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
           longitude: pos.longitude,
           heading: pos.heading,
           is_online: true,
+          problem_type: problemRef.current?.type ?? null,
+          problem_since: problemRef.current?.since ?? null,
         });
       } catch {
         // Silent
@@ -204,9 +229,54 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
       }
     }
 
+    // Going invisible clears your signal — you can't ask for help from a
+    // map you've stepped off, and a stale "SOS" left hanging would mislead.
+    problemRef.current = null;
+    setMyProblem(null);
     setIsOnline(false);
     setOnlineUsers([]);
   }, [userId]);
+
+  // ─── Raise / clear my own problem signal ─────────────────
+  //
+  // A signal rides the same presence payload as position, so every driver
+  // on the map — convoy-mate or stranger — sees it the instant it's raised,
+  // with no extra channel or DB round-trip. Raising one also brings you onto
+  // the map if you were hidden: a problem nobody can see helps nobody.
+  const raiseProblem = useCallback(
+    async (type: ProblemType) => {
+      const signal: ProblemSignal = { type, since: new Date().toISOString() };
+      problemRef.current = signal;
+      setMyProblem(signal);
+
+      if (!channelRef.current) {
+        // goOnline's first publish reads problemRef, so the signal goes out
+        // with the very first position it broadcasts.
+        await goOnline();
+        return;
+      }
+      if (!userId) return;
+      try {
+        const pos = await getPosition();
+        await publishPosition(userId, pos);
+      } catch {
+        // The next interval tick will carry the flag regardless.
+      }
+    },
+    [userId, getPosition, publishPosition, goOnline]
+  );
+
+  const clearProblem = useCallback(async () => {
+    problemRef.current = null;
+    setMyProblem(null);
+    if (!channelRef.current || !userId) return;
+    try {
+      const pos = await getPosition();
+      await publishPosition(userId, pos);
+    } catch {
+      // Silent — the next tick broadcasts the cleared state.
+    }
+  }, [userId, getPosition, publishPosition]);
 
   // ─── Cleanup on unmount ───────────────────────────────────
   useEffect(() => {
@@ -233,5 +303,9 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
     isOnline,
     goOnline,
     goOffline,
+    /** My own active problem signal, or null. */
+    myProblem,
+    raiseProblem,
+    clearProblem,
   };
 });

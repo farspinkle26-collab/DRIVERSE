@@ -45,9 +45,18 @@ including `jsonb` sub-structures):
 
 Other schema areas, one migration file per feature (self-descriptive names):
 community v2, daily quests, realtime events, garage + public profiles, online
-users presence, OSM places, parties/convoys, platinum, profile v2, saved
-routes, trip names, trip privacy. `expo/database_setup_complete.sql` is a consolidated
-setup script. `expo/supabase/functions` holds Supabase Edge Functions.
+users presence, OSM places, parties/convoys, platinum, problem signal, profile
+v2, saved routes, trip names, trip privacy. `expo/database_setup_complete.sql`
+is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
+Functions.
+
+The **problem signal** (`expo/database_migration_problem_signal.sql`,
+`expo/PROBLEM_SIGNAL_REFERENCE.md`) lets a driver in trouble broadcast a help
+signal — breakdown / accident / out-of-fuel / SOS — that every online driver
+on the map sees in real time, whether or not they share a convoy. The live
+path is Supabase Realtime Presence (the same `online-players` channel that
+carries positions, in `hooks/useOnlineUsers.ts`); the migration only adds the
+`problem_type` / `problem_since` mirror columns to `user_locations`.
 
 When asked about the schema, prefer reading `expo/database_schema.json` and
 the specific `expo/database_migration_*.sql` file for the feature in question
