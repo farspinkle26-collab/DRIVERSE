@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import * as Location from "expo-location";
 import {
   ArrowLeft,
   Mail,
@@ -27,12 +28,16 @@ import {
   ChevronRight,
   Circle,
   CheckCircle2,
+  MapPin,
+  Search,
+  Navigation,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countries";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-const STEPS = ["account", "profile", "car"] as const;
+const STEPS = ["account", "nation", "profile", "car"] as const;
 type Step = (typeof STEPS)[number];
 
 const CAR_COLORS = [
@@ -72,11 +77,17 @@ export default function SignUpScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Step 2: Profile
+  // Step 2: Nation
+  const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
+  const [countryQuery, setCountryQuery] = useState("");
+  const [detectingCountry, setDetectingCountry] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+
+  // Step 3: Profile
   const [selectedMake, setSelectedMake] = useState("");
   const [selectedColor, setSelectedColor] = useState(CAR_COLORS[4]);
 
-  // Step 3: Car name
+  // Step 4: Car name
   const [carName, setCarName] = useState("");
   const [carYear, setCarYear] = useState("2024");
   const [licensePlate, setLicensePlate] = useState("");
@@ -107,10 +118,50 @@ export default function SignUpScreen() {
     }
   };
 
+  const detectCountry = async () => {
+    setDetectError(null);
+    setDetectingCountry(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setDetectError("Location permission denied. Pick your nation from the list.");
+        return;
+      }
+      const pos =
+        (await Location.getLastKnownPositionAsync()) ??
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low }));
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+      const match = findCountryByCode(place?.isoCountryCode);
+      if (match) {
+        setSelectedCountry(match);
+        setCountryQuery("");
+      } else if (place?.country) {
+        // Fall back to the raw name if it's not in our list.
+        setSelectedCountry({ code: place.isoCountryCode ?? "", name: place.country, flag: "🌍" });
+        setCountryQuery("");
+      } else {
+        setDetectError("Couldn't detect your nation. Pick it from the list.");
+      }
+    } catch {
+      setDetectError("Couldn't detect your nation. Pick it from the list.");
+    } finally {
+      setDetectingCountry(false);
+    }
+  };
+
+  const filteredCountries = countryQuery.trim().length > 0
+    ? COUNTRIES.filter((c) => c.name.toLowerCase().includes(countryQuery.trim().toLowerCase()))
+    : COUNTRIES;
+
   const canGoNext = (): boolean => {
     switch (step) {
       case "account":
         return name.trim().length > 0 && email.trim().length > 0 && password.length >= 6 && password === confirmPassword;
+      case "nation":
+        return selectedCountry != null;
       case "profile":
         return selectedMake.length > 0 && selectedColor != null;
       case "car":
@@ -124,7 +175,7 @@ export default function SignUpScreen() {
     if (!canGoNext()) return;
 
     const fullCarName = carName.trim() || `${selectedMake} ${carYear}`;
-    const success = await signup(email.trim(), password, name.trim(), phone.trim());
+    const success = await signup(email.trim(), password, name.trim(), phone.trim(), selectedCountry?.name);
 
     if (success) {
       // The starter car is auto-created by the DB trigger, but we can also
@@ -214,11 +265,19 @@ export default function SignUpScreen() {
           {/* Step titles */}
           <View style={styles.stepTitleSection}>
             <Text style={styles.stepTitle}>
-              {step === "account" ? "Create Account" : step === "profile" ? "Your Drive" : "Name Your Ride"}
+              {step === "account"
+                ? "Create Account"
+                : step === "nation"
+                ? "Your Nation"
+                : step === "profile"
+                ? "Your Drive"
+                : "Name Your Ride"}
             </Text>
             <Text style={styles.stepSubtitle}>
               {step === "account"
                 ? "Set up your login credentials"
+                : step === "nation"
+                ? "Pick your nation or detect it automatically"
                 : step === "profile"
                 ? "Choose your car's make and color"
                 : "Give your ride an identity"}
@@ -348,7 +407,76 @@ export default function SignUpScreen() {
               </View>
             )}
 
-            {/* ============ STEP 2: CAR MAKE & COLOR ============ */}
+            {/* ============ STEP 2: NATION ============ */}
+            {step === "nation" && (
+              <View style={styles.stepForm}>
+                {/* GPS auto-detect */}
+                <TouchableOpacity
+                  style={styles.detectBtn}
+                  onPress={detectCountry}
+                  activeOpacity={0.8}
+                  disabled={detectingCountry}
+                >
+                  {detectingCountry ? (
+                    <ActivityIndicator color="#FF6B35" size="small" />
+                  ) : (
+                    <Navigation size={18} color="#FF6B35" />
+                  )}
+                  <Text style={styles.detectBtnText}>
+                    {detectingCountry ? "Detecting your location…" : "Detect with GPS"}
+                  </Text>
+                </TouchableOpacity>
+
+                {detectError ? <Text style={styles.detectError}>{detectError}</Text> : null}
+
+                {/* Selected nation */}
+                {selectedCountry && (
+                  <View style={styles.selectedCountry}>
+                    <Text style={styles.selectedCountryFlag}>{selectedCountry.flag}</Text>
+                    <Text style={styles.selectedCountryName}>{selectedCountry.name}</Text>
+                    <CheckCircle2 size={18} color="#22C55E" />
+                  </View>
+                )}
+
+                {/* Search */}
+                <View style={styles.inputWrapper}>
+                  <Search size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Search nations"
+                    placeholderTextColor="#5A5A6E"
+                    value={countryQuery}
+                    onChangeText={setCountryQuery}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                {/* Nation list */}
+                <View style={styles.countryList}>
+                  {filteredCountries.map((c) => {
+                    const active = selectedCountry?.code === c.code && selectedCountry?.name === c.name;
+                    return (
+                      <TouchableOpacity
+                        key={c.code}
+                        style={[styles.countryRow, active && styles.countryRowActive]}
+                        onPress={() => { setSelectedCountry(c); setDetectError(null); }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.countryFlag}>{c.flag}</Text>
+                        <Text style={[styles.countryName, active && styles.countryNameActive]}>{c.name}</Text>
+                        {active && <CheckCircle2 size={16} color="#FF6B35" />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {filteredCountries.length === 0 && (
+                    <Text style={styles.countryEmpty}>No nations match “{countryQuery.trim()}”.</Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* ============ STEP 3: CAR MAKE & COLOR ============ */}
             {step === "profile" && (
               <View style={styles.stepForm}>
                 {/* Car make grid */}
@@ -400,7 +528,7 @@ export default function SignUpScreen() {
               </View>
             )}
 
-            {/* ============ STEP 3: CAR NAME ============ */}
+            {/* ============ STEP 4: CAR NAME ============ */}
             {step === "car" && (
               <View style={styles.stepForm}>
                 <View style={styles.carPreview}>
@@ -606,6 +734,85 @@ const styles = StyleSheet.create({
     color: "#5A5A6E",
     letterSpacing: 1,
     textTransform: "uppercase" as const,
+  },
+  // Nation step
+  detectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 107, 53, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.4)",
+  },
+  detectBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FF6B35",
+  },
+  detectError: {
+    fontSize: 13,
+    color: "#EF4444",
+    fontWeight: "600",
+  },
+  selectedCountry: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(34, 197, 94, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.3)",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    height: 52,
+  },
+  selectedCountryFlag: {
+    fontSize: 22,
+  },
+  selectedCountryName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  countryList: {
+    gap: 6,
+  },
+  countryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  countryRowActive: {
+    backgroundColor: "rgba(255, 107, 53, 0.15)",
+    borderColor: "#FF6B35",
+  },
+  countryFlag: {
+    fontSize: 20,
+  },
+  countryName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#C8C8D4",
+  },
+  countryNameActive: {
+    color: "#FFFFFF",
+  },
+  countryEmpty: {
+    fontSize: 13,
+    color: "#5A5A6E",
+    fontWeight: "500",
+    textAlign: "center",
+    paddingVertical: 16,
   },
   makeGrid: {
     flexDirection: "row",
