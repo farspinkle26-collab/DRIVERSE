@@ -809,10 +809,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }, [user, loadCars]);
 
   // ─── AI car render (Gemini Lite) ────────────────────────────
+  // Platinum-gated, same as the garage-slot cap above: check before the
+  // modal opens so a Regular driver sees the paywall, not a "free" pitch
+  // for a feature they can't actually use.
   const openPremium = useCallback((car: CarItem) => {
+    if (!selfIsPlatinum) {
+      openPaywall("showcase");
+      return;
+    }
     setPremiumTargetCar(car);
     setPremiumOpen(true);
-  }, []);
+  }, [selfIsPlatinum, openPaywall]);
 
   // Picks the driver's own car photo, sends it to the generate-car-image
   // edge function (Gemini 3.1 Flash Lite Image), and refreshes the garage
@@ -820,6 +827,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   // the car as generated/featured everywhere else in this file.
   const handleGenerate = useCallback(async () => {
     if (!user || !premiumTargetCar) return;
+    if (!selfIsPlatinum) {
+      // The client gate in openPremium is the normal path here; this only
+      // catches a subscription that lapsed while the modal was already open.
+      setPremiumOpen(false);
+      openPaywall("showcase");
+      return;
+    }
     const car = premiumTargetCar;
     try {
       if (Platform.OS !== "web") {
@@ -848,9 +862,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       Alert.alert("Ready!", `${car.name} has been generated and added to your garage.`);
     } catch (err) {
       setGenerating(false);
+      // The server disagreed with the client gate above — a lapsed
+      // subscription the SDK hasn't caught up on yet. The paywall is the
+      // honest response, not a raw error alert.
+      if (err instanceof Error && (err as { code?: string }).code === "not_platinum") {
+        setPremiumOpen(false);
+        openPaywall("showcase");
+        return;
+      }
       Alert.alert("Error", err instanceof Error ? err.message : "Could not generate your car.");
     }
-  }, [user, premiumTargetCar, loadCars]);
+  }, [user, premiumTargetCar, selfIsPlatinum, openPaywall, loadCars]);
 
   // ─── Actions: friends ──────────────────────────────────────
   const handleAddFriendById = useCallback(async () => {
@@ -2033,7 +2055,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             views your page.
           </Text>
           <View style={styles.premiumPerks}>
-            {["AI-generated studio car render", "Featured on your public profile", "Free, powered by Gemini Lite"].map((perk) => (
+            {["AI-generated studio car render", "Featured on your public profile", "Platinum-exclusive, powered by Gemini"].map((perk) => (
               <View key={perk} style={styles.premiumPerkRow}>
                 <Check size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 <Text style={styles.premiumPerkText}>{perk}</Text>
