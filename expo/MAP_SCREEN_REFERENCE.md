@@ -26,6 +26,20 @@ the map.
 | `lib/placesApi.ts` | Two error strings rewritten to the voice rules. |
 | `assets/images/map-icons/*.png` | **Deleted** (7 files, 122 kB). Superseded by `MapGlyphs`. |
 
+A later pass (§10) changed what the markers *are* rather than how they look:
+
+| File | Change |
+|---|---|
+| `supabase/functions/_shared/overpass.ts` | Taxonomy 4 → 9 categories; `node` → `nwr` + `out center`; per-category unnamed fallback. |
+| `constants/placesCategories.ts` | The one taxonomy. Pure data — no React imports, so it can be unit-tested and read from non-render code. |
+| `components/MapGlyphs.tsx` | +`ParkingGlyph`, +`HeadingChevron`, +`PLACE_CATEGORY_GLYPHS` (the category→glyph binding, moved off the data module). |
+| `lib/mapClustering.ts` | **New.** Grid clustering, two modes. 18 tests. |
+| `lib/mapFilters.ts` | **New.** Filter state + its storage migration. 13 tests. |
+| `hooks/useMapFilters.ts` | **New.** React/AsyncStorage wrapper over the above. |
+| `hooks/usePlaces.ts` | Single-category → all-categories fetch, with a client-side bucket cache. |
+| `components/PlacesLayer.tsx` | `PlacesFilterBar` and `PlacesMarkers` **deleted** — POIs render once, in `map.tsx`. |
+| `database_migration_places_taxonomy.sql` | **New.** Widens the `places` category constraint; clears the stale cache. |
+
 Measured on the screen after the pass:
 
 | | Before | After |
@@ -53,9 +67,9 @@ icon languages simultaneously:
    a per-marker image-load gate (`loadedBadgeIds`) to stop Android
    snapshotting a half-decoded image into the marker view.
 
-Ten glyphs are now drawn by hand: cafe, food, fuel, workshop, hangout,
-shopping, car wash, charging, event, driver. Plus three non-category marks:
-`DestinationMark`, `DriverMark`, `VisibilityGlyph`.
+Eleven glyphs are now drawn by hand: cafe, food, fuel, workshop, hangout,
+shopping, car wash, charging, parking, event, driver. Plus four non-category
+marks: `DestinationMark`, `DriverMark`, `HeadingChevron`, `VisibilityGlyph`.
 
 All of them use `strokeLinecap="square"` and `strokeLinejoin="miter"`.
 lucide's family is round-capped and round-joined, which reads as the
@@ -68,7 +82,7 @@ Android snapshot. The gate is still in place for **online driver avatars**,
 which are genuinely network images.
 
 **Category is shape. State is colour.** That is the rule that lets eleven
-map categories live inside a six-value palette. A marker is
+map layers live inside a six-value palette. A marker is
 `carbonSurface` + `hairline` normally, `racingRed` + black glyph when
 selected. Nothing is coloured to say *what* it is.
 
@@ -192,6 +206,13 @@ Six conditions carried six pastel colours (`#CFE2FF`, `#7FB2F2`, `#9AA4BC`,
 `#B9C2D8`, `#F2C94C`, `#FFD75E`). All six now draw in `textSecondary`; the
 shape carries the condition. Weather is supporting information in a 16pt
 pill and was spending five palette slots.
+
+**D-13 — Markers are clustered in JS, not by the map engine.**
+`react-native-maps` renders whatever `<Marker>` children it is given and has
+no clustering of its own, so the reduction happens in `lib/mapClustering.ts`
+before the list reaches the map. Grid bucketing rather than a distance-based
+clusterer: it is one O(n) pass with no sort, and it is *stable*, so markers
+do not reshuffle when unrelated state changes. See §10c for the two modes.
 
 **D-12 — Status colours are gone, not tokenised.**
 The screen carried green (online / success / EV), gold (XP / rank), amber
@@ -365,3 +386,142 @@ Everything in `DRIVE_HUB_REFERENCE.md` §6 still applies, plus:
     Do not tokenise marker geometry.
 13. `Pressable` has no press feedback. If you replace a `TouchableOpacity`,
     add the `pressed` style back.
+14. One taxonomy per concept. If two files can disagree about what a
+    category is called, they eventually will (§10a).
+15. A filter toggle must not trigger a fetch. Fetch everything the panel
+    can offer, filter at render — otherwise "instant" is a lie the first
+    time the network is slow.
+16. Data modules stay free of React imports. `constants/placesCategories.ts`
+    is shared with the edge functions and unit-tested; the category→glyph
+    binding lives in `components/MapGlyphs.tsx` instead.
+
+---
+
+## 10. Marker taxonomy pass
+
+A later, separate pass — not part of the re-skin. It rebuilt what the
+markers *are* rather than how they look, against a reference design that
+showed nine POI categories, a Filters panel with real per-category state,
+clustered markers, driver headings and a persistent status card.
+
+### 10a. One taxonomy, not two
+
+The screen was carrying two category systems for the same nine things:
+
+| | `LandmarkCategory` | `PlaceCategory` |
+|---|---|---|
+| Lived in | `app/(tabs)/map.tsx` | `constants/placesCategories.ts` |
+| Ids | cafe / restaurant / spbu / shopping / carwash / charging / workshop | cafe / gas_station / workshop / hangout |
+| Source | Mapbox Geocoding keyword search | Overpass, behind `/places-nearby` |
+| Cache | none | 7-day server-side, ~1km buckets |
+| Community submissions | no | yes |
+| Reachable in the shipping build | yes | **no** (§8) |
+
+So the ids a driver actually saw came from the path with no cache, no
+community layer and no backend contract — and the path with all three was
+dark. They are merged onto the Overpass ids.
+
+What that deleted: `fetchAllIndonesiaCafes`, which ran seven keyword
+searches against Mapbox Geocoding for each of 24 hardcoded Indonesian
+cities on every cold start — **168 requests to fill a list capped at 200
+markers for the entire country**, which meant a driver outside those 24
+cities saw nothing near them. It is nine cached requests around wherever
+the driver is (`hooks/usePlaces.ts`).
+
+The nine categories, and the OSM tags they map to
+(`supabase/functions/_shared/overpass.ts`):
+
+| Category | OSM tag(s) |
+|---|---|
+| `gas_station` | `amenity=fuel` |
+| `ev_charger` | `amenity=charging_station` |
+| `parking` | `amenity=parking` |
+| `workshop` | `shop=car_repair` |
+| `car_wash` | `shop=car_wash` |
+| `cafe` | `amenity=cafe` |
+| `restaurant` | `amenity=restaurant` |
+| `shopping` | `shop=mall`, `shop=department_store` |
+| `hangout` | `amenity=bar`, `amenity=fast_food`, `leisure=park` |
+
+`restaurant` was inside the `hangout` umbrella and is now its own
+filterable category, which is also what stops `hangout` being the densest
+layer on the map by a wide margin.
+
+Two query changes came with it. The Overpass query moved from `node` to
+`nwr` + `out center`, because malls, car parks and car washes are mapped as
+areas far more often than as points and `node` alone missed most of them;
+and unnamed results fall back to what the thing *is* ("Car park") rather
+than "Unnamed", because most parking bays and charging points carry no
+`name` tag at all. `database_migration_places_taxonomy.sql` widens the
+`places` check constraint and clears the cache, whose payloads are
+undercounted under the old node-only query.
+
+### 10b. What the reference design asked for, and what it got
+
+**The palette was not adopted.** The reference colours a badge per
+category — purple shopping, orange cafe/fuel, blue parking, green EV,
+red/pink car wash — which is exactly the `CAT_COLORS`/`PLACE_CATEGORY_COLORS`
+maps §2 deleted, and exactly what checklist rule 10 forbids. Two of its
+hues also collide directly: car-wash red/pink against `racingRed`'s accent
+budget (§3), and a green "You" marker against Street Explorer's `#4F9E5A`,
+which would make the driver's own marker read as a rank tier. **Confirmed
+with the requester before any rendering code was touched.** The reference's
+layout, marker anatomy, panel structure and status card were taken; its
+hues were not.
+
+Everything else is as specified:
+
+- **Marker anatomy** — icon in a badge, name below, distance below that.
+  This was already the shape of `poiMarkerWrap`; it now covers nine
+  categories instead of seven and carries the community-submission accent
+  outline the Places layer used to own.
+- **Driver markers** — the rank colour comes from `frameForLevel()` in
+  `constants/rankFrames.ts`, the same table the Profile Frame system reads.
+  There is no second rank→colour mapping on this screen. A `HeadingChevron`
+  orbits the ring at the driver's bearing, and a driver with no avatar gets
+  a car glyph in their rank colour rather than an initial.
+- **Filters panel** — nine categories plus events plus other-drivers,
+  persisted to AsyncStorage under one key (`lib/mapFilters.ts`).
+- **Status card** — "YOU'RE ONLINE", the sentence that says what is shared,
+  and a switch that goes offline. Its body opens a visibility sheet.
+
+### 10c. Clustering (D-13)
+
+`react-native-maps` has no clustering, so the marker list is reduced in JS
+before it reaches the map (`lib/mapClustering.ts`). Grid bucketing, one
+pass, cell size derived from the visible region.
+
+The brief asked which of per-category and global clustering reads better.
+Both were built and the answer is *both, by zoom*: per-category keeps the
+glyph, so a cluster still says "twelve fuel stations here", and that is
+worth more than a bare count through most of the range — but at the far
+zoom-out nine categories put nine badges in every cell, which is the case a
+bare count handles well. Per-category below `GLOBAL_CLUSTER_DELTA` (~39km
+viewport), global above it, individual markers below `CLUSTER_MIN_DELTA`
+(~2km viewport). Tapping a cluster fits its members.
+
+**Reduced detail at scale is respected.** Marker rank frames were already
+static (`RANK_FRAME_REFERENCE.md`, "the map marker is a special case"), and
+nothing added here animates: the heading chevron is a static transform,
+bucketed to 15° so a marker re-snapshots on a real change of direction
+rather than on GPS jitter.
+
+### 10d. Not done, and why
+
+- **No on-device benchmark.** `lib/mapClustering.ts` is unit-tested — 400
+  POIs in a 2km box reduce to under a quarter of the marker count, no item
+  is ever lost, clustering is stable under input reordering — but the
+  frame-rate measurement the brief asks for needs a device, and there is
+  none in this environment. This is the same open item
+  `RANK_FRAME_REFERENCE.md` records.
+- **No per-audience visibility.** The status card's body opens a sheet that
+  states who can see the driver and offers the two controls that exist.
+  "Visible to friends only" is not offered because it cannot be enforced:
+  position is broadcast on one Supabase Realtime Presence channel
+  (`online-players`) that every signed-in client subscribes to, with no
+  server-side filter. That is a presence-layer change, not a UI one, and it
+  is the follow-up the brief asked to be flagged.
+- **Driver markers keep the avatar.** The brief asks for a car symbol on
+  driver markers. Where a driver has a photo the photo identifies them
+  better than a car does, so the car glyph is the no-avatar fallback rather
+  than a replacement. The marker was never a generic pin.

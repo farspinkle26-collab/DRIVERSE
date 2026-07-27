@@ -2,7 +2,7 @@
 // Auto-approves (status='approved') so submissions show up immediately;
 // there's no moderation queue/UI in the app today. Revisit if abuse shows up.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { isPlaceCategory } from "../_shared/overpass.ts";
+import { CATEGORY_ERROR_MESSAGE, isPlaceCategory } from "../_shared/overpass.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "lat and lng are required numeric fields" }, 400);
   }
   if (!isPlaceCategory(body.category)) {
-    return jsonResponse({ error: "category must be one of cafe, gas_station, workshop, hangout" }, 400);
+    return jsonResponse({ error: CATEGORY_ERROR_MESSAGE }, 400);
   }
 
   const { data, error } = await supabase
