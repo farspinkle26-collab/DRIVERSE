@@ -170,3 +170,47 @@ export function driveScore(trip: TripLike): number {
  * DRIVE_HUB_REFERENCE.md — one accent per card is what keeps red an accent.
  */
 export const SCORE_STANDOUT = 90;
+
+/* ------------------------------------------------------------------ *
+ * Drive XP
+ * ------------------------------------------------------------------ */
+
+/**
+ * XP for a recorded (or in-progress) drive, scaled off what actually
+ * happened on the road — distance covered, time behind the wheel, and the
+ * pace that implies — rather than a flat per-trip number. A quick errand
+ * and a long highway run should not earn the same XP.
+ *
+ *   distance   the primary driver: every km covered counts.
+ *   time       a steady trickle for time spent driving.
+ *   pace       average speed scales the total up (open-road driving) or
+ *              down (crawling in traffic), clamped so neither a GPS blip
+ *              nor a long traffic jam produces an absurd number.
+ *   ETA bonus  stacked on top when a routed destination was beaten, same
+ *              intent as before but additive rather than being the reward.
+ */
+export function calculateDriveXP(params: {
+  distanceMeters: number;
+  durationSeconds: number;
+  estimatedDurationSeconds?: number | null;
+}): number {
+  const distanceKm = Math.max(0, params.distanceMeters) / 1000;
+  const durationMin = Math.max(0, params.durationSeconds) / 60;
+  if (distanceKm <= 0 || durationMin <= 0) return 0;
+
+  const avgSpeedKmh = clamp(distanceKm / (durationMin / 60), 0, 180);
+
+  const distanceXp = distanceKm * 25;
+  const timeXp = durationMin * 4;
+  const paceMultiplier = clamp(avgSpeedKmh / 45, 0.6, 2.2);
+
+  let xp = (distanceXp + timeXp) * paceMultiplier;
+
+  const estimatedSec = params.estimatedDurationSeconds ?? 0;
+  if (estimatedSec > 60 && params.durationSeconds < estimatedSec) {
+    const ratio = clamp((estimatedSec - params.durationSeconds) / estimatedSec, 0, 1);
+    xp += 50 + ratio * 150;
+  }
+
+  return Math.max(5, Math.round(xp));
+}
