@@ -1,22 +1,17 @@
 /**
  * Driveverse — the OSM + community "nearby places" layer.
  *
- * Two pieces, on the Phase 1 tokens:
+ * Four pieces, all rebuilt on the Phase 1 tokens:
+ *   PlacesFilterBar   cafe / gas / workshop / hangout, cut-corner chips
+ *   PlacesMarkers     the map markers themselves
  *   PlaceDetailSheet  the callout for a tapped place
  *   SubmitPlaceFab    + SubmitPlaceModal, the community submission flow
- *
- * `PlacesFilterBar` and `PlacesMarkers` used to live here too. Both are
- * gone: POIs are the map's own layer now, rendered once in
- * app/(tabs)/map.tsx with clustering, and category selection belongs to
- * the Filters panel, which has real on/off state per category rather than
- * one active selection. Keeping a second marker renderer for the same data
- * would only let the two drift apart.
  *
  * The colour rule for the whole layer: **category is shape, state is
  * colour.** Each category has its own hand-drawn glyph (MapGlyphs.tsx) at
  * one stroke weight, and the only colour that varies is whether the thing
  * is active/selected (racingRed) or not (hairline + textSecondary). That
- * is what lets nine categories live inside a six-value palette; the
+ * is what lets four categories live inside a six-value palette; the
  * previous version needed a hue per category and spent four of the six.
  */
 
@@ -30,11 +25,14 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   View,
+  ViewStyle,
 } from "react-native";
+import { Marker } from "react-native-maps";
 import { Bookmark, Camera, Plus, X } from "lucide-react-native";
 import * as ImagePickerExpo from "expo-image-picker";
 import {
@@ -46,7 +44,6 @@ import {
 import {
   CHROME_ICON_STROKE,
   MAP_GLYPH_STROKE,
-  PLACE_CATEGORY_GLYPHS,
 } from "@/components/MapGlyphs";
 import {
   alpha,
@@ -66,11 +63,124 @@ import { supabase } from "@/lib/supabase";
 import type { NormalizedPlace } from "@/lib/placesApi";
 import {
   PLACE_CATEGORIES,
+  PLACE_CATEGORY_ICONS,
   PLACE_CATEGORY_LABELS,
   type PlaceCategory,
 } from "@/constants/placesCategories";
 
 export const PLACE_SUBMIT_XP = 15;
+
+/** Marker glyph size. On the spacing scale, per DRIVE_HUB_REFERENCE D-3. */
+const MARKER_GLYPH_SIZE = spacing.spacingLg;
+
+/* ------------------------------------------------------------------ *
+ * Category filter chips
+ * ------------------------------------------------------------------ */
+
+/**
+ * One chip per category, drawn by the shared `CutCornerChip` — the same
+ * component the profile's Garage / Trips / Friends selector uses, so a
+ * single-select control looks identical wherever it appears.
+ */
+export function PlacesFilterBar({
+  active,
+  onChange,
+  style,
+}: {
+  active: PlaceCategory;
+  onChange: (category: PlaceCategory) => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    // Horizontal scroll rather than a fixed row: four chips at Rajdhani 12
+    // overflow a 390pt screen once the chrome column is subtracted, and a
+    // clipped filter is a filter the driver cannot reach.
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={style as StyleProp<ViewStyle>}
+      contentContainerStyle={styles.filterBar}
+      keyboardShouldPersistTaps="handled"
+    >
+      {PLACE_CATEGORIES.map((cat) => {
+        const Glyph = PLACE_CATEGORY_ICONS[cat];
+        const isActive = active === cat;
+        return (
+          <CutCornerChip
+            key={cat}
+            label={PLACE_CATEGORY_LABELS[cat]}
+            active={isActive}
+            accessibilityLabel={`Show ${PLACE_CATEGORY_LABELS[cat]} places`}
+            onPress={() => onChange(cat)}
+            icon={
+              <Glyph
+                size={spacing.spacingMd}
+                color={chipContentColor(isActive)}
+              />
+            }
+          />
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Markers (render as a child of <MapView>)
+ * ------------------------------------------------------------------ */
+
+export function PlacesMarkers({
+  places,
+  onSelect,
+  selectedId,
+}: {
+  places: NormalizedPlace[];
+  onSelect: (place: NormalizedPlace) => void;
+  selectedId?: string | null;
+}) {
+  return (
+    <>
+      {places.map((place) => {
+        const Glyph = PLACE_CATEGORY_ICONS[place.category];
+        const isSelected = selectedId === place.id;
+        // A community submission gets the accent outline; an OSM import
+        // gets the hairline. One bit of information, one colour step.
+        const isCommunity = place.source === "user";
+        const borderColor = isSelected
+          ? colors.racingRed
+          : isCommunity
+            ? alpha(colors.racingRed, 0.55)
+            : colors.hairline;
+        return (
+          <Marker
+            key={place.id}
+            coordinate={{ latitude: place.lat, longitude: place.lng }}
+            onPress={() => onSelect(place)}
+            tracksViewChanges={false}
+          >
+            <View style={styles.markerBox} collapsable={false}>
+              <CutCornerSurface
+                fill={isSelected ? colors.racingRed : colors.carbonSurface}
+                borderColor={borderColor}
+                borderWidth={borderWidth.hairline}
+                cutSize={spacing.spacingSm}
+                corners="topRight"
+                style={styles.markerBadge}
+                contentStyle={styles.markerBadgeContent}
+              >
+                <Glyph
+                  size={MARKER_GLYPH_SIZE}
+                  color={isSelected ? onRacingRed : colors.textPrimary}
+                  strokeWidth={MAP_GLYPH_STROKE}
+                />
+              </CutCornerSurface>
+            </View>
+          </Marker>
+        );
+      })}
+    </>
+  );
+}
 
 /* ------------------------------------------------------------------ *
  * Tap callout
@@ -106,7 +216,7 @@ export function PlaceDetailSheet({
   bottomInset?: number;
 }) {
   if (!place) return null;
-  const Glyph = PLACE_CATEGORY_GLYPHS[place.category];
+  const Glyph = PLACE_CATEGORY_ICONS[place.category];
   const openingHours = place.tags.opening_hours;
   const notes = place.tags.notes;
   const distance = distanceMeters != null ? formatDistance(distanceMeters) : null;
@@ -278,9 +388,9 @@ export function SubmitPlaceFab({ onPress, style }: { onPress: () => void; style?
 }
 
 /**
- * Category picker for the submit form. The one place a driver picks a
- * single category rather than toggling several, so it stays a chip row
- * rather than borrowing the Filters panel's checkbox list.
+ * Category picker for the submit form — the same `CutCornerChip` as
+ * `PlacesFilterBar` above, just laid out inline in a form rather than as a
+ * scrolling map filter.
  */
 function CategoryPicker({
   value,
@@ -292,7 +402,7 @@ function CategoryPicker({
   return (
     <View style={styles.categoryRow}>
       {PLACE_CATEGORIES.map((cat) => {
-        const Glyph = PLACE_CATEGORY_GLYPHS[cat];
+        const Glyph = PLACE_CATEGORY_ICONS[cat];
         const isActive = value === cat;
         return (
           <CutCornerChip
@@ -495,7 +605,7 @@ export function SubmitPlaceModal({
     }
   };
 
-  const SuccessGlyph = PLACE_CATEGORY_GLYPHS[category];
+  const SuccessGlyph = PLACE_CATEGORY_ICONS[category];
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
@@ -590,6 +700,29 @@ export function SubmitPlaceModal({
 }
 
 const styles = StyleSheet.create({
+  /* Filter chips — the chip itself is `CutCornerChip`; this is its row. */
+  filterBar: {
+    flexDirection: "row",
+    gap: spacing.spacingSm,
+  },
+  /* Markers */
+  // Fixed outer box: the native Android marker bitmap is sized at capture
+  // time, so the bounds must not depend on content that lays out later.
+  markerBox: {
+    width: spacing.spacingXxxl,
+    height: spacing.spacingXxxl,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  markerBadge: {
+    width: spacing.spacingXl + spacing.spacingSm,
+    height: spacing.spacingXl + spacing.spacingSm,
+  },
+  markerBadgeContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   /* Detail sheet */
   sheetWrap: {
     position: "absolute",

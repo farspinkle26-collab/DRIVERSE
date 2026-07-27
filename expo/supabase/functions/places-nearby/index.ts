@@ -5,7 +5,7 @@
 // for a self-hosted instance or a paid provider by editing _shared/overpass.ts
 // only.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { CATEGORY_ERROR_MESSAGE, fetchFromOverpass, isPlaceCategory, OverpassError, type NormalizedPlace } from "../_shared/overpass.ts";
+import { fetchFromOverpass, isPlaceCategory, OverpassError, type NormalizedPlace } from "../_shared/overpass.ts";
 import { getCached, setCached } from "../_shared/cache.ts";
 import { mergePlaces } from "../_shared/merge.ts";
 
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "lat and lng are required numeric query parameters" }, 400);
   }
   if (!isPlaceCategory(category)) {
-    return jsonResponse({ error: CATEGORY_ERROR_MESSAGE }, 400);
+    return jsonResponse({ error: "category must be one of cafe, gas_station, workshop, hangout" }, 400);
   }
   const radius = Math.min(Number.isFinite(requestedRadius) ? requestedRadius : DEFAULT_RADIUS_METERS, MAX_RADIUS_METERS);
 

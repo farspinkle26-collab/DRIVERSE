@@ -1,12 +1,5 @@
 import { describe, expect, it, mock, afterEach } from "bun:test";
-import {
-  CATEGORY_ERROR_MESSAGE,
-  fetchFromOverpass,
-  isPlaceCategory,
-  OverpassError,
-  PLACE_CATEGORIES,
-  type NormalizedPlace,
-} from "../overpass.ts";
+import { fetchFromOverpass, isPlaceCategory, OverpassError, type NormalizedPlace } from "../overpass.ts";
 import { mergePlaces } from "../merge.ts";
 import { cacheKeyFor, latLngBucket, isStale } from "../cache.ts";
 
@@ -15,38 +8,16 @@ import { cacheKeyFor, latLngBucket, isStale } from "../cache.ts";
 const JAKARTA = { lat: -6.1754, lng: 106.8272 };
 
 describe("isPlaceCategory", () => {
-  it("accepts every category in the taxonomy", () => {
-    for (const category of PLACE_CATEGORIES) {
-      expect(isPlaceCategory(category)).toBe(true);
-    }
-  });
-
-  it("covers the nine categories the map's Filters panel offers", () => {
-    expect([...PLACE_CATEGORIES].sort()).toEqual([
-      "car_wash",
-      "cafe",
-      "ev_charger",
-      "gas_station",
-      "hangout",
-      "parking",
-      "restaurant",
-      "shopping",
-      "workshop",
-    ].sort());
+  it("accepts the four supported categories", () => {
+    expect(isPlaceCategory("cafe")).toBe(true);
+    expect(isPlaceCategory("gas_station")).toBe(true);
+    expect(isPlaceCategory("workshop")).toBe(true);
+    expect(isPlaceCategory("hangout")).toBe(true);
   });
 
   it("rejects anything else", () => {
-    // The client's own ids for the same things, which must not leak through.
-    expect(isPlaceCategory("spbu")).toBe(false);
-    expect(isPlaceCategory("carwash")).toBe(false);
-    expect(isPlaceCategory("charging")).toBe(false);
+    expect(isPlaceCategory("restaurant")).toBe(false);
     expect(isPlaceCategory("")).toBe(false);
-  });
-
-  it("builds its 400-response text from the live taxonomy", () => {
-    for (const category of PLACE_CATEGORIES) {
-      expect(CATEGORY_ERROR_MESSAGE).toContain(category);
-    }
   });
 });
 
@@ -71,7 +42,7 @@ describe("fetchFromOverpass", () => {
     const places = await fetchFromOverpass("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
     expect(places).toHaveLength(1);
     expect(places[0]).toEqual({
-      id: "osm-node-111",
+      id: "osm-111",
       name: "Kopi Kenangan",
       lat: JAKARTA.lat,
       lng: JAKARTA.lng,
@@ -81,121 +52,13 @@ describe("fetchFromOverpass", () => {
     });
   });
 
-  it("falls back to what the place is when tags.name is missing", async () => {
+  it("falls back to 'Unnamed' when tags.name is missing", async () => {
     globalThis.fetch = mock(async () =>
       new Response(JSON.stringify({ elements: [{ id: 222, lat: 0, lon: 0, tags: {} }] }), { status: 200 })
     ) as unknown as typeof fetch;
 
-    // Most car parks and charging bays carry no name at all, so "Unnamed"
-    // would have been the label on most of two whole categories.
     const places = await fetchFromOverpass("gas_station", 0, 0, 2000);
-    expect(places[0].name).toBe("Fuel station");
-
-    const parking = await fetchFromOverpass("parking", 0, 0, 2000);
-    expect(parking[0].name).toBe("Car park");
-  });
-
-  it("reads the representative point of a way or relation from `center`", async () => {
-    // Malls, car parks and car washes are mapped as areas far more often
-    // than as points, so `out center` results have no lat/lon of their own.
-    globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            {
-              type: "way",
-              id: 333,
-              center: { lat: JAKARTA.lat, lon: JAKARTA.lng },
-              tags: { name: "Grand Indonesia" },
-            },
-          ],
-        }),
-        { status: 200 }
-      )
-    ) as unknown as typeof fetch;
-
-    const places = await fetchFromOverpass("shopping", JAKARTA.lat, JAKARTA.lng, 2000);
-    expect(places).toHaveLength(1);
-    expect(places[0].lat).toBe(JAKARTA.lat);
-    expect(places[0].lng).toBe(JAKARTA.lng);
-  });
-
-  it("namespaces ids by element type, since a node and a way can share a number", async () => {
-    globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { type: "node", id: 7, lat: 0, lon: 0, tags: {} },
-            { type: "way", id: 7, center: { lat: 1, lon: 1 }, tags: {} },
-          ],
-        }),
-        { status: 200 }
-      )
-    ) as unknown as typeof fetch;
-
-    const places = await fetchFromOverpass("parking", 0, 0, 2000);
-    expect(places.map((p) => p.id)).toEqual(["osm-node-7", "osm-way-7"]);
-  });
-
-  it("drops an element Overpass gave no usable coordinate for", async () => {
-    globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { type: "relation", id: 9, tags: { name: "No centre" } },
-            { type: "node", id: 10, lat: 0, lon: 0, tags: {} },
-          ],
-        }),
-        { status: 200 }
-      )
-    ) as unknown as typeof fetch;
-
-    const places = await fetchFromOverpass("car_wash", 0, 0, 2000);
-    expect(places.map((p) => p.id)).toEqual(["osm-node-10"]);
-  });
-
-  it("queries nodes, ways and relations, and asks for a centre point", async () => {
-    let body = "";
-    globalThis.fetch = mock(async (_url: string, init: RequestInit) => {
-      body = String(init.body);
-      return new Response(JSON.stringify({ elements: [] }), { status: 200 });
-    }) as unknown as typeof fetch;
-
-    await fetchFromOverpass("shopping", JAKARTA.lat, JAKARTA.lng, 2000);
-    expect(body).toContain("out center;");
-    expect(body).toContain('nwr["shop"="mall"]');
-    expect(body).toContain('nwr["shop"="department_store"]');
-  });
-
-  it("queries the OSM tag each new category maps to", async () => {
-    const expected: Record<string, string> = {
-      parking: '["amenity"="parking"]',
-      ev_charger: '["amenity"="charging_station"]',
-      car_wash: '["shop"="car_wash"]',
-      restaurant: '["amenity"="restaurant"]',
-    };
-    for (const [category, tag] of Object.entries(expected)) {
-      let body = "";
-      globalThis.fetch = mock(async (_url: string, init: RequestInit) => {
-        body = String(init.body);
-        return new Response(JSON.stringify({ elements: [] }), { status: 200 });
-      }) as unknown as typeof fetch;
-      await fetchFromOverpass(category as never, JAKARTA.lat, JAKARTA.lng, 2000);
-      expect(body).toContain(tag);
-    }
-  });
-
-  it("no longer folds restaurants into hangout — they are their own category", async () => {
-    let body = "";
-    globalThis.fetch = mock(async (_url: string, init: RequestInit) => {
-      body = String(init.body);
-      return new Response(JSON.stringify({ elements: [] }), { status: 200 });
-    }) as unknown as typeof fetch;
-
-    await fetchFromOverpass("hangout", JAKARTA.lat, JAKARTA.lng, 2000);
-    expect(body).not.toContain('"amenity"="restaurant"');
-    expect(body).toContain('"amenity"="bar"');
-    expect(body).toContain('"leisure"="park"');
+    expect(places[0].name).toBe("Unnamed");
   });
 
   it("throws OverpassError (not a raw exception) when Overpass returns a non-200", async () => {

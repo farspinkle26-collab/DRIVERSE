@@ -27,8 +27,8 @@ import { Stack, useRouter } from "expo-router";
 import { ArrowLeft, Bookmark, Navigation2, Trash2 } from "lucide-react-native";
 import { CutCornerSurface } from "@/components/CutCorner";
 import TierLimitNotice from "@/components/platinum/TierLimitNotice";
-import { PLACE_CATEGORY_GLYPHS } from "@/components/MapGlyphs";
 import {
+  PLACE_CATEGORY_ICONS,
   PLACE_CATEGORY_LABELS,
 } from "@/constants/placesCategories";
 import {
@@ -119,7 +119,7 @@ export default function SavedPlacesScreen() {
           )
         ) : (
           places.map((place) => {
-            const Glyph = PLACE_CATEGORY_GLYPHS[place.category];
+            const Glyph = PLACE_CATEGORY_ICONS[place.category];
             return (
               <CutCornerSurface
                 key={place.id}
