@@ -19,6 +19,7 @@ import { useGroupChat } from "@/hooks/useGroupChatStore";
 import { supabase } from "@/lib/supabase";
 import { CutCornerBadge, CutCornerButton } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
+import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
 import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
 import { borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
@@ -36,6 +37,8 @@ interface Contact {
   id: string;
   name: string;
   avatar?: string;
+  /** Drives the rank frame on the row's avatar. */
+  level?: number;
 }
 
 interface ConversationRow {
@@ -49,6 +52,8 @@ interface ConversationRow {
   lastAt: string;
   unread: number;
   memberCount?: number;
+  /** DM rows only — a group has no single rank to frame. */
+  level?: number;
 }
 
 function timeAgo(dateStr: string): string {
@@ -98,13 +103,25 @@ export default function MessagesScreen() {
       new Set(list.map((m) => (m.sender_id === user.id ? m.receiver_id : m.sender_id)))
     );
     if (partnerIds.length > 0) {
-      const { data: profileRows } = await supabase
-        .from("profiles")
-        .select("id, name, avatar")
-        .in("id", partnerIds);
+      // Level comes from `user_xp`, not `profiles` — same two-query shape the
+      // convoy roster and profile search already use. Both go out together so
+      // the row does not paint an unframed avatar and then pop a frame in.
+      const [{ data: profileRows }, { data: xpRows }] = await Promise.all([
+        supabase.from("profiles").select("id, name, avatar").in("id", partnerIds),
+        supabase.from("user_xp").select("user_id, level").in("user_id", partnerIds),
+      ]);
+      const levelMap: Record<string, number> = {};
+      (xpRows ?? []).forEach((x: any) => {
+        levelMap[x.user_id] = x.level;
+      });
       const map: Record<string, Contact> = {};
       (profileRows ?? []).forEach((p: any) => {
-        map[p.id] = { id: p.id, name: p.name ?? "Driver", avatar: p.avatar ?? undefined };
+        map[p.id] = {
+          id: p.id,
+          name: p.name ?? "Driver",
+          avatar: p.avatar ?? undefined,
+          level: levelMap[p.id] ?? 1,
+        };
       });
       setProfiles(map);
     }
@@ -174,6 +191,7 @@ export default function MessagesScreen() {
       lastSenderIsMe: last.sender_id === user.id,
       lastAt: last.created_at,
       unread: unreadByPartner.get(partnerId) ?? 0,
+      level: profiles[partnerId]?.level,
     }));
 
     const groupList: ConversationRow[] = groupConversations.map((c) => ({
@@ -299,15 +317,24 @@ export default function MessagesScreen() {
                 (item.kind === "group" ? `/messages/group/${item.targetId}` : `/messages/${item.targetId}`) as any
               )}
             >
-              <View style={styles.avatar}>
-                {item.kind === "group" ? (
+              {/* Groups get the bare avatar well: the row stands for a convoy,
+                  not a driver, so there is no rank to frame. DMs get the
+                  partner's rank frame at `list` detail. */}
+              {item.kind === "group" ? (
+                <View style={styles.avatar}>
                   <Users size={20} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                ) : item.avatar ? (
-                  <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
-                ) : (
-                  <Text style={styles.avatarText}>{item.name[0]?.toUpperCase() ?? "?"}</Text>
-                )}
-              </View>
+                </View>
+              ) : (
+                <ListAvatarFrame level={item.level ?? 1} size={50}>
+                  <View style={styles.avatar}>
+                    {item.avatar ? (
+                      <Image source={{ uri: item.avatar }} style={styles.avatarImg} />
+                    ) : (
+                      <Text style={styles.avatarText}>{item.name[0]?.toUpperCase() ?? "?"}</Text>
+                    )}
+                  </View>
+                </ListAvatarFrame>
+              )}
               <View style={{ flex: 1 }}>
                 <View style={styles.rowNameLine}>
                   <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
