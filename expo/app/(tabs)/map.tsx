@@ -132,6 +132,7 @@ import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import ShareCardModal from "@/components/ShareCardModal";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
+import { calculateDriveXP } from "@/lib/tripStats";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
@@ -1710,31 +1711,20 @@ export default function MapScreen() {
     setTripHistory((prev) => [trip, ...prev]);
 
     // --- XP calculation ---
+    // Scaled off distance covered, time driven and the pace that implies,
+    // not a flat per-trip number — see calculateDriveXP in lib/tripStats.
     const estimatedSec = estimatedDurationRef.current;
     const oldLevel = level;
-    if (estimatedSec && estimatedSec > 0 && tripDistance > 0) {
-      const faster = actualDurationSec < estimatedSec;
-      setWasFaster(faster);
-
-      let earned: number;
-      if (faster) {
-        const timeDiff = estimatedSec - actualDurationSec;
-        const ratio = Math.min(timeDiff / estimatedSec, 1);
-        const bonus = Math.round(ratio * 200);
-        earned = 50 + bonus;
-      } else {
-        earned = 25;
-      }
-      setXpEarned(earned);
-      const newLvl = addXP(earned);
-      setLeveledUp(newLvl > oldLevel);
-    } else {
-      const earned = 10;
-      setXpEarned(earned);
-      setWasFaster(false);
-      const newLvl = addXP(earned);
-      setLeveledUp(newLvl > oldLevel);
-    }
+    const faster = !!estimatedSec && estimatedSec > 0 && actualDurationSec < estimatedSec;
+    setWasFaster(faster);
+    const earned = calculateDriveXP({
+      distanceMeters: tripDistance,
+      durationSeconds: actualDurationSec,
+      estimatedDurationSeconds: estimatedSec,
+    });
+    setXpEarned(earned);
+    const newLvl = addXP(earned);
+    setLeveledUp(newLvl > oldLevel);
 
     // Save trip to Supabase
     if (user?.id) {
@@ -1760,8 +1750,8 @@ export default function MapScreen() {
         avg_speed_kmh: avgSpeed,
         top_speed_kmh: tripTopSpeed,
         estimated_duration_seconds: Math.round(estSec),
-        xp_earned: xpEarned ?? 10,
-        was_faster_than_estimation: wasFaster,
+        xp_earned: earned,
+        was_faster_than_estimation: faster,
         car_id: activeCar?.id ?? null,
         started_at: new Date(tripStartMs ?? now).toISOString(),
         completed_at: new Date(now).toISOString(),
@@ -1811,17 +1801,21 @@ export default function MapScreen() {
   // uses at the end, but against a projected finish time based on progress so far —
   // a real (if approximate) running total rather than a placeholder number.
   const liveXpEarned = (() => {
-    if (!routeInfo || tripDistance <= 0 || elapsedMs <= 0) return 0;
+    if (tripDistance <= 0 || elapsedMs <= 0) return 0;
+    const elapsedSec = elapsedMs / 1000;
+    if (!routeInfo) {
+      return calculateDriveXP({ distanceMeters: tripDistance, durationSeconds: elapsedSec });
+    }
     const fractionDone = Math.min(1, tripDistance / routeInfo.distanceMeters);
     if (fractionDone <= 0) return 0;
-    const projectedTotalSec = (elapsedMs / 1000) / fractionDone;
-    const estimatedSec = routeInfo.durationSeconds;
-    if (projectedTotalSec < estimatedSec) {
-      const timeDiff = estimatedSec - projectedTotalSec;
-      const ratio = Math.min(timeDiff / estimatedSec, 1);
-      return 50 + Math.round(ratio * 200);
-    }
-    return 25;
+    // Estimated time for the distance covered so far, not the full route —
+    // so the ETA-beating bonus reflects pace, not how much trip is left.
+    const estimatedSecSoFar = routeInfo.durationSeconds * fractionDone;
+    return calculateDriveXP({
+      distanceMeters: tripDistance,
+      durationSeconds: elapsedSec,
+      estimatedDurationSeconds: estimatedSecSoFar,
+    });
   })();
 
   // Nearest POI per category — same haversine approach as `nearestPoi` below,
