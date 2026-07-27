@@ -83,12 +83,17 @@ export interface DateRangeValue {
 
 const PRESET_DAYS: Partial<Record<DateRangePreset, number>> = { today: 0, "7d": 7, "30d": 30, "90d": 90 };
 
+// "All time" and open-ended custom ranges must not cap out at `now` — the
+// posts grid also carries future-dated Scheduled posts (the whole point of
+// a content calendar), and those still need to show up under "All time".
+const FAR_FUTURE = new Date("9999-12-31T00:00:00Z");
+
 /** Resolve a DateRangeValue to a concrete [start, end] window. */
 export function resolveDateRange(value: DateRangeValue, now = new Date()): { start: Date; end: Date } {
-  if (value.preset === "all") return { start: new Date(0), end: now };
+  if (value.preset === "all") return { start: new Date(0), end: FAR_FUTURE };
   if (value.preset === "custom") {
     const start = value.customStart ? new Date(`${value.customStart}T00:00:00Z`) : new Date(0);
-    const end = value.customEnd ? new Date(`${value.customEnd}T23:59:59.999Z`) : now;
+    const end = value.customEnd ? new Date(`${value.customEnd}T23:59:59.999Z`) : FAR_FUTURE;
     return { start, end };
   }
   const days = PRESET_DAYS[value.preset] ?? 0;
