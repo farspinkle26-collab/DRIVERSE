@@ -1,32 +1,32 @@
-// Shared chart tokens (validated data-viz dark palette). Client-safe.
+// Shared chart tokens (red-and-black house palette). Client-safe.
 export const SERIES = [
-  "#3987e5", // 1 blue
-  "#d95926", // 2 orange
-  "#199e70", // 3 aqua
-  "#c98500", // 4 yellow
-  "#d55181", // 5 magenta
-  "#008300", // 6 green
-  "#9085e9", // 7 violet
-  "#e66767", // 8 red
+  "#e0263a", // 1 red
+  "#ff6a3d", // 2 orange-red
+  "#c9184a", // 3 rose
+  "#f2a900", // 4 amber
+  "#8f0f2a", // 5 deep maroon
+  "#ff9d8a", // 6 salmon
+  "#7a1220", // 7 blood red
+  "#c94b4b", // 8 brick
 ];
 
 export const STATUS = {
-  good: "#0ca30c",
-  warning: "#fab219",
-  serious: "#ec835a",
-  critical: "#d03b3b",
+  good: "#2e9e4f",
+  warning: "#f2a900",
+  serious: "#ff6a3d",
+  critical: "#e0263a",
 };
 
-export const AXIS = "#898781";
-export const GRID = "#2c2c2a";
-export const BASELINE = "#383835";
+export const AXIS = "#9c8482";
+export const GRID = "#3a1414";
+export const BASELINE = "#4a1a1a";
 
 export const tooltipStyle = {
-  background: "#232322",
-  border: "1px solid #2c2c2a",
+  background: "#221010",
+  border: "1px solid #3a1414",
   borderRadius: 8,
   color: "#ffffff",
   fontSize: 12,
 };
-export const tooltipItemStyle = { color: "#c3c2b7" };
+export const tooltipItemStyle = { color: "#d9c7c5" };
 export const tooltipLabelStyle = { color: "#ffffff", fontWeight: 600 };

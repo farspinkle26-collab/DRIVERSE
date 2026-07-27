@@ -1,40 +1,41 @@
 import type { Config } from "tailwindcss";
 
-// Palette roles come from the validated data-viz reference palette (dark mode).
-// Kept as CSS custom properties in globals.css; Tailwind maps a few semantic
-// tokens onto them so utility classes stay readable.
+// Palette roles: red-and-black house theme, kept as CSS custom properties in
+// globals.css; Tailwind maps a few semantic tokens onto them so utility
+// classes stay readable. Chart series stay hue-varied within red/amber/rose
+// so multi-series charts are still distinguishable.
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         surface: {
-          plane: "#0d0d0d",
-          1: "#1a1a19",
-          2: "#232322",
+          plane: "#090707",
+          1: "#160b0b",
+          2: "#221010",
         },
         ink: {
           primary: "#ffffff",
-          secondary: "#c3c2b7",
-          muted: "#898781",
+          secondary: "#d9c7c5",
+          muted: "#9c8482",
         },
-        hairline: "#2c2c2a",
-        baseline: "#383835",
+        hairline: "#3a1414",
+        baseline: "#4a1a1a",
         series: {
-          1: "#3987e5",
-          2: "#d95926",
-          3: "#199e70",
-          4: "#c98500",
-          5: "#d55181",
-          6: "#008300",
-          7: "#9085e9",
-          8: "#e66767",
+          1: "#e0263a",
+          2: "#ff6a3d",
+          3: "#c9184a",
+          4: "#f2a900",
+          5: "#8f0f2a",
+          6: "#ff9d8a",
+          7: "#7a1220",
+          8: "#c94b4b",
         },
         status: {
-          good: "#0ca30c",
-          warning: "#fab219",
-          serious: "#ec835a",
-          critical: "#d03b3b",
+          good: "#2e9e4f",
+          warning: "#f2a900",
+          serious: "#ff6a3d",
+          critical: "#e0263a",
         },
       },
       fontFamily: {

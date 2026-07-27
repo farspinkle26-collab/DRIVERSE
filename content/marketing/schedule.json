@@ -1,0 +1,157 @@
+{
+  "updatedAt": "2026-07-27T00:00:00.000Z",
+  "productTasks": [
+    {
+      "id": "product-1",
+      "week": "1–2",
+      "build": "\"Share Trip\" export — Trip card → clean branded image, one tap",
+      "why": "Unlocks real users generating shareable content before you've posted a single video",
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "product-2",
+      "week": "3",
+      "build": "Shareable rank-up/quest-completion card",
+      "why": "Second-highest leverage, still simple to build",
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "product-3",
+      "week": "4+",
+      "build": "\"Driveverse Wrapped\"-style monthly recap",
+      "why": "Higher effort, can ship after content is already running",
+      "done": false,
+      "notes": ""
+    }
+  ],
+  "contentCalendar": [
+    {
+      "id": "cal-mon",
+      "day": "Monday",
+      "pillar": "garagey",
+      "format": "Car showcase/collection format",
+      "commentSeed": true,
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "cal-tue",
+      "day": "Tuesday",
+      "pillar": "pov_daily",
+      "format": "Everyday drive, app glance mid-scene",
+      "commentSeed": true,
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "cal-wed",
+      "day": "Wednesday",
+      "pillar": "ai_supercars",
+      "format": "Reach/hook content, no app shown",
+      "commentSeed": false,
+      "done": false,
+      "notes": "Awareness only — no comment-seeding mechanic"
+    },
+    {
+      "id": "cal-thu",
+      "day": "Thursday",
+      "pillar": "garagey",
+      "format": "Second Garagey post — your proven format gets 2x/week",
+      "commentSeed": true,
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "cal-fri",
+      "day": "Friday",
+      "pillar": "tips_tricks",
+      "format": "Driving tip w/ app utility woven in",
+      "commentSeed": true,
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "cal-sat",
+      "day": "Saturday",
+      "pillar": null,
+      "format": "(off, or restock buffer)",
+      "commentSeed": false,
+      "done": false,
+      "notes": ""
+    },
+    {
+      "id": "cal-sun",
+      "day": "Sunday",
+      "pillar": "fake_scripted_pov",
+      "format": "\"Met someone from the map\" narrative",
+      "commentSeed": true,
+      "done": false,
+      "notes": ""
+    }
+  ],
+  "rolloutPlan": [
+    {
+      "id": "week-1",
+      "week": 1,
+      "title": "Launch",
+      "description": "Launch content calendar as above. Ship \"Share Trip\" export mid-week if possible. Log every post per the daily execution checklist.",
+      "done": false
+    },
+    {
+      "id": "week-2",
+      "week": 2,
+      "title": "Ship rank-up card",
+      "description": "Continue calendar. Ship shareable rank-up card. Review Week 1 log — which non-Garagey pillar got the most organic \"what app is that\" pickup (not just views)? Start weighting Week 3 toward that.",
+      "done": false
+    },
+    {
+      "id": "week-3",
+      "week": 3,
+      "title": "Adjust weighting",
+      "description": "Adjust calendar weighting based on Week 2 data — e.g. if POV Daily is outperforming Fake Scripted POV, swap Sunday's slot for a second POV Daily post. Keep Garagey at 2x/week regardless unless a pillar clearly overtakes it.",
+      "done": false
+    },
+    {
+      "id": "week-4",
+      "week": 4,
+      "title": "Wrapped groundwork + full review",
+      "description": "Ship \"Driveverse Wrapped\" recap groundwork (even a simple version). Full review: which pillars are working, which burner-seeded posts saw genuine organic pickup vs needed heavy seeding, and whether download numbers correlate with any specific pillar or posting time.",
+      "done": false
+    }
+  ],
+  "checklistSteps": [
+    {
+      "id": "step-1",
+      "order": 1,
+      "title": "T+0 (post time) — Publish",
+      "description": "Publish video. No app name in caption, on-screen text, or voiceover. App-screen moment is 3–5 seconds, mid-action, most-viral-feature-first (rotate: live map w/ nearby drivers → trip/route card → quest/XP notification)."
+    },
+    {
+      "id": "step-2",
+      "order": 2,
+      "title": "T+30–60 min — Seed comments",
+      "description": "From 3–4 burner accounts, comment \"Driveverse?\" — stagger them (don't post all four in the same minute; space by 5–15 min so it doesn't look scripted)."
+    },
+    {
+      "id": "step-3",
+      "order": 3,
+      "title": "T+45–90 min — Confirm",
+      "description": "Reply from the main content account to each burner comment, confirming the name."
+    },
+    {
+      "id": "step-4",
+      "order": 4,
+      "title": "T+2–4 hrs — Check organic pickup",
+      "description": "Check if real accounts have started asking the same question organically — if yes, stop seeding further on that post, it's self-sustaining. If no organic pickup by hour 4, note it and move on rather than over-seeding."
+    },
+    {
+      "id": "step-5",
+      "order": 5,
+      "title": "End of day — Log",
+      "description": "Log the post (pillar, feature shown, seed timing, whether organic pickup happened) — this is what lets you find your second working pillar after a few weeks instead of guessing."
+    }
+  ],
+  "resultsLog": []
+}
