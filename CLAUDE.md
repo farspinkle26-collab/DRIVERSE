@@ -50,6 +50,15 @@ v2, saved routes, trip names, trip privacy. `expo/database_setup_complete.sql`
 is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
 Functions.
 
+**Finishing a drive writes two different rows.** A `trips` row is written
+automatically the moment the driver ends a drive (the log, the XP, the Drive
+Hub); a `saved_routes` row is written only if they open the save sheet and
+confirm (the publishable route, with a name, visibility and a Regular cap).
+Sharing needs neither — the share card renders from the in-memory trip, so
+the Share action is never gated on a successful save.
+`expo/SAVE_ROUTE_REFERENCE.md` covers the sheet, the failure modes and how
+to verify it; `expo/lib/routeDraft.ts` holds the pure guards and their tests.
+
 **Online presence** — who each driver sees on the map — runs on two paths at
 once, both in `expo/hooks/useOnlineUsers.ts`: Supabase Realtime Presence on
 the `online-players` channel (instant), and a 10-second poll of the

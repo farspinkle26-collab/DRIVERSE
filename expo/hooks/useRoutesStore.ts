@@ -2,6 +2,11 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { parseLimitRejection } from "@/lib/platinumLimits";
+import {
+  describeSaveFailure,
+  sanitizeCount,
+  sanitizeMetric,
+} from "@/lib/routeDraft";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
 
 // ─── Types ─────────────────────────────────────────────────
@@ -219,43 +224,54 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
         };
       }
 
-      const { data, error } = await supabase
-        .from("saved_routes")
-        .insert({
-          user_id: uid,
-          title: input.title.trim(),
-          description: (input.description ?? "").trim(),
-          activity_type: input.activity_type ?? "drive",
-          route_polyline: input.route_polyline,
-          start_lat: input.start_lat,
-          start_lng: input.start_lng,
-          end_lat: input.end_lat,
-          end_lng: input.end_lng,
-          origin_name: input.origin_name ?? "",
-          destination_name: input.destination_name ?? "",
-          distance_km: input.distance_km,
-          duration_seconds: input.duration_seconds,
-          avg_speed_kmh: input.avg_speed_kmh,
-          top_speed_kmh: input.top_speed_kmh,
-          xp_earned: input.xp_earned ?? 0,
-          visibility: input.visibility ?? "public",
-          car_id: input.car_id ?? null,
-          recorded_at: (input.recorded_at ?? new Date()).toISOString(),
-        })
-        .select("id")
-        .single();
+      // Every numeric goes through the sanitisers: PostgREST serialises the
+      // insert as JSON, where NaN and Infinity are not representable, so a
+      // single unmeasured speed turns a saveable drive into a rejected
+      // request. See lib/routeDraft.ts.
+      try {
+        const { data, error } = await supabase
+          .from("saved_routes")
+          .insert({
+            user_id: uid,
+            title: input.title.trim(),
+            description: (input.description ?? "").trim(),
+            activity_type: input.activity_type ?? "drive",
+            route_polyline: input.route_polyline,
+            start_lat: input.start_lat,
+            start_lng: input.start_lng,
+            end_lat: input.end_lat,
+            end_lng: input.end_lng,
+            origin_name: input.origin_name ?? "",
+            destination_name: input.destination_name ?? "",
+            distance_km: sanitizeMetric(input.distance_km),
+            duration_seconds: sanitizeCount(input.duration_seconds),
+            avg_speed_kmh: sanitizeMetric(input.avg_speed_kmh),
+            top_speed_kmh: sanitizeMetric(input.top_speed_kmh),
+            xp_earned: sanitizeCount(input.xp_earned),
+            visibility: input.visibility ?? "public",
+            car_id: input.car_id ?? null,
+            recorded_at: (input.recorded_at ?? new Date()).toISOString(),
+          })
+          .select("id")
+          .single();
 
-      if (error) {
-        const rejection = parseLimitRejection(error);
-        if (rejection) {
-          openPaywall(rejection.benefit);
-          await fetchRoutes();
-          return { error: rejection.message, limitReached: true };
+        if (error) {
+          const rejection = parseLimitRejection(error);
+          if (rejection) {
+            openPaywall(rejection.benefit);
+            await fetchRoutes();
+            return { error: rejection.message, limitReached: true };
+          }
+          return { error: describeSaveFailure(error) };
         }
-        return { error: error.message };
+        await fetchRoutes();
+        return { id: (data as { id: string } | null)?.id };
+      } catch (err) {
+        // A thrown failure — no network, an expired session, a client
+        // misconfiguration — never reached the caller before, so the sheet's
+        // spinner ran forever and the driver read it as "Save does nothing".
+        return { error: describeSaveFailure(err) };
       }
-      await fetchRoutes();
-      return { id: (data as { id: string } | null)?.id };
     },
     [fetchRoutes, routes, limit, openPaywall]
   );

@@ -1,34 +1,82 @@
-import React, { useState } from "react";
+/**
+ * Driveverse — SaveRouteModal.
+ *
+ * The sheet that turns a just-finished drive into a row in the driver's
+ * route library. Reached from the trip summary's SAVE button on the map.
+ *
+ * STYLING
+ *   Migrated off the legacy orange/gradient styling onto `constants/theme`
+ *   (DESIGN_SYSTEM_AUDIT §2, MAP_SCREEN_REFERENCE §8 "Known gaps"). It is a
+ *   form sheet, so it follows `CreateConvoyModal` rather than the map's
+ *   cut-corner cards: plain carbon slab, hairline rules, `radius.sharp`
+ *   inputs and chips. The red budget is one element — the SAVE ROUTE
+ *   button — which is why the activity and visibility selections mark
+ *   themselves with `textPrimary` rather than a second accent.
+ *
+ * WHY THE FOOTER IS PINNED
+ *   The button used to sit below an unbounded ScrollView inside a
+ *   `KeyboardAvoidingView` with no definite height, so `maxHeight: "92%"`
+ *   had nothing to resolve against and the sheet grew past the bottom of
+ *   the screen — the visibility options were cut in half and the action
+ *   overlapped them. The wrapper now takes `flex: 1` so the percentage is
+ *   real, and the action bar lives outside the scroller so it is always
+ *   reachable.
+ *
+ * WHY THE ERROR IS IN THE FOOTER
+ *   It used to be the last child of the scroll content, several hundred
+ *   points below the fold. A failed save therefore looked exactly like a
+ *   dead button. It now sits directly above the action, where the driver is
+ *   already looking when they press it.
+ */
+
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  Modal,
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import {
-  X,
-  Route as RouteIcon,
-  Timer,
-  Gauge,
-  Globe,
-  Users,
-  Lock,
+  Briefcase,
   Car,
   Coffee,
   Flame,
-  Briefcase,
+  Gauge,
+  Globe,
+  Lock,
   Map as MapIcon,
+  Route as RouteIcon,
+  Timer,
+  Users,
+  X,
 } from "lucide-react-native";
+import { CutCornerButton } from "@/components/CutCorner";
+import TierLimitNotice from "@/components/platinum/TierLimitNotice";
+import { ICON_STROKE } from "@/components/TripCard";
+import {
+  borderWidth,
+  colors,
+  fontFamily,
+  onRacingRed,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 import { useRoutes, ActivityType, RouteVisibility } from "@/hooks/useRoutesStore";
 import { encodePolyline, simplifyPath, LatLng } from "@/lib/polyline";
+import {
+  DESCRIPTION_MAX,
+  TITLE_MAX,
+  describeSaveFailure,
+  validateRouteDraft,
+} from "@/lib/routeDraft";
 
 interface SaveRouteModalProps {
   visible: boolean;
@@ -45,32 +93,73 @@ interface SaveRouteModalProps {
   carId?: string | null;
 }
 
-const ACTIVITY_OPTIONS: { key: ActivityType; label: string; icon: React.FC<{ size: number; color: string }>; color: string }[] = [
-  { key: "drive", label: "Drive", icon: Car, color: "#FF6B35" },
-  { key: "cruise", label: "Cruise", icon: Coffee, color: "#8B5CF6" },
-  { key: "commute", label: "Commute", icon: Briefcase, color: "#3B82F6" },
-  { key: "race", label: "Race", icon: Flame, color: "#FF3B6F" },
-  { key: "roadtrip", label: "Road Trip", icon: MapIcon, color: "#00D4AA" },
+type IconComponent = React.FC<{ size: number; color: string; strokeWidth?: number }>;
+
+/**
+ * Category is shape, not hue (MAP_SCREEN_REFERENCE §9.10) — the glyph says
+ * which activity it is, and colour is reserved for which one is selected.
+ */
+const ACTIVITY_OPTIONS: { key: ActivityType; label: string; icon: IconComponent }[] = [
+  { key: "drive", label: "Drive", icon: Car },
+  { key: "cruise", label: "Cruise", icon: Coffee },
+  { key: "commute", label: "Commute", icon: Briefcase },
+  { key: "race", label: "Race", icon: Flame },
+  { key: "roadtrip", label: "Road Trip", icon: MapIcon },
 ];
 
-const VISIBILITY_OPTIONS: { key: RouteVisibility; label: string; sub: string; icon: React.FC<{ size: number; color: string }> }[] = [
-  { key: "public", label: "Public", sub: "Everyone can see & give kudos", icon: Globe },
-  { key: "friends", label: "Friends", sub: "Only your friends can see", icon: Users },
-  { key: "private", label: "Private", sub: "Only you can see", icon: Lock },
+const VISIBILITY_OPTIONS: {
+  key: RouteVisibility;
+  label: string;
+  sub: string;
+  icon: IconComponent;
+}[] = [
+  { key: "public", label: "Public", sub: "Everyone can see it and give kudos", icon: Globe },
+  { key: "friends", label: "Friends", sub: "Only your friends can see it", icon: Users },
+  { key: "private", label: "Private", sub: "Only you can see it", icon: Lock },
 ];
 
 function fmtMeters(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(2)} km`;
+  if (!Number.isFinite(meters)) return "0";
+  if (meters < 1000) return `${Math.round(meters)}`;
+  return (meters / 1000).toFixed(2);
+}
+
+function metersUnit(meters: number): string {
+  return Number.isFinite(meters) && meters >= 1000 ? "km" : "m";
 }
 
 function fmtDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0s";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+/** One column of the stats strip: mono value, Inter unit, caption label. */
+function StatColumn({
+  glyph: Glyph,
+  value,
+  unit,
+  label,
+}: {
+  glyph: IconComponent;
+  value: string;
+  unit?: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.statColumn}>
+      <Glyph size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+      <View style={styles.statValueRow}>
+        <Text style={styles.statValue}>{value}</Text>
+        {unit ? <Text style={styles.statUnit}>{unit}</Text> : null}
+      </View>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
 }
 
 export default function SaveRouteModal({
@@ -88,11 +177,12 @@ export default function SaveRouteModal({
   carId,
 }: SaveRouteModalProps) {
   const insets = useSafeAreaInsets();
-  const { saveRoute } = useRoutes();
+  const { saveRoute, myRoutes, savedRouteLimit } = useRoutes();
 
-  const defaultTitle = destinationName && destinationName !== "Unknown"
-    ? `Drive to ${destinationName}`
-    : "Morning Drive";
+  const defaultTitle =
+    destinationName && destinationName !== "Unknown"
+      ? `Drive to ${destinationName}`
+      : "Morning Drive";
 
   const [title, setTitle] = useState(defaultTitle);
   const [description, setDescription] = useState("");
@@ -101,193 +191,271 @@ export default function SaveRouteModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSave = async () => {
-    if (!title.trim()) {
-      setError("Give your route a name");
+  // The sheet is mounted for the life of the map screen and only toggled by
+  // `visible`, so without this the fields keep whatever the last drive left
+  // in them — including a stale "Drive to <somewhere I am not going>".
+  useEffect(() => {
+    if (!visible) return;
+    setTitle(defaultTitle);
+    setDescription("");
+    setActivity("drive");
+    setVisibility("public");
+    setSaving(false);
+    setError(null);
+    // `defaultTitle` is derived from the destination, which is fixed for the
+    // drive being saved; re-running on every keystroke would fight the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+
+    const problem = validateRouteDraft({
+      title,
+      description,
+      pathLength: path.length,
+    });
+    if (problem) {
+      setError(problem);
       return;
     }
-    if (path.length < 2) {
-      setError("This route is too short to save");
-      return;
-    }
+
     setSaving(true);
     setError(null);
 
-    const simplified = simplifyPath(path, 400);
-    const polyline = encodePolyline(simplified);
-    const start = path[0];
-    const end = path[path.length - 1];
+    try {
+      const simplified = simplifyPath(path, 400);
+      const polyline = encodePolyline(simplified);
+      const start = path[0];
+      const end = path[path.length - 1];
 
-    const { id, error: saveError } = await saveRoute({
-      title: title.trim(),
-      description: description.trim(),
-      activity_type: activity,
-      route_polyline: polyline,
-      start_lat: start.latitude,
-      start_lng: start.longitude,
-      end_lat: end.latitude,
-      end_lng: end.longitude,
-      origin_name: originName ?? "",
-      destination_name: destinationName ?? "",
-      distance_km: distanceMeters / 1000,
-      duration_seconds: Math.round(durationSeconds),
-      avg_speed_kmh: avgSpeedKmh,
-      top_speed_kmh: topSpeedKmh,
-      xp_earned: xpEarned,
-      visibility,
-      car_id: carId ?? null,
-    });
+      const { id, error: saveError } = await saveRoute({
+        title: title.trim(),
+        description: description.trim(),
+        activity_type: activity,
+        route_polyline: polyline,
+        start_lat: start.latitude,
+        start_lng: start.longitude,
+        end_lat: end.latitude,
+        end_lng: end.longitude,
+        origin_name: originName ?? "",
+        destination_name: destinationName ?? "",
+        distance_km: distanceMeters / 1000,
+        duration_seconds: Math.round(durationSeconds),
+        avg_speed_kmh: avgSpeedKmh,
+        top_speed_kmh: topSpeedKmh,
+        xp_earned: xpEarned,
+        visibility,
+        car_id: carId ?? null,
+      });
 
-    setSaving(false);
-    if (saveError) {
-      setError(saveError);
-      return;
+      if (saveError) {
+        setError(saveError);
+        return;
+      }
+      if (id) onSaved?.(id);
+      onClose();
+    } catch (err) {
+      // Encoding the polyline or the store itself throwing must not leave
+      // the button spinning with nothing said.
+      setError(describeSaveFailure(err));
+    } finally {
+      setSaving(false);
     }
-    // Reset for next time
-    setTitle(defaultTitle);
-    setDescription("");
-    if (id) onSaved?.(id);
-    onClose();
-  };
+  }, [
+    saving,
+    title,
+    description,
+    path,
+    saveRoute,
+    activity,
+    originName,
+    destinationName,
+    distanceMeters,
+    durationSeconds,
+    avgSpeedKmh,
+    topSpeedKmh,
+    xpEarned,
+    visibility,
+    carId,
+    onSaved,
+    onClose,
+  ]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.kav}
+          style={styles.sheetWrap}
         >
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
+          <View style={styles.sheet}>
             {/* Header */}
             <View style={styles.header}>
-              <View style={styles.grabber} />
-              <View style={styles.headerRow}>
-                <Text style={styles.headerTitle}>Save Route</Text>
-                <TouchableOpacity onPress={onClose} hitSlop={10}>
-                  <X size={22} color="#8A8A9A" />
-                </TouchableOpacity>
+              <View style={styles.headerLeft}>
+                <View style={styles.headerIcon}>
+                  <RouteIcon size={18} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                </View>
+                <Text style={styles.headerTitle}>SAVE ROUTE</Text>
               </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close save route"
+                hitSlop={spacing.spacingSm}
+                onPress={onClose}
+                style={styles.closeBtn}
+              >
+                <X size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+              </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Stats strip */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.scrollContent}
+            >
+              {/* Stats strip — a utility surface, so a plain rect. */}
               <View style={styles.statsStrip}>
-                <View style={styles.statItem}>
-                  <RouteIcon size={16} color="#FF6B35" />
-                  <Text style={styles.statValue}>{fmtMeters(distanceMeters)}</Text>
-                  <Text style={styles.statLabel}>Distance</Text>
-                </View>
+                <StatColumn
+                  glyph={RouteIcon}
+                  value={fmtMeters(distanceMeters)}
+                  unit={metersUnit(distanceMeters)}
+                  label="DISTANCE"
+                />
                 <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Timer size={16} color="#F59E0B" />
-                  <Text style={styles.statValue}>{fmtDuration(durationSeconds)}</Text>
-                  <Text style={styles.statLabel}>Time</Text>
-                </View>
+                <StatColumn glyph={Timer} value={fmtDuration(durationSeconds)} label="TIME" />
                 <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Gauge size={16} color="#3B82F6" />
-                  <Text style={styles.statValue}>{avgSpeedKmh.toFixed(0)}</Text>
-                  <Text style={styles.statLabel}>km/h avg</Text>
-                </View>
+                <StatColumn
+                  glyph={Gauge}
+                  value={Number.isFinite(avgSpeedKmh) ? avgSpeedKmh.toFixed(0) : "0"}
+                  unit="km/h"
+                  label="AVG"
+                />
               </View>
 
-              {/* Title */}
-              <Text style={styles.fieldLabel}>Route name</Text>
+              <Text style={styles.label}>Route name</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Sunset Canyon Run"
-                placeholderTextColor="#5A5A6E"
+                placeholder="Sunset Canyon Run"
+                placeholderTextColor={colors.textSecondary}
                 value={title}
                 onChangeText={setTitle}
-                maxLength={100}
+                maxLength={TITLE_MAX}
               />
 
-              {/* Description */}
-              <Text style={styles.fieldLabel}>Description (optional)</Text>
+              <Text style={styles.label}>Description (optional)</Text>
               <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="How was the drive? Add notes for your followers..."
-                placeholderTextColor="#5A5A6E"
+                style={[styles.input, styles.inputMultiline]}
+                placeholder="How was the drive? Add notes for your followers…"
+                placeholderTextColor={colors.textSecondary}
                 value={description}
                 onChangeText={setDescription}
                 multiline
-                maxLength={1000}
+                maxLength={DESCRIPTION_MAX}
               />
 
-              {/* Activity type */}
-              <Text style={styles.fieldLabel}>Activity type</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipsRow}
-              >
+              <Text style={styles.label}>Activity type</Text>
+              <View style={styles.chipRow}>
                 {ACTIVITY_OPTIONS.map((opt) => {
                   const active = activity === opt.key;
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={opt.key}
-                      style={[
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={({ pressed }) => [
                         styles.chip,
-                        active && { backgroundColor: `${opt.color}20`, borderColor: opt.color },
+                        active && styles.chipActive,
+                        pressed && styles.pressed,
                       ]}
                       onPress={() => setActivity(opt.key)}
-                      activeOpacity={0.7}
                     >
-                      <opt.icon size={15} color={active ? opt.color : "#8A8A9A"} />
-                      <Text style={[styles.chipText, active && { color: opt.color }]}>{opt.label}</Text>
-                    </TouchableOpacity>
+                      <opt.icon
+                        size={14}
+                        color={active ? colors.textPrimary : colors.textSecondary}
+                        strokeWidth={ICON_STROKE}
+                      />
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
                   );
                 })}
-              </ScrollView>
+              </View>
 
-              {/* Visibility */}
-              <Text style={styles.fieldLabel}>Who can see this?</Text>
+              <Text style={styles.label}>Who can see this?</Text>
               {VISIBILITY_OPTIONS.map((opt) => {
                 const active = visibility === opt.key;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={opt.key}
-                    style={[styles.visRow, active && styles.visRowActive]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${opt.label}. ${opt.sub}`}
+                    style={({ pressed }) => [
+                      styles.visRow,
+                      active && styles.visRowActive,
+                      pressed && styles.pressed,
+                    ]}
                     onPress={() => setVisibility(opt.key)}
-                    activeOpacity={0.7}
                   >
-                    <View style={[styles.visIcon, active && { backgroundColor: "rgba(255,107,53,0.15)" }]}>
-                      <opt.icon size={18} color={active ? "#FF6B35" : "#8A8A9A"} />
+                    <View style={[styles.visIcon, active && styles.visIconActive]}>
+                      <opt.icon
+                        size={16}
+                        color={active ? colors.textPrimary : colors.textSecondary}
+                        strokeWidth={ICON_STROKE}
+                      />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.visLabel, active && { color: "#FFFFFF" }]}>{opt.label}</Text>
+                    <View style={styles.visText}>
+                      <Text style={[styles.visLabel, active && styles.visLabelActive]}>
+                        {opt.label}
+                      </Text>
                       <Text style={styles.visSub}>{opt.sub}</Text>
                     </View>
-                    <View style={[styles.radio, active && styles.radioActive]}>
-                      {active && <View style={styles.radioDot} />}
+                    {/* A square mark, not a radio dot — the shape policy has
+                        no pill or circle outside avatars. */}
+                    <View style={[styles.mark, active && styles.markActive]}>
+                      {active ? <View style={styles.markFill} /> : null}
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
 
-              {error && <Text style={styles.errorText}>{error}</Text>}
+              {/* Says the ceiling out loud rather than letting the driver
+                  find it by pressing Save on their eleventh drive. */}
+              <TierLimitNotice
+                current={myRoutes.length}
+                cap={savedRouteLimit}
+                noun="routes"
+                benefit="routes"
+                atCapMessage={`Your route library is full at ${savedRouteLimit}. Delete one, or go Platinum for unlimited.`}
+                style={styles.limitNotice}
+              />
             </ScrollView>
 
-            {/* Save button */}
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={handleSave}
-              disabled={saving}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={["#FF6B35", "#FF3B6F"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.saveBtnGradient}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.saveBtnText}>Save Route</Text>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+            {/* Action bar — outside the scroller so it is always reachable,
+                with the failure reason directly above it. */}
+            <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.spacingLg }]}>
+              {error ? (
+                <Text style={styles.errorText} accessibilityLiveRegion="polite">
+                  {error}
+                </Text>
+              ) : null}
+              <CutCornerButton
+                title={saving ? "Saving…" : "Save Route"}
+                corners="topRight"
+                disabled={saving}
+                onPress={handleSave}
+                accessibilityLabel="Save this route to your profile"
+                icon={
+                  saving ? (
+                    <ActivityIndicator size="small" color={onRacingRed} />
+                  ) : (
+                    <RouteIcon size={18} color={onRacingRed} strokeWidth={ICON_STROKE} />
+                  )
+                }
+              />
+            </View>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -298,187 +466,221 @@ export default function SaveRouteModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
     justifyContent: "flex-end",
   },
-  kav: {
+  // `flex: 1` is load-bearing: without a definite height on this wrapper the
+  // sheet's percentage maxHeight resolves to nothing and the sheet grows off
+  // the bottom of the screen.
+  sheetWrap: {
+    flex: 1,
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#111119",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
+    backgroundColor: colors.carbonSurface,
+    borderTopWidth: borderWidth.hairline,
+    borderLeftWidth: borderWidth.hairline,
+    borderRightWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingXl,
+    paddingTop: spacing.spacingLg,
     maxHeight: "92%",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+  },
+  pressed: {
+    opacity: 0.7,
   },
   header: {
-    paddingTop: 10,
-    paddingBottom: 12,
-  },
-  grabber: {
-    alignSelf: "center",
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginBottom: 14,
-  },
-  headerRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.spacingMd,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+  },
+  headerIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sharp,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scrollContent: {
+    paddingBottom: spacing.spacingLg,
   },
   statsStrip: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 16,
-    paddingVertical: 14,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    alignItems: "stretch",
+    backgroundColor: colors.voidBlack,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingVertical: spacing.spacingMd,
   },
-  statItem: {
+  statColumn: {
     flex: 1,
     alignItems: "center",
-    gap: 4,
+    gap: spacing.spacingXs,
   },
   statDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    width: borderWidth.hairline,
+    backgroundColor: colors.hairline,
+  },
+  statValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
   },
   statValue: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...textStyle("dataSm"),
+    color: colors.textPrimary,
+  },
+  statUnit: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   statLabel: {
-    fontSize: 11,
-    color: "#8A8A9A",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
   },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#8A8A9A",
-    letterSpacing: 0.5,
-    textTransform: "uppercase" as const,
-    marginBottom: 8,
-    marginTop: 6,
+  label: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 1,
+    marginTop: spacing.spacingLg,
+    marginBottom: spacing.spacingSm,
   },
   input: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 48,
-    fontSize: 15,
-    color: "#FFFFFF",
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingMd,
+    ...textStyle("body"),
   },
-  textArea: {
-    height: 88,
-    paddingTop: 12,
+  inputMultiline: {
+    minHeight: 72,
     textAlignVertical: "top",
   },
-  chipsRow: {
-    gap: 8,
-    paddingBottom: 16,
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.spacingSm,
   },
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    gap: spacing.spacingXs,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
+  },
+  chipActive: {
+    borderColor: colors.textPrimary,
+    backgroundColor: colors.hairline,
   },
   chipText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#8A8A9A",
+    ...textStyle("caption", { fontFamily: fontFamily.bodyMedium }),
+    color: colors.textSecondary,
+  },
+  chipTextActive: {
+    color: colors.textPrimary,
   },
   visRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    marginBottom: 8,
+    gap: spacing.spacingMd,
+    padding: spacing.spacingMd,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.voidBlack,
+    marginBottom: spacing.spacingSm,
   },
   visRowActive: {
-    borderColor: "#FF6B3560",
-    backgroundColor: "rgba(255,107,53,0.06)",
+    borderColor: colors.textPrimary,
   },
   visIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    justifyContent: "center",
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  visIconActive: {
+    backgroundColor: colors.hairline,
+    borderColor: colors.textPrimary,
+  },
+  visText: {
+    flex: 1,
+    gap: spacing.spacingXs / 2,
   },
   visLabel: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#CACAD5",
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.textSecondary,
+  },
+  visLabelActive: {
+    color: colors.textPrimary,
   },
   visSub: {
-    fontSize: 12,
-    color: "#8A8A9A",
-    marginTop: 1,
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: "#3A3A4E",
-    justifyContent: "center",
+  mark: {
+    width: spacing.spacingLg,
+    height: spacing.spacingLg,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
     alignItems: "center",
+    justifyContent: "center",
   },
-  radioActive: {
-    borderColor: "#FF6B35",
+  markActive: {
+    borderColor: colors.textPrimary,
   },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#FF6B35",
+  markFill: {
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    backgroundColor: colors.textPrimary,
+  },
+  limitNotice: {
+    marginTop: spacing.spacingLg,
+  },
+  footer: {
+    paddingTop: spacing.spacingLg,
+    gap: spacing.spacingMd,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
   },
   errorText: {
-    color: "#EF4444",
-    fontSize: 13,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  saveBtn: {
-    borderRadius: 16,
-    overflow: "hidden",
-    marginTop: 12,
-  },
-  saveBtnGradient: {
-    height: 54,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  saveBtnText: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("caption"),
+    color: colors.racingRed,
   },
 });
