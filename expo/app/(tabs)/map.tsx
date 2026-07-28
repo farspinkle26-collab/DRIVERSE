@@ -48,21 +48,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { SettledMarker } from "@/components/SettledMarker";
-import { PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
-import { usePlaces } from "@/hooks/usePlaces";
-import { useMapFilters } from "@/hooks/useMapFilters";
 import {
-  MAP_LAYERS,
-  PLACE_CATEGORIES,
   PLACE_CATEGORY_ICONS,
   PLACE_CATEGORY_LABELS,
-  MAP_LAYER_DESCRIPTIONS,
-  type MapLayerId,
   type PlaceCategory,
 } from "@/constants/placesCategories";
 import { CATEGORY_COLORS, ON_CATEGORY } from "@/constants/mapCategoryColors";
-import type { NormalizedPlace } from "@/lib/placesApi";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import {
@@ -565,8 +557,6 @@ const CAT_LABELS = PLACE_CATEGORY_LABELS;
  * chrome cannot use the scale for its own positions the way a scrolling
  * layout can, because the panels overlap each other rather than stack.
  */
-/** Below the filter chip row (one chip tall plus its margin). */
-const PLACES_STATUS_OFFSET = spacing.spacingXxxl + spacing.spacingMd; // 60
 /** Below the driving-mode profile pill. */
 const TURN_CARD_OFFSET = spacing.spacingXxxl + spacing.spacingSm; // 56
 /** Below the speed-limit sign and compass. */
@@ -642,51 +632,6 @@ function ActionRow({
   );
 }
 
-/**
- * One toggle row in the Filters popover: category glyph, Inter label, and
- * a square tick box that fills racingRed when the layer is on.
- */
-function FilterRow({
-  label,
-  description,
-  checked,
-  onToggle,
-  children,
-}: {
-  label: string;
-  /** One line under the label saying what the layer actually contains. */
-  description?: string;
-  checked: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-      accessibilityLabel={`${label} layer`}
-      accessibilityHint={description}
-      style={({ pressed }) => [styles.filterRow, pressed && styles.pressed]}
-      onPress={onToggle}
-    >
-      {children}
-      <View style={styles.filterLabelBox}>
-        <Text style={styles.filterLabel} numberOfLines={1}>{label}</Text>
-        {description ? (
-          <Text style={styles.filterDescription} numberOfLines={2}>{description}</Text>
-        ) : null}
-      </View>
-      {/* The tick is `textPrimary`, not the accent. Every layer is on by
-          default, so an accent-coloured tick meant nine red squares in one
-          popover — which is the opposite of a sparingly-used accent. */}
-      <View style={[styles.filterCheck, checked && styles.filterCheckOn]}>
-        {checked && (
-          <Check size={spacing.spacingMd} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
-        )}
-      </View>
-    </Pressable>
-  );
-}
 
 /**
  * A labelled icon button in the map's floating chrome (search, locate,
@@ -806,16 +751,6 @@ export default function MapScreen() {
   const landmarkFetchRef = useRef(0);
   const landmarkDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass).
-  // Always on — gated only by the Filters popover's per-category toggles, the
-  // same predicate the landmark layer uses. There used to be a second "Places"
-  // chrome button that opened/closed this layer independently of Filters; it
-  // just hid the layer behind an extra tap and left two controls doing one job.
-  const places = usePlaces();
-  const [selectedPlace, setSelectedPlace] = useState<NormalizedPlace | null>(null);
-  const [submitPlaceCoord, setSubmitPlaceCoord] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [showSubmitPlaceModal, setShowSubmitPlaceModal] = useState(false);
-
   // Selected destination (cafe or custom tapped location)
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
   // Whether the selected pin has been confirmed (kept for marker emphasis styling)
@@ -928,22 +863,6 @@ export default function MapScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Layer visibility is one persisted store now, not three pieces of local
-  // state (`visibleCats`, `showEventsLayer`, `showDriversLayer`) that reset
-  // on every app launch. `isLayerVisible` is the single predicate every
-  // marker render site below goes through — that is what makes the toggles
-  // real rather than decorative, and it is unit-tested in
-  // `hooks/__tests__/mapFiltersState.test.ts`.
-  const {
-    isVisible: isLayerVisible,
-    toggle: toggleLayer,
-    setAll: setAllLayers,
-    activeCategories,
-    visibleCount: visibleLayerCount,
-    ready: filtersReady,
-  } = useMapFilters();
-  const showEventsLayer = isLayerVisible("events");
-  const showDriversLayer = isLayerVisible("users");
   const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
   /** Last region the map reported. Drives the clustering threshold. */
   const [mapRegion, setMapRegion] = useState<{
@@ -1641,24 +1560,6 @@ export default function MapScreen() {
     setShowDropPinHint(false);
   }, [showDropPinHint]);
 
-  // --- Nearby places (OSM + community): fetch on filter change or map pan ---
-  //
-  // `activeCategories` is the switched-on subset, so unticking a category
-  // stops its Overpass traffic as well as its markers. With nine categories
-  // live that is the difference between one round trip and nine.
-  //
-  // `categoryKey` rather than the array itself in the dependency list:
-  // `activeCategories` is a fresh array on every filter change, and an
-  // array identity in a dep list would re-fire this effect on every render
-  // that touches filters at all.
-  const categoryKey = activeCategories.join(",");
-
-  useEffect(() => {
-    if (!userLocation || !filtersReady) return;
-    places.fetchForRegion(userLocation.latitude, userLocation.longitude, activeCategories);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryKey, userLocation, filtersReady]);
-
   const handlePlacesRegionChange = useCallback(
     (nextRegion: {
       latitude: number;
@@ -1673,51 +1574,9 @@ export default function MapScreen() {
       // another city has to bring that city's POIs with it. Guarded by
       // distance inside, so an idle nudge costs nothing.
       maybeRefetchLandmarks(nextRegion.latitude, nextRegion.longitude);
-      if (!filtersReady) return;
-      places.fetchForRegion(nextRegion.latitude, nextRegion.longitude, activeCategories);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [categoryKey, filtersReady, maybeRefetchLandmarks]
+    [maybeRefetchLandmarks]
   );
-
-  /**
-   * Tapping a cluster zooms into it rather than opening a sheet.
-   *
-   * Halving the region's height per tap is the behaviour every map has
-   * trained drivers to expect, and it converges: two or three taps on any
-   * cluster drops below the clustering threshold and breaks it into its
-   * members. Opening a list sheet instead would need a second selection
-   * model for something the map can already express.
-   */
-  const zoomToCluster = useCallback(
-    (cluster: { lat: number; lng: number }) => {
-      const delta = Math.max((mapRegion?.latitudeDelta ?? 0.05) / 2, 0.004);
-      mapRef.current?.animateToRegion(
-        {
-          latitude: cluster.lat,
-          longitude: cluster.lng,
-          latitudeDelta: delta,
-          longitudeDelta: delta,
-        },
-        350
-      );
-    },
-    [mapRegion?.latitudeDelta]
-  );
-
-  // --- Long-press the map to drop a pin and submit a new place ---
-  const handleMapLongPress = useCallback((event: any) => {
-    if (!user) {
-      Alert.alert(
-        "Submitting a place needs an account",
-        "Community places are credited to the driver who added them, so this can't be done while signed out. Sign in from the banner above the tab bar, then try again."
-      );
-      return;
-    }
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    setSubmitPlaceCoord({ latitude, longitude });
-    setShowSubmitPlaceModal(true);
-  }, [user]);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
@@ -2076,10 +1935,6 @@ export default function MapScreen() {
     !selectedDestination &&
     !selectedEvent &&
     !selectedOnlineUser &&
-    // A tapped OSM/community place owns the bottom slot too — without this
-    // the callout renders underneath the Drive/Convoy/Chat stack and its
-    // close control sits behind a button.
-    !selectedPlace &&
     recordedPath.length === 0;
 
   const firstName = (user?.name ?? "Driver").split(" ")[0];
@@ -2193,21 +2048,9 @@ export default function MapScreen() {
         }
         followsUserLocation={false}
         onPress={handleMapPress}
-        onLongPress={handleMapLongPress}
         onRegionChangeComplete={handlePlacesRegionChange}
       >
         <MapboxTileLayer dark={mapStyleDark} />
-
-        {filtersReady && (
-          <PlacesMarkers
-            places={places.places}
-            onSelect={setSelectedPlace}
-            onSelectCluster={zoomToCluster}
-            selectedId={selectedPlace?.id ?? null}
-            origin={userLocation}
-            latitudeDelta={mapRegion?.latitudeDelta}
-          />
-        )}
 
         {/* Landmark markers — cut-corner badge + hand-drawn category glyph +
             name + distance. Always rendered, regardless of recording/online/
@@ -2217,9 +2060,8 @@ export default function MapScreen() {
             The category badge is filled with the category's own colour and
             the glyph drawn in `ON_CATEGORY` on top. Selected is still
             racingRed on every category, so "the one you tapped" can never be
-            read as "this is a car wash". Nothing renders without asking
-            `isLayerVisible` first. */}
-        {filtersReady && cafes.filter((poi) => isLayerVisible(poi.category)).map((poi) => {
+            read as "this is a car wash". */}
+        {cafes.map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const Glyph = CAT_GLYPHS[poi.category];
           const isChosen = isSelected && locationChosen;
@@ -2384,7 +2226,7 @@ export default function MapScreen() {
             (see PLAYER_COLORS); everything else — level badge, convoy badge,
             name plate — is palette. The party ring stays thicker rather than
             brighter, because a shadow-based "glow" is not in the system. */}
-        {isUserOnline && showDriversLayer && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
+        {isUserOnline && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
           // A raised problem takes the accent and overrides the livery/party
           // colour: distress has to win the marker outright, or it competes
@@ -2502,7 +2344,7 @@ export default function MapScreen() {
             A live event is the one thing on the events layer that gets the
             accent; scheduled events stay neutral so "live" means something
             at a glance. */}
-        {!isRecording && showEventsLayer && events.map((ev) => {
+        {!isRecording && events.map((ev) => {
           const isSelected = selectedEventId === ev.id;
           const timeLabel = fmtEventTime(ev.starts_at, ev.is_live);
           const accented = ev.is_live || isSelected;
@@ -2608,71 +2450,6 @@ export default function MapScreen() {
           </SettledMarker>
         )}
       </MapView>
-
-      {/* ===================================================== */}
-      {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
-      {/* ===================================================== */}
-      {/* The category chip bar this used to render up top is gone — the
-          Filters popover (right column) already toggles every one of these
-          categories, and having two controls for the same nine toggles was
-          the redundant one. */}
-      {!isRecording && (
-        <>
-          {places.loading && (
-            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
-              <ActivityIndicator size="small" color={colors.racingRed} />
-              <Text style={styles.placesStatusText}>
-                Loading nearby places…
-              </Text>
-            </View>
-          )}
-          {places.error && !places.loading && (
-            <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
-              <Text style={styles.placesStatusText}>
-                {places.error} Pan the map to retry this area.
-              </Text>
-            </View>
-          )}
-          {/* Yields the bottom-left slot to the place callout. */}
-          {!selectedPlace && (
-          <SubmitPlaceFab
-            onPress={() => {
-              if (!user) {
-                Alert.alert(
-                  "Submitting a place needs an account",
-                  "Community places are credited to the driver who added them, so this can't be done while signed out. Sign in from the banner above the tab bar, then try again."
-                );
-                return;
-              }
-              setSubmitPlaceCoord(userLocation);
-              setShowSubmitPlaceModal(true);
-            }}
-            style={[styles.placesFabSlot, { bottom: insets.bottom + BOTTOM_STACK_OFFSET }]}
-          />
-          )}
-        </>
-      )}
-
-      <PlaceDetailSheet
-        place={selectedPlace}
-        onClose={() => setSelectedPlace(null)}
-        bottomInset={insets.bottom + TAB_BAR_CLEARANCE}
-        distanceMeters={
-          selectedPlace && userLocation
-            ? haversineMeters(userLocation, {
-                latitude: selectedPlace.lat,
-                longitude: selectedPlace.lng,
-              })
-            : null
-        }
-      />
-
-      <SubmitPlaceModal
-        visible={showSubmitPlaceModal}
-        onClose={() => setShowSubmitPlaceModal(false)}
-        coordinate={submitPlaceCoord}
-        onSubmit={places.submitPlace}
-      />
 
       {/* --- Locating --- */}
       {locating && (
@@ -3508,55 +3285,6 @@ export default function MapScreen() {
               </Text>
             </Pressable>
           </View>
-
-          <View style={styles.filtersHeaderRow}>
-            <Text style={styles.filtersTitle}>MAP LAYERS</Text>
-            {/* One control, two states — "Hide all" while anything is on,
-                "Show all" once everything is off. A driver who has hidden
-                nine categories one at a time needs one tap back, not nine. */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                visibleLayerCount > 0 ? "Hide all map layers" : "Show all map layers"
-              }
-              hitSlop={spacing.spacingSm}
-              onPress={() => setAllLayers(visibleLayerCount === 0)}
-              style={({ pressed }) => [pressed && styles.pressed]}
-            >
-              <Text style={styles.filtersBulkAction}>
-                {visibleLayerCount > 0 ? "HIDE ALL" : "SHOW ALL"}
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Each row's glyph carries its category colour — the same value
-              its marker is filled with, so the panel is a legend as well as
-              a control. The tick stays `textPrimary`: every layer is on by
-              default, and an accent-coloured tick meant eleven red squares
-              in one popover (MAP_SCREEN_REFERENCE §3). */}
-          <ScrollView
-            style={styles.filtersScroll}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {MAP_LAYERS.map((layer) => {
-              const Glyph = PLACE_CATEGORY_ICONS[layer];
-              return (
-                <FilterRow
-                  key={layer}
-                  label={PLACE_CATEGORY_LABELS[layer]}
-                  description={MAP_LAYER_DESCRIPTIONS[layer]}
-                  checked={isLayerVisible(layer)}
-                  onToggle={() => toggleLayer(layer)}
-                >
-                  <Glyph
-                    size={spacing.spacingLg}
-                    color={CATEGORY_COLORS[layer as PlaceCategory] ?? colors.textSecondary}
-                  />
-                </FilterRow>
-              );
-            })}
-          </ScrollView>
         </CutCornerSurface>
       )}
 
@@ -3903,7 +3631,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   ONLINE STATUS BANNER — compact, above the tab bar    */}
       {/* ===================================================== */}
-      {!isRecording && !routeInfo && !selectedDestination && !selectedPlace && recordedPath.length === 0 && (() => {
+      {!isRecording && !routeInfo && !selectedDestination && recordedPath.length === 0 && (() => {
         const onlineCount = onlineUsers.length;
         return (
           <Animated.View
@@ -4583,37 +4311,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
 
-  /* ---------------- Places layer (OSM + community) ---------------- */
-  // The submit-a-place action takes the bottom-left slot the live feed
-  // vacates while this layer is open.
-  placesFabSlot: {
-    position: "absolute",
-    left: SCREEN_MARGIN,
-    zIndex: 5,
-  },
-
-  placesStatusPill: {
-    position: "absolute",
-    left: SCREEN_MARGIN,
-    // Same gutter as the chip row above it.
-    right: spacing.spacingXxxl + spacing.spacingXl,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.spacingSm,
-    backgroundColor: colors.carbonSurface,
-    borderWidth: borderWidth.hairline,
-    borderColor: colors.hairline,
-    borderRadius: radius.sharp,
-    paddingHorizontal: spacing.spacingMd,
-    paddingVertical: spacing.spacingSm,
-    zIndex: 5,
-  },
-  placesStatusText: {
-    ...textStyle("caption"),
-    color: colors.textSecondary,
-    flexShrink: 1,
-  },
-
   /* ---------------- Status pills and banners ---------------- */
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -5062,9 +4759,6 @@ const styles = StyleSheet.create({
   filtersPopover: {
     position: "absolute",
     right: spacing.spacingXxxl + spacing.spacingXl + spacing.spacingSm,
-    // 240, up from 192: each row now carries a description line under its
-    // label, and at the old width "Other drivers on the map. Hiding them
-    // does not hide you." wrapped to four lines.
     width: spacing.spacingXxxl * 5,
     zIndex: 240,
   },
@@ -5080,55 +4774,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.spacingSm,
     marginBottom: spacing.spacingXs,
-  },
-  filtersHeaderRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-  },
-  filtersBulkAction: {
-    fontFamily: fontFamily.displaySemiBold,
-    fontSize: 12,
-    lineHeight: 15,
-    letterSpacing: 1,
-    color: colors.textPrimary,
-  },
-  // Eleven rows with a description line each overflow the popover on a
-  // small screen. The list scrolls; the MAP STYLE control above it and the
-  // bulk action stay pinned, so the two things a driver reaches for most
-  // never scroll out of view.
-  filtersScroll: {
-    maxHeight: spacing.spacingXxxl * 6, // 288
-  },
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.spacingMd,
-    paddingVertical: spacing.spacingSm,
-  },
-  filterLabelBox: {
-    flex: 1,
-  },
-  filterLabel: {
-    ...textStyle("body"),
-    color: colors.textPrimary,
-  },
-  filterDescription: {
-    ...textStyle("caption"),
-    color: colors.textSecondary,
-  },
-  filterCheck: {
-    width: spacing.spacingXl,
-    height: spacing.spacingXl,
-    borderRadius: radius.sharp,
-    borderWidth: borderWidth.hairline,
-    borderColor: colors.hairline,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  filterCheckOn: {
-    backgroundColor: colors.textPrimary,
-    borderColor: colors.textPrimary,
   },
   // Utility surface: a segmented control is a plain rectangle.
   mapStyleToggle: {

@@ -20,7 +20,6 @@ import { RoutesProvider } from "@/hooks/useRoutesStore";
 import { PlatinumProvider } from "@/hooks/usePlatinumStore";
 import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
 import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
-import { MapFiltersContext } from "@/hooks/useMapFilters";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 import { useAppFonts } from "@/hooks/useAppFonts";
@@ -45,7 +44,6 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="signup" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="routes" options={{ headerShown: false }} />
-      <Stack.Screen name="nearby-places" options={{ headerShown: false }} />
       <Stack.Screen name="route/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="trip/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="ranks" options={{ headerShown: false }} />
@@ -119,15 +117,8 @@ export default function RootLayout() {
                                   <ActiveCarProvider>
                                     <SavedPlacesProvider>
                                       <CosmeticsProvider>
-                                        {/* Map layer filters. No dependency
-                                            on any store above — it reads
-                                            AsyncStorage and nothing else —
-                                            so it sits at the bottom where
-                                            it is cheapest to mount. */}
-                                        <MapFiltersContext>
-                                          <RootLayoutNav />
-                                          <NotificationBanner />
-                                        </MapFiltersContext>
+                                        <RootLayoutNav />
+                                        <NotificationBanner />
                                       </CosmeticsProvider>
                                     </SavedPlacesProvider>
                                   </ActiveCarProvider>

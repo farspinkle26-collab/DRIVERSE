@@ -29,13 +29,11 @@ import {
   Calendar,
   Car,
   ChevronRight,
-  Coffee,
   Route as RouteIcon,
   Share2,
   Swords,
   Target,
   Users,
-  Wrench,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useQuests } from "@/hooks/useQuestStore";
@@ -109,20 +107,6 @@ const FEATURES: Feature[] = [
     subtitle: "Meets & rallies",
     icon: Calendar,
     route: "/community?tab=events",
-  },
-  {
-    id: "cafe",
-    title: "Cafés",
-    subtitle: "Pit stops",
-    icon: Coffee,
-    route: "/nearby-places?type=cafe",
-  },
-  {
-    id: "workshop",
-    title: "Workshops",
-    subtitle: "Tuning & repairs",
-    icon: Wrench,
-    route: "/nearby-places?type=workshop",
   },
   {
     id: "garage",
