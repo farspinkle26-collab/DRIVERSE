@@ -24,8 +24,35 @@ export interface NormalizedPlace {
   source: "osm" | "user";
 }
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+/**
+ * Overpass endpoints, tried in order.
+ *
+ * The main instance limits **concurrent queries per IP** (two, by default)
+ * and answers anything over that with 429 immediately rather than queueing
+ * it. Every edge-function invocation leaves Supabase from the same egress
+ * IP, so a driver with several categories ticked is competing with themself
+ * — and with every other driver on the same Supabase region. The client
+ * windows its requests (`lib/placesApi.ts`), which is the main fix; this list
+ * plus the retry below cover what still slips through.
+ *
+ * kumi.systems is a public mirror running the same API and the same data,
+ * maintained for exactly this purpose.
+ */
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 const OVERPASS_TIMEOUT_MS = 12_000;
+/** Attempts per endpoint before moving to the next one. */
+const OVERPASS_ATTEMPTS_PER_ENDPOINT = 2;
+const OVERPASS_RETRY_DELAY_MS = 700;
+
+/** Statuses worth trying again: rate limit, gateway, and Overpass's own 504. */
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 504 || status >= 500;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Category -> one or more OSM tags, OR'd together in the query.
 //
@@ -99,20 +126,12 @@ export class OverpassError extends Error {
   }
 }
 
-/** Queries Overpass for a category around a point. Throws OverpassError on timeout/failure. */
-export async function fetchFromOverpass(
-  category: PlaceCategory,
-  lat: number,
-  lng: number,
-  radiusMeters: number
-): Promise<NormalizedPlace[]> {
-  const query = buildOverpassQuery(category, lat, lng, radiusMeters);
+/** One POST to one endpoint, with its own abort timer. */
+async function postQuery(endpoint: string, query: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
-
-  let response: Response;
   try {
-    response = await fetch(OVERPASS_URL, {
+    return await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: query,
@@ -126,9 +145,56 @@ export async function fetchFromOverpass(
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  if (!response.ok) {
-    throw new OverpassError(`Overpass returned ${response.status}`);
+/**
+ * Queries Overpass for a category around a point, retrying a rate-limited or
+ * failing instance before falling through to the mirror. Throws OverpassError
+ * once every endpoint has been exhausted.
+ *
+ * A 429 here is not "there are no places", it is "ask again in a moment" —
+ * and the previous version turned it straight into a 502 the client rendered
+ * as a dead category. Retrying is the whole difference for a request that was
+ * only ever refused for arriving alongside its eight siblings.
+ */
+export async function fetchFromOverpass(
+  category: PlaceCategory,
+  lat: number,
+  lng: number,
+  radiusMeters: number
+): Promise<NormalizedPlace[]> {
+  const query = buildOverpassQuery(category, lat, lng, radiusMeters);
+
+  let response: Response | null = null;
+  let lastError: OverpassError | null = null;
+
+  outer: for (const endpoint of OVERPASS_ENDPOINTS) {
+    for (let attempt = 0; attempt < OVERPASS_ATTEMPTS_PER_ENDPOINT; attempt++) {
+      if (attempt > 0) await sleep(OVERPASS_RETRY_DELAY_MS * attempt);
+
+      let attempted: Response;
+      try {
+        attempted = await postQuery(endpoint, query);
+      } catch (error) {
+        lastError = error instanceof OverpassError ? error : new OverpassError(String(error));
+        continue;
+      }
+
+      if (attempted.ok) {
+        response = attempted;
+        break outer;
+      }
+
+      // Drain the body so the connection can be reused rather than leaked.
+      await attempted.body?.cancel().catch(() => {});
+      lastError = new OverpassError(`Overpass (${endpoint}) returned ${attempted.status}`);
+      console.warn(`[overpass] ${category}: ${lastError.message}`);
+      if (!isRetryableStatus(attempted.status)) break;
+    }
+  }
+
+  if (!response) {
+    throw lastError ?? new OverpassError("Overpass request failed");
   }
 
   let data: { elements?: unknown[] };

@@ -119,6 +119,21 @@ either. Per-category marker colours live in
 because they reverse the "category is shape, state is colour" rule that
 `expo/MAP_SCREEN_REFERENCE.md` §2 established — read that file's header
 before using one. Clustering is `expo/lib/mapClustering.ts` (grid-based,
-per-category), because `react-native-maps` has none of its own. Full detail,
-including what is still unverified on device, in
+per-category), because `react-native-maps` has none of its own.
+
+Two rules the first device pass established the hard way, both in
+`expo/MAP_MARKER_REFERENCE.md` §10:
+
+- **POIs are fetched for the area on screen**, bounded by a radius and
+  refetched when the map centre moves. Both sources obey this — landmarks
+  (Mapbox geocoding, `types=poi` + a hard radius, because `proximity` only
+  *ranks*) and OSM places (`expo/lib/placesApi.ts`, windowed three at a time
+  through `expo/lib/concurrency.ts` because Overpass refuses concurrent
+  queries per IP rather than queueing them).
+- **No marker sets `tracksViewChanges` itself** — every custom marker goes
+  through `expo/components/SettledMarker.tsx`. A constant `false` freezes
+  Android's marker bitmap before the SVG inside it has drawn, leaving a
+  marker that is present, tappable and blank.
+
+Full detail, including what is still unverified on device, in
 `expo/MAP_MARKER_REFERENCE.md`.

@@ -204,7 +204,12 @@ input/output shape as a `ShapeSource` cluster.
 
 ## 7. Known gaps
 
-**Not verified on a device.** This is the significant one. The brief's
+**Not verified on a device.** This is the significant one — and when it was
+finally run, all four of the bullets below turned out to be blocked behind
+three bugs that emptied the layer entirely. **See §10.** The rest of this
+section is left as written, because the bullets it lists are still open.
+
+The brief's
 acceptance test — toggle each category off, screenshot, confirm only that
 category vanished — has been automated at the state layer but **not run on
 hardware**. `react-native-maps` has no web renderer in this build (the same
@@ -249,6 +254,14 @@ Everything in `MAP_SCREEN_REFERENCE.md` §9 still applies, plus:
 16. A hidden category should cost no network.
 17. Category colour is an experiment quarantined in one file. If you find
     yourself importing it outside the map surface, stop.
+18. **No marker sets `tracksViewChanges` itself.** Every custom marker goes
+    through `components/SettledMarker.tsx`. A constant `false` freezes the
+    Android bitmap before the SVG inside it has drawn, and the marker stays
+    blank for its whole life — see §10c.
+19. **Nothing asks a POI provider for "everything, nationwide".** POIs are
+    fetched for the area on screen, bounded by a radius, and refetched when
+    the map moves. A geocoder proximity hint is a ranking preference, not a
+    filter — see §10a.
 
 ---
 
@@ -269,3 +282,97 @@ unconditionally once `filtersReady`, exactly like the landmark layer always
 was — gated only by `isLayerVisible`/`activeCategories`, never by a second
 open/closed flag. Long-press-to-submit and the submit-place FAB are likewise
 no longer conditioned on a "layer open" state.
+
+---
+
+## 10. The device pass: no custom markers on screen at all
+
+§7 called the device pass the significant gap. It happened, on an Android
+handset in Kalibata, Jakarta, and the answer was worse than "the ten hues are
+hard to tell apart": **not one custom marker drew.** Google's own baked-in POI
+labels were the only things on the tiles, the console carried
+`fetchNearbyPlaces failed: FunctionsHttpError`, and the live feed was offering
+a "nearest parking" **724 km away**.
+
+Three independent faults, each of which alone empties the layer. None of them
+is Expo Go — `react-native-maps`, `react-native-svg` and `expo-location` are
+all in the Expo Go runtime, and `app.json` carries a Google Maps key for both
+platforms. The same build fails the same way in a dev client.
+
+### 10a. The landmark layer never looked where the driver was
+
+`map.tsx` walked a hardcoded twenty-city `INDONESIAN_CITIES` list on first GPS
+fix, ran nine geocoder queries per city, and kept `.slice(0, 200)`. Nine
+categories at `limit=10` is up to ninety results *per city*, so the cap was
+spent inside the first two or three cities, and nothing ever refetched for
+where the driver actually was.
+
+Worse, the queries were wrong in kind. Mapbox Geocoding v5 is a **name**
+matcher; `proximity` re-ranks results, it does not restrict them, and a fuzzy
+name hit always beats returning nothing. Querying `"parking"` near Jakarta is
+how *Paring Raya* — a street 724 km away, one letter off — became the map's
+nearest car park.
+
+Now: one fetch centred on the driver, refetched when the map centre moves more
+than `LANDMARK_REFETCH_METERS`, with `types=poi` so the geocoder answers with
+POIs instead of streets and regions, and a hard `maxDistanceMeters` radius in
+`searchPlaces` so a name match in another province can never reach a marker.
+The radius is the load-bearing part: `types=poi` narrows the *class* of
+answer, only the radius bounds *where* it can be.
+
+### 10b. Nine parallel Overpass queries, from one IP
+
+`fetchNearbyPlacesMany` fired every ticked category at once, on the reasoning
+that the wall-clock cost is then one round trip however many boxes are ticked.
+That held at four categories and broke at nine. The bottleneck is not the
+client: each request becomes an edge-function invocation making its own
+Overpass query, all leaving Supabase from **one egress IP**, and
+`overpass-api.de` refuses anything past its small per-IP slot count with an
+immediate **429** rather than queueing it. Past two or three, extra
+parallelism converts into failures, not speed — which surfaced as
+`Edge Function returned a non-2xx status code` for whichever categories lost
+the race.
+
+Fixed at both ends:
+
+- **Client** (`lib/placesApi.ts`) windows the requests through
+  `mapWithConcurrency` (`lib/concurrency.ts`, pure and unit-tested) at three
+  at a time, and retries once on 429/5xx. It also reads the real status off
+  `error.context`, so the log now says *which* failure it was — 429, 502, 400
+  and 404 all need different fixes and were previously indistinguishable.
+- **Server** (`_shared/overpass.ts`) retries a retryable status twice per
+  endpoint and falls through to the kumi.systems mirror. A 429 is "ask again
+  in a moment", not "there are no places here", and turning it straight into a
+  502 is what made a ticked category read as a dead feature.
+
+A malformed request (4xx that is not 429) is *not* retried at either end —
+it fails the same way at every mirror, and retrying only spends the driver's
+time to fail four times instead of once.
+
+### 10c. `tracksViewChanges={false}` froze the marker bitmap before it drew
+
+This one bites only once the other two are fixed, and it is the reason to
+distrust "no markers" as a symptom: the markers would have been present,
+tappable and blank.
+
+Android does not render a custom marker's React view on the map — it
+rasterises the view into a bitmap and draws that. `PlacesMarkers` passed
+`tracksViewChanges={false}` as a **constant**, which freezes that bitmap on
+the first frame: before `react-native-svg` has painted the glyph and before
+the name/distance text has laid out. Tracking never turns back on, so the
+empty snapshot is permanent. It is D-5's "icons cropped to half size" in its
+worst form.
+
+`SettledMarker` — the wrapper `map.tsx` already used for landmark and driver
+markers — has always handled this: track until the content is `ready` and
+`settleKey` has held still for 600 ms, then freeze. It now lives in
+`components/SettledMarker.tsx` and **both** layers use it. Two marker
+wrappers with two different freeze policies is precisely what left one layer
+blank while the other was fine.
+
+### What this changes about §7
+
+The colour experiment is still unjudged — nothing was legible enough on
+screen to have an opinion about ten hues. Per-category vs global clustering
+and marker bitmap bounds with the two-line label are likewise still open. The
+device pass has to be re-run now that there is something to look at.

@@ -44,8 +44,8 @@ import {
   View,
   ViewStyle,
 } from "react-native";
-import { Marker } from "react-native-maps";
 import { Bookmark, Camera, Plus, X } from "lucide-react-native";
+import { SettledMarker } from "@/components/SettledMarker";
 import * as ImagePickerExpo from "expo-image-picker";
 import {
   chipContentColor,
@@ -225,17 +225,17 @@ export function PlacesMarkers({
 
         if (isCluster(cluster)) {
           return (
-            <Marker
+            <SettledMarker
               key={cluster.id}
               coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
               onPress={() => onSelectCluster?.(cluster)}
-              tracksViewChanges={false}
+              settleKey={`${category}-${cluster.count}`}
               accessibilityLabel={`${cluster.count} ${PLACE_CATEGORY_LABELS[category]} here. Tap to zoom in.`}
             >
               <View style={styles.markerBox} collapsable={false}>
                 <ClusterBadge count={cluster.count} tint={tint} />
               </View>
-            </Marker>
+            </SettledMarker>
           );
         }
 
@@ -244,15 +244,21 @@ export function PlacesMarkers({
         const isSelected = selectedId === place.id;
         const distance = origin ? metresBetween(origin, place) : null;
 
+        const distanceLabel = distance != null ? formatDistanceLabel(distance) : null;
+
         return (
-          <Marker
+          <SettledMarker
             key={place.id}
             coordinate={{ latitude: place.lat, longitude: place.lng }}
             onPress={() => onSelect(place)}
-            tracksViewChanges={false}
+            // Everything that changes how this marker looks. A constant
+            // `tracksViewChanges={false}` used to sit here, which froze the
+            // Android bitmap before the SVG glyph had drawn — see
+            // `SettledMarker`'s header.
+            settleKey={`${place.id}-${isSelected}-${place.name}-${distanceLabel ?? ""}`}
             accessibilityLabel={`${place.name}, ${
               PLACE_CATEGORY_LABELS[place.category]
-            }${distance != null ? `, ${formatDistanceLabel(distance)} away` : ""}`}
+            }${distanceLabel != null ? `, ${distanceLabel} away` : ""}`}
           >
             <View style={styles.markerBox} collapsable={false}>
               <CutCornerSurface
@@ -286,11 +292,11 @@ export function PlacesMarkers({
               <Text style={styles.markerName} numberOfLines={1}>
                 {place.name}
               </Text>
-              {distance != null ? (
-                <Text style={styles.markerDistance}>{formatDistanceLabel(distance)}</Text>
+              {distanceLabel != null ? (
+                <Text style={styles.markerDistance}>{distanceLabel}</Text>
               ) : null}
             </View>
-          </Marker>
+          </SettledMarker>
         );
       })}
     </>

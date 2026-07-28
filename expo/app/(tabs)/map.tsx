@@ -47,6 +47,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import { SettledMarker } from "@/components/SettledMarker";
 import { PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import { usePlaces } from "@/hooks/usePlaces";
@@ -166,29 +167,37 @@ import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// --- Major Indonesian cities for nationwide search ---
-const INDONESIAN_CITIES = [
-  { name: "Jakarta", lat: -6.2088, lng: 106.8456 },
-  { name: "Bandung", lat: -6.9175, lng: 107.6191 },
-  { name: "Surabaya", lat: -7.2575, lng: 112.7521 },
-  { name: "Yogyakarta", lat: -7.7956, lng: 110.3695 },
-  { name: "Medan", lat: 3.5952, lng: 98.6722 },
-  { name: "Semarang", lat: -6.9932, lng: 110.4203 },
-  { name: "Denpasar", lat: -8.6705, lng: 115.2126 },
-  { name: "Makassar", lat: -5.1477, lng: 119.4327 },
-  { name: "Palembang", lat: -2.9761, lng: 104.7754 },
-  { name: "Batam", lat: 1.1301, lng: 104.0527 },
-  { name: "Balikpapan", lat: -1.2379, lng: 116.8529 },
-  { name: "Manado", lat: 1.4748, lng: 124.8421 },
-  { name: "Pontianak", lat: -0.0263, lng: 109.3425 },
-  { name: "Banjarmasin", lat: -3.3186, lng: 114.5944 },
-  { name: "Lombok", lat: -8.5833, lng: 116.1067 },
-  { name: "Malang", lat: -7.9839, lng: 112.6214 },
-  { name: "Padang", lat: -0.9471, lng: 100.4172 },
-  { name: "Pekanbaru", lat: 0.5071, lng: 101.4478 },
-  { name: "Ambon", lat: -3.6954, lng: 128.1814 },
-  { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
-];
+/**
+ * Landmarks are fetched around the driver, not preloaded nationwide.
+ *
+ * WHAT THIS REPLACED, AND WHY
+ *   This screen used to walk a hardcoded list of twenty Indonesian cities on
+ *   first GPS fix, run nine geocoder queries per city, and keep the first 200
+ *   results — a cap that nine categories × twenty cities blows through inside
+ *   the first two or three cities. Two things went wrong with that:
+ *
+ *   1. The 200 kept were the ones the *list* happened to reach first, not the
+ *      ones near the driver, and nothing ever refetched for where the driver
+ *      actually was. Drive anywhere outside those first cities and the
+ *      landmark layer was empty for the rest of the session.
+ *   2. Mapbox's geocoder matches names, not categories, and `proximity` only
+ *      re-ranks. Querying "parking" returned *Paring Raya* — a street 724 km
+ *      away, one letter off — and it outranked nothing because there was
+ *      nothing else to rank it against.
+ *
+ *   The result on screen was a map with no POI markers on it at all and a
+ *   live feed offering the driver a "nearest parking" 724 km away.
+ *
+ *   Now: one fetch centred on the driver, `types=poi` so the geocoder answers
+ *   with POIs instead of streets and regions, and a hard radius so a fuzzy
+ *   name match in another province can never land on the map.
+ */
+/** How far out landmarks are pulled from the current centre. */
+const LANDMARK_RADIUS_METERS = 15_000;
+/** How far the map centre must move before landmarks are refetched. */
+const LANDMARK_REFETCH_METERS = 6_000;
+/** Pan settling time before a landmark refetch fires. */
+const LANDMARK_REFETCH_DEBOUNCE_MS = 800;
 
 /**
  * Landmarks and Places used to carry two different vocabularies for the
@@ -591,33 +600,10 @@ const CAT_GLYPHS = PLACE_CATEGORY_ICONS;
  */
 const PLAYER_RANK_RING_SIZE = 42;
 
-// ─── SettledMarker ───────────────────────────────────────
-// Android draws custom marker views by snapshotting them into a bitmap.
-// Turning tracksViewChanges off in the same frame the content finishes
-// (image onLoadEnd, text layout, size change on select/deselect) can freeze
-// the snapshot mid-paint, which shows up as icons cropped to half their
-// size. This wrapper keeps tracking on until `ready` is true AND a short
-// grace period passes with no appearance change (`settleKey`), then freezes
-// the bitmap for performance. Any settleKey/ready change re-arms tracking.
-const MARKER_SETTLE_MS = 600;
-type SettledMarkerProps = React.ComponentProps<typeof Marker> & {
-  settleKey: string;
-  ready?: boolean;
-};
-function SettledMarker({ settleKey, ready = true, children, ...markerProps }: SettledMarkerProps) {
-  const [tracking, setTracking] = useState(true);
-  useEffect(() => {
-    setTracking(true);
-    if (!ready) return;
-    const t = setTimeout(() => setTracking(false), MARKER_SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [settleKey, ready]);
-  return (
-    <Marker {...markerProps} tracksViewChanges={tracking}>
-      {children}
-    </Marker>
-  );
-}
+// `SettledMarker` moved to `components/SettledMarker.tsx` — the places layer
+// needs the same Android snapshot handling, and having two marker wrappers
+// with two different freeze policies is what left one of the layers blank.
+// See that file's header.
 
 /**
  * A list row in a bottom sheet: icon, Inter label, chevron. A utility
@@ -811,9 +797,14 @@ export default function MapScreen() {
   const [locating, setLocating] = useState(true);
   const [locError, setLocError] = useState<string | null>(null);
 
-  // Cafe state
+  // Landmark state (Mapbox POI geocoding, fetched around the driver)
   const [cafes, setCafes] = useState<CafePOI[]>([]);
   const [loadingCafes, setLoadingCafes] = useState(false);
+  /** Centre the current landmark set was fetched for. */
+  const landmarkCenterRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  /** Monotonic id so a superseded landmark fetch cannot overwrite a newer one. */
+  const landmarkFetchRef = useRef(0);
+  const landmarkDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass).
   // Always on — gated only by the Filters popover's per-category toggles, the
@@ -993,60 +984,85 @@ export default function MapScreen() {
   const onlinePulse = useRef(new Animated.Value(1)).current;
   const onlineSlide = useRef(new Animated.Value(0)).current;
 
-  // --- Fetch cafes from a specific city ---
-  const fetchCityCafes = useCallback(async (lat: number, lng: number, cityName: string): Promise<CafePOI[]> => {
-    if (!MAPBOX_ACCESS_TOKEN) return [];
-    const allResults: CafePOI[] = [];
-    const seen = new Set<string>();
-
-    for (const { category, query } of LANDMARK_CATEGORY_QUERIES) {
-      try {
-        const places = await searchPlaces(query, { latitude: lat, longitude: lng });
-        for (const place of places) {
-          if (seen.has(place.id)) continue;
-          seen.add(place.id);
-          allResults.push({
-            id: place.id,
-            name: place.name,
-            lat: place.latitude,
-            lng: place.longitude,
-            vicinity: place.fullAddress ?? cityName,
-            types: [],
-            category,
-          });
-        }
-      } catch {
-        // Skip failed category
-      }
-    }
-    return allResults;
-  }, []);
-
-  // --- Fetch cafes from ALL Indonesian cities ---
-  const fetchAllIndonesiaCafes = useCallback(async () => {
+  // --- Landmarks around a point (see LANDMARK_RADIUS_METERS' header) ---
+  //
+  // The nine category queries go out together and each is allowed to fail on
+  // its own: one geocoder hiccup should cost that category's markers, not the
+  // whole layer. `landmarkFetchRef` makes a superseded fetch a no-op, so a
+  // slow response from a region the driver has already left cannot land on
+  // top of a newer one.
+  const fetchLandmarksAround = useCallback(async (lat: number, lng: number) => {
     if (!MAPBOX_ACCESS_TOKEN) return;
+    const fetchId = ++landmarkFetchRef.current;
+    landmarkCenterRef.current = { latitude: lat, longitude: lng };
     setLoadingCafes(true);
 
-    const seen = new Set<string>();
-    const allResults: CafePOI[] = [];
-
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < INDONESIAN_CITIES.length; i += BATCH_SIZE) {
-      const batch = INDONESIAN_CITIES.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map((city) => fetchCityCafes(city.lat, city.lng, city.name));
-      const batchResults = await Promise.all(batchPromises);
-      for (const results of batchResults) {
-        for (const cafe of results) {
-          if (seen.has(cafe.id)) continue;
-          seen.add(cafe.id);
-          allResults.push(cafe);
+    const proximity = { latitude: lat, longitude: lng };
+    const perCategory = await Promise.all(
+      LANDMARK_CATEGORY_QUERIES.map(async ({ category, query }) => {
+        try {
+          const places = await searchPlaces(query, proximity, "id", {
+            types: "poi",
+            maxDistanceMeters: LANDMARK_RADIUS_METERS,
+          });
+          return { category, places };
+        } catch {
+          return { category, places: [] };
         }
+      })
+    );
+
+    // A newer fetch owns the state — including `loadingCafes`, which that
+    // fetch will clear when it finishes.
+    if (fetchId !== landmarkFetchRef.current) return;
+
+    const seen = new Set<string>();
+    const results: CafePOI[] = [];
+    for (const { category, places } of perCategory) {
+      for (const place of places) {
+        if (seen.has(place.id)) continue;
+        seen.add(place.id);
+        results.push({
+          id: place.id,
+          name: place.name,
+          lat: place.latitude,
+          lng: place.longitude,
+          vicinity: place.fullAddress,
+          types: [],
+          category,
+        });
       }
     }
 
-    setCafes(allResults.slice(0, 200));
+    setCafes(results);
     setLoadingCafes(false);
-  }, [fetchCityCafes]);
+  }, []);
+
+  /**
+   * Refetch landmarks when the map centre has moved far enough to be a
+   * different area, debounced so a pan gesture costs one round of queries
+   * rather than one per frame.
+   */
+  const maybeRefetchLandmarks = useCallback(
+    (lat: number, lng: number) => {
+      const from = landmarkCenterRef.current;
+      if (from && haversineMeters(from, { latitude: lat, longitude: lng }) < LANDMARK_REFETCH_METERS) {
+        return;
+      }
+      if (landmarkDebounceRef.current) clearTimeout(landmarkDebounceRef.current);
+      landmarkDebounceRef.current = setTimeout(() => {
+        fetchLandmarksAround(lat, lng);
+      }, LANDMARK_REFETCH_DEBOUNCE_MS);
+    },
+    [fetchLandmarksAround]
+  );
+
+  useEffect(
+    () => () => {
+      if (landmarkDebounceRef.current) clearTimeout(landmarkDebounceRef.current);
+    },
+    []
+  );
 
   // --- Fetch directions from user location to destination ---
   const fetchDirections = useCallback(async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }) => {
@@ -1159,8 +1175,8 @@ export default function MapScreen() {
 
         Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
 
-        // Load ALL Indonesia cafes
-        fetchAllIndonesiaCafes();
+        // Landmarks for where the driver actually is
+        fetchLandmarksAround(coords.latitude, coords.longitude);
 
         // Watch GPS position for real-time tracking
         sub = await Location.watchPositionAsync(
@@ -1653,11 +1669,15 @@ export default function MapScreen() {
       // `latitudeDelta` is what decides whether markers cluster, and the
       // landmark layer is on screen the whole time.
       setMapRegion(nextRegion);
+      // Landmarks follow the map, not just the first GPS fix — panning to
+      // another city has to bring that city's POIs with it. Guarded by
+      // distance inside, so an idle nudge costs nothing.
+      maybeRefetchLandmarks(nextRegion.latitude, nextRegion.longitude);
       if (!filtersReady) return;
       places.fetchForRegion(nextRegion.latitude, nextRegion.longitude, activeCategories);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [categoryKey, filtersReady]
+    [categoryKey, filtersReady, maybeRefetchLandmarks]
   );
 
   /**
@@ -2692,7 +2712,7 @@ export default function MapScreen() {
         <Animated.View style={[styles.cafeLoading, { top: insets.top + LANDMARK_STATUS_OFFSET, opacity: fadeIn }]}>
           <View style={styles.statusPill}>
             <ActivityIndicator size="small" color={colors.racingRed} />
-            <Text style={styles.statusPillText}>Loading landmarks across Indonesia…</Text>
+            <Text style={styles.statusPillText}>Loading landmarks nearby…</Text>
           </View>
         </Animated.View>
       )}
@@ -3431,8 +3451,8 @@ export default function MapScreen() {
           ) : searchQuery.trim().length > 0 ? (
             <View style={styles.searchResults}>
               <Text style={styles.searchEmpty}>
-                No landmark here matches “{searchQuery.trim()}”. Landmarks load per city — pan the map to the
-                area you mean, then search again.
+                No landmark here matches “{searchQuery.trim()}”. Landmarks load for the area you're looking at —
+                pan the map to the area you mean, then search again.
               </Text>
             </View>
           ) : null}
