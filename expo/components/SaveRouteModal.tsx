@@ -69,6 +69,7 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
 import { useRoutes, ActivityType, RouteVisibility } from "@/hooks/useRoutesStore";
 import { encodePolyline, simplifyPath, LatLng } from "@/lib/polyline";
 import {
@@ -91,6 +92,11 @@ interface SaveRouteModalProps {
   originName?: string;
   destinationName?: string;
   carId?: string | null;
+  /** The `trips` row written automatically when the drive ended, so the
+   * name entered here can be written back onto it — that row is otherwise
+   * never named, even though the Drive Hub and trip detail screen both
+   * prefer it over the destination fallback. */
+  tripId?: string | null;
 }
 
 type IconComponent = React.FC<{ size: number; color: string; strokeWidth?: number }>;
@@ -175,6 +181,7 @@ export default function SaveRouteModal({
   originName,
   destinationName,
   carId,
+  tripId,
 }: SaveRouteModalProps) {
   const insets = useSafeAreaInsets();
   const { saveRoute, myRoutes, savedRouteLimit } = useRoutes();
@@ -253,6 +260,12 @@ export default function SaveRouteModal({
         setError(saveError);
         return;
       }
+      // Best-effort: the route saved fine either way, so a failure here
+      // (or no tripId, on drives that failed their automatic trips write)
+      // must not block the sheet from closing.
+      if (tripId) {
+        supabase.from("trips").update({ name: title.trim() }).eq("id", tripId).then();
+      }
       if (id) onSaved?.(id);
       onClose();
     } catch (err) {
@@ -278,6 +291,7 @@ export default function SaveRouteModal({
     xpEarned,
     visibility,
     carId,
+    tripId,
     onSaved,
     onClose,
   ]);
