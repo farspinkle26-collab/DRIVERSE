@@ -86,7 +86,7 @@ because it has five distinct modes:
 | **Drop-pin armed** | the hint's border and reticle + DRIVE's active outline — the same action, twice |
 | **Route ready** | the route polyline + START NAVIGATION |
 | **Recording** | the recorded trace + END DRIVE + the live turn instruction + the speed-limit sign's regulatory ring |
-| **Trip summary** | SAVE & SHARE ROUTE |
+| **Trip summary** | SAVE (SHARE beside it is `ghost`) |
 
 **Rule: one red action, plus red for live data (the route, the trace, the
 current instruction), plus one small live-state mark.** Everything else is
@@ -227,6 +227,18 @@ reverted deliberately rather than discovered.
 5. **`PlaceDetailSheet` takes a `bottomInset`** so it clears the floating
    tab bar. It was rendering underneath it.
 
+A sixth changed later, in the save-route pass — it is a behaviour change,
+not a layout collision, so it is listed separately:
+
+6. **SHARE on the trip summary is no longer gated on SAVE.** It was
+   `disabled={savedRouteId == null}`, which tied the growth loop to a
+   database write: any save failure — offline, expired session, route
+   library full — silently took sharing away too, and the two failures
+   looked identical from the driver's seat. `ShareCardModal` renders from
+   the in-memory trip and never needed the row. SAVE still flips to a
+   locked-in "Saved" state, so which of the two has happened is still
+   visible. See `SAVE_ROUTE_REFERENCE.md`.
+
 Nothing else moved. Verified by diff: `startRecording`, `stopRecording`,
 `togglePause`, `captureDrivePhoto`, `handleMapPress`, `handleMapLongPress`,
 `handleNavigate`, `clearRoute`, `fetchDirections`, the mount-once GPS
@@ -335,10 +347,6 @@ through a throwaway build that forces the state open, but **in the shipping
 build no user can reach it.** Restoring the button is a one-line change; it
 was not made here because removing it was a deliberate product decision two
 commits ago, not an oversight to fix inside a re-skin.
-
-**`components/SaveRouteModal.tsx` is still on the legacy styling.** It is
-launched by "Save & Share Route" on the trip summary, so there is a visible
-style break at that boundary. 92 values; its own pass.
 
 **The map tiles could not be verified visually.** `react-native-maps` has no
 web renderer in this build, so every screenshot shows the chrome over a

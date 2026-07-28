@@ -133,6 +133,7 @@ import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import ShareCardModal from "@/components/ShareCardModal";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
+import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeDraft";
 import { calculateDriveXP } from "@/lib/tripStats";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
@@ -846,8 +847,11 @@ export default function MapScreen() {
   // Save & Share Route modal
   const [showSaveRoute, setShowSaveRoute] = useState(false);
   // Id of the just-recorded drive once it has been saved to the profile.
-  // Drives the Save button's "Saved" state and unlocks the Share button.
+  // Drives the Save button's "Saved" state. Sharing does not depend on it.
   const [savedRouteId, setSavedRouteId] = useState<string | null>(null);
+  // Why the automatic `trips` write failed, if it did. Surfaced on the trip
+  // summary rather than swallowed into the console.
+  const [tripSaveError, setTripSaveError] = useState<string | null>(null);
   // Trip share-card sheet (only reachable after the drive is saved).
   const [showShareTrip, setShowShareTrip] = useState(false);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1682,6 +1686,7 @@ export default function MapScreen() {
     setRecordedPath([]);
     setXpEarned(null);
     setSavedRouteId(null);
+    setTripSaveError(null);
     setWasFaster(false);
     setLeveledUp(false);
     setCurrentSpeed(0);
@@ -1758,6 +1763,7 @@ export default function MapScreen() {
         : "Unknown";
       const dest = destCoords();
       const estSec = estimatedDurationRef.current ?? 0;
+      setTripSaveError(null);
       supabase.from("trips").insert({
         user_id: user.id,
         origin_name: "Current Location",
@@ -1766,19 +1772,29 @@ export default function MapScreen() {
         destination_name: destName,
         destination_lat: dest?.latitude ?? 0,
         destination_lng: dest?.longitude ?? 0,
-        distance_km: tripDistance / 1000,
-        duration_seconds: Math.round(actualDurationSec),
-        avg_speed_kmh: avgSpeed,
-        top_speed_kmh: tripTopSpeed,
-        estimated_duration_seconds: Math.round(estSec),
-        xp_earned: earned,
+        // The recorded trace, so the Drive Hub and the trip detail screen can
+        // draw the drive. It was being dropped on the floor here, which is
+        // why saved trips came back as stat rows with no map.
+        route_polyline:
+          recordedPath.length > 1 ? encodePolyline(simplifyPath(recordedPath, 400)) : "",
+        distance_km: sanitizeMetric(tripDistance / 1000),
+        duration_seconds: sanitizeCount(actualDurationSec),
+        avg_speed_kmh: sanitizeMetric(avgSpeed),
+        top_speed_kmh: sanitizeMetric(tripTopSpeed),
+        estimated_duration_seconds: sanitizeCount(estSec),
+        xp_earned: sanitizeCount(earned),
         was_faster_than_estimation: faster,
         car_id: activeCar?.id ?? null,
         started_at: new Date(tripStartMs ?? now).toISOString(),
         completed_at: new Date(now).toISOString(),
-      }).then(({ error }) => {
-        if (error) console.error("Failed to save trip:", error);
-      });
+      }).then(
+        ({ error }) => {
+          // A failed trip write used to be console-only, so the driver was
+          // told the drive was recorded while nothing had been stored.
+          if (error) setTripSaveError(describeSaveFailure(error));
+        },
+        (err: unknown) => setTripSaveError(describeSaveFailure(err))
+      );
     }
 
     // Keep path visible after stopping
@@ -2917,6 +2933,7 @@ export default function MapScreen() {
                   setElapsedMs(0);
                   setXpEarned(null);
                   setSavedRouteId(null);
+                  setTripSaveError(null);
                   clearRoute();
                 }}
               >
@@ -2984,10 +3001,22 @@ export default function MapScreen() {
               </View>
             </View>
 
-            {/* Save first, then Share. The route must be stored to the
-                driver's profile before it can be shared, so the Save button
-                flips to a locked-in "Saved" state on success and only then
-                does the Share button come alive. */}
+            {tripSaveError && (
+              <Text style={styles.sheetErrorText} accessibilityLiveRegion="polite">
+                {tripSaveError}
+              </Text>
+            )}
+
+            {/* Save and Share are independent actions.
+                Share used to be disabled until `savedRouteId` was set, on the
+                reasoning that a drive should live on the profile before it
+                goes out. That coupled the growth loop to a database write:
+                any save failure — offline, session expired, route library
+                full — also took sharing away, and the driver had no way to
+                tell the two apart. The share card is rendered from the
+                in-memory trip, so it never needed the row. Share is now
+                always live; Save still flips to a locked-in "Saved" state so
+                the driver can see which of the two has happened. */}
             <View style={styles.sheetActions}>
               <CutCornerButton
                 title={savedRouteId ? "Saved" : "Save"}
@@ -3008,10 +3037,9 @@ export default function MapScreen() {
                 title="Share"
                 variant="ghost"
                 corners="topRight"
-                disabled={savedRouteId == null}
                 onPress={() => setShowShareTrip(true)}
                 style={styles.sheetPrimaryAction}
-                accessibilityLabel={savedRouteId ? "Share this drive" : "Save the route before sharing"}
+                accessibilityLabel="Share this drive"
                 icon={<Share2 size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
               />
             </View>
@@ -5459,6 +5487,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "stretch",
     gap: spacing.spacingMd,
+  },
+  sheetErrorText: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
   },
   sheetPrimaryAction: {
     flex: 1,
