@@ -168,6 +168,56 @@ describe("fetchFromOverpass", () => {
 
     await expect(fetchFromOverpass("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(OverpassError);
   });
+
+  // A 429 is Overpass saying "you have too many queries open right now", not
+  // "there is nothing here". Turning it straight into a 502 is what made a
+  // ticked category read on the map as a dead feature.
+  it("retries a 429 and returns the places the retry got", async () => {
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls++;
+      if (calls === 1) return new Response("rate limited", { status: 429 });
+      return new Response(
+        JSON.stringify({ elements: [{ id: 7, lat: JAKARTA.lat, lon: JAKARTA.lng, tags: { name: "SPBU 31" } }] }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch;
+
+    const places = await fetchFromOverpass("gas_station", JAKARTA.lat, JAKARTA.lng, 2000);
+    expect(calls).toBe(2);
+    expect(places).toHaveLength(1);
+    expect(places[0].name).toBe("SPBU 31");
+  });
+
+  it("falls through to the mirror when the primary instance stays down", async () => {
+    const endpoints: string[] = [];
+    globalThis.fetch = mock(async (input: string) => {
+      endpoints.push(String(input));
+      if (String(input).includes("overpass-api.de")) {
+        return new Response("service unavailable", { status: 503 });
+      }
+      return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const places = await fetchFromOverpass("parking", 0, 0, 2000);
+    expect(places).toEqual([]);
+    expect(endpoints.some((e) => e.includes("overpass-api.de"))).toBe(true);
+    expect(endpoints.some((e) => e.includes("kumi.systems"))).toBe(true);
+  });
+
+  // A malformed query is malformed at every mirror. Retrying it just spends
+  // the driver's time to fail four times instead of once.
+  it("does not retry a 400 on the same endpoint", async () => {
+    const endpoints: string[] = [];
+    globalThis.fetch = mock(async (input: string) => {
+      endpoints.push(String(input));
+      return new Response("bad request", { status: 400 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchFromOverpass("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(OverpassError);
+    // One attempt per endpoint, no retry within an endpoint.
+    expect(endpoints).toHaveLength(2);
+  });
 });
 
 describe("mergePlaces", () => {

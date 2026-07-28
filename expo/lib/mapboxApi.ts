@@ -140,10 +140,45 @@ export interface PlaceSuggestion {
   category?: string;
 }
 
+export interface SearchPlacesOptions {
+  /**
+   * Mapbox `types` filter, e.g. `"poi"`. Left unset the geocoder answers
+   * with every feature class it has — country, region, place, locality,
+   * address — which is right for a driver typing a destination and wrong
+   * for anything trying to use this as a POI lookup. See
+   * `maxDistanceMeters` for why the two go together.
+   */
+  types?: string;
+  /** `limit` passed straight through. Mapbox caps this at 10. */
+  limit?: number;
+  /**
+   * Drop results further than this from `proximity`.
+   *
+   * The geocoder is a **name** matcher, not a category search: `proximity`
+   * only re-ranks, it does not restrict, and a fuzzy name hit always beats
+   * an empty answer. Searching "parking" near Jakarta is how the map ended
+   * up drawing *Paring Raya* — a street 724 km away whose name is one
+   * letter off. Nothing but a hard radius keeps that off a map of what is
+   * near you.
+   */
+  maxDistanceMeters?: number;
+}
+
+/** Metres between two coordinates (equirectangular; fine at city scale). */
+function approxMetresBetween(a: RoutePoint, b: RoutePoint): number {
+  const R = 6_371_000;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const meanLat = (((b.latitude + a.latitude) / 2) * Math.PI) / 180;
+  const x = dLng * Math.cos(meanLat);
+  return Math.sqrt(x * x + dLat * dLat) * R;
+}
+
 export async function searchPlaces(
   query: string,
   proximity?: RoutePoint | null,
-  language: string = "id"
+  language: string = "id",
+  options: SearchPlacesOptions = {}
 ): Promise<PlaceSuggestion[]> {
   if (!MAPBOX_ACCESS_TOKEN || !query.trim()) return [];
 
@@ -152,8 +187,11 @@ export async function searchPlaces(
     autocomplete: "true",
     country: "id",
     language,
-    limit: "10",
+    limit: String(options.limit ?? 10),
   });
+  if (options.types) {
+    params.set("types", options.types);
+  }
   if (proximity) {
     params.set("proximity", `${proximity.longitude},${proximity.latitude}`);
   }
@@ -165,14 +203,22 @@ export async function searchPlaces(
     const data = await response.json();
     if (!data.features) return [];
 
-    return data.features.map((feature: any) => ({
-      id: feature.id,
-      name: feature.text,
-      fullAddress: feature.place_name,
-      latitude: feature.center[1],
-      longitude: feature.center[0],
-      category: feature.place_type?.[0],
-    }));
+    const suggestions: PlaceSuggestion[] = data.features
+      .filter((feature: any) => Array.isArray(feature?.center) && feature.center.length === 2)
+      .map((feature: any) => ({
+        id: feature.id,
+        name: feature.text,
+        fullAddress: feature.place_name,
+        latitude: feature.center[1],
+        longitude: feature.center[0],
+        category: feature.place_type?.[0],
+      }));
+
+    if (proximity && options.maxDistanceMeters != null) {
+      const limit = options.maxDistanceMeters;
+      return suggestions.filter((s) => approxMetresBetween(proximity, s) <= limit);
+    }
+    return suggestions;
   } catch (error) {
     console.error("Mapbox search error:", error);
     return [];
