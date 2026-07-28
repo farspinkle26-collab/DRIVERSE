@@ -19,11 +19,35 @@ interface NotificationState {
   permissionGranted: boolean;
 }
 
-// Configure notification behavior for mobile
+// Configure notification behavior for mobile.
+//
+// LAUNCH SAFETY — the native foreground handler is registered from a mount
+// effect (`ensureNotificationHandler`), never here at module scope. Module
+// scope runs while Hermes is still evaluating the bundle, before the app's
+// first frame. A native TurboModule call that throws in that window raises an
+// Objective-C exception on `com.meta.react.turbomodulemanager.queue`, which no
+// JavaScript `try/catch` can catch — it aborts the process on launch. Loading
+// the module (a JS-only `require`) is cheap and safe here; touching the native
+// side is deferred until the tree has mounted.
 let Notifications: any = null;
 if (Platform.OS !== 'web') {
   try {
     Notifications = require('expo-notifications');
+  } catch (error) {
+    console.log('expo-notifications not available');
+  }
+}
+
+let notificationHandlerConfigured = false;
+
+/**
+ * Registers the foreground-presentation handler exactly once. Called from a
+ * mount effect rather than at import time — see the note above.
+ */
+function ensureNotificationHandler() {
+  if (notificationHandlerConfigured || !Notifications) return;
+  notificationHandlerConfigured = true;
+  try {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowBanner: true,
@@ -33,7 +57,7 @@ if (Platform.OS !== 'web') {
       }),
     });
   } catch (error) {
-    console.log('expo-notifications not available');
+    console.log('Failed to configure notification handler', error);
   }
 }
 
@@ -197,6 +221,11 @@ export const [NotificationContext, useNotifications] = createContextHook(() => {
   // Listen for notification responses (when user taps notification)
   useEffect(() => {
     if (Platform.OS !== 'web' && Notifications) {
+      // Register the foreground handler now that the tree has mounted, well
+      // clear of the bundle-evaluation window where a native throw would
+      // abort launch.
+      ensureNotificationHandler();
+
       const subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
         const data = response.notification.request.content.data;
         console.log('Notification tapped:', data);
