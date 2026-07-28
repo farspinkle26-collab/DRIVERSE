@@ -66,12 +66,8 @@ export interface StoreProduct {
   } | null;
 }
 
-/**
- * The billing periods Platinum is sold in. `lifetime` is a one-off,
- * non-consumable purchase rather than a subscription — it never renews and
- * never expires, which the UI has to say differently.
- */
-export type PlatinumPeriod = "monthly" | "yearly" | "lifetime";
+/** The billing periods Platinum is sold in. */
+export type PlatinumPeriod = "monthly" | "yearly";
 
 export interface PlatinumPackage {
   /** RevenueCat package identifier, passed back to `purchase()`. */
@@ -84,16 +80,10 @@ export interface PlatinumPackage {
 
 export interface EntitlementSnapshot {
   isPlatinum: boolean;
-  /** ISO date the current period ends. Always null for lifetime. */
+  /** ISO date the current period ends. */
   expiresAt: string | null;
   /** False once the driver cancels but before the period ends. */
   willRenew: boolean;
-  /**
-   * Granted by a non-expiring purchase. A lifetime holder also reports
-   * `willRenew: false`, so without this the UI would tell them their access
-   * is about to end.
-   */
-  isLifetime: boolean;
   /** RevenueCat's period type: NORMAL | INTRO | TRIAL | PREPAID. */
   periodType: string | null;
   /** Inside a free trial — worth saying out loud before the first charge. */
@@ -120,7 +110,6 @@ export const NO_ENTITLEMENT: EntitlementSnapshot = {
   isPlatinum: false,
   expiresAt: null,
   willRenew: false,
-  isLifetime: false,
   periodType: null,
   isTrial: false,
   productIdentifier: null,
@@ -143,7 +132,7 @@ export interface CustomerSummary {
   firstSeen: string | null;
   activeSubscriptions: string[];
   allPurchasedProductIdentifiers: string[];
-  /** Non-subscription purchases — this is where a lifetime unlock shows up. */
+  /** Non-subscription purchases. */
   nonSubscriptionProductIdentifiers: string[];
   latestExpirationDate: string | null;
   managementURL: string | null;
@@ -197,9 +186,8 @@ const ERROR_CODE = {
   OFFLINE_CONNECTION: "35",
 } as const;
 
-/** `PACKAGE_TYPE`, for mapping an offering's packages onto our three periods. */
+/** `PACKAGE_TYPE`, for mapping an offering's packages onto our two periods. */
 const PACKAGE_TYPE = {
-  LIFETIME: "LIFETIME",
   ANNUAL: "ANNUAL",
   MONTHLY: "MONTHLY",
 } as const;
@@ -450,10 +438,6 @@ function toSnapshot(customerInfo: unknown): EntitlementSnapshot {
     isPlatinum: true,
     expiresAt,
     willRenew: entitlement.willRenew ?? false,
-    // RevenueCat documents a null expiration as "lifetime access". It is the
-    // only signal distinguishing a one-off unlock from a cancelled subscription,
-    // both of which report willRenew: false.
-    isLifetime: expiresAt === null,
     periodType,
     isTrial: periodType?.toUpperCase() === "TRIAL",
     productIdentifier: entitlement.productIdentifier ?? null,
@@ -540,20 +524,18 @@ export function onEntitlementChange(
  * ------------------------------------------------------------------ */
 
 /**
- * RevenueCat's package types, normalised to our three periods.
+ * RevenueCat's package types, normalised to our two periods.
  *
  * `packageType` is authoritative — it is what the dashboard's Monthly /
- * Annual / Lifetime slots set. The identifier is only consulted for packages
+ * Annual slots set. The identifier is only consulted for packages
  * configured with a custom id, which is the documented escape hatch.
  */
 function periodOf(packageType: string, identifier: string): PlatinumPeriod | null {
   const type = packageType.toUpperCase();
-  if (type === PACKAGE_TYPE.LIFETIME) return "lifetime";
   if (type === PACKAGE_TYPE.ANNUAL) return "yearly";
   if (type === PACKAGE_TYPE.MONTHLY) return "monthly";
 
   const value = `${type} ${identifier}`.toUpperCase();
-  if (value.includes("LIFETIME") || value.includes("FOREVER")) return "lifetime";
   if (value.includes("ANNUAL") || value.includes("YEAR")) return "yearly";
   if (value.includes("MONTH")) return "monthly";
   return null;

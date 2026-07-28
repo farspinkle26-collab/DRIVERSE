@@ -9,7 +9,7 @@ file is the runbook.
 | SDK | `react-native-purchases` 10.4.x + `react-native-purchases-ui` 10.4.x |
 | Entitlement id | `platinum` |
 | Offering id | `platinum` |
-| Products | `monthly`, `yearly`, `lifetime` |
+| Products | `monthly`, `yearly` |
 | App code | `lib/purchases.ts`, `lib/purchasesUi.tsx`, `hooks/usePlatinumStore.ts`, `app/platinum.tsx`, `app/subscription.tsx` |
 
 ---
@@ -94,7 +94,6 @@ and code elsewhere:
 |---|---|---|---|
 | Monthly | `driverse_monthly_10` | Auto-renewable subscription | Subscription, monthly base plan |
 | Yearly | `driverse_yearly_100` | Auto-renewable subscription | Subscription, annual base plan |
-| Lifetime | *(none yet — not created in App Store Connect)* | **Non-consumable** | **One-time product** |
 
 As of the current App Store Connect setup, `driverse_yearly_100` and
 `driverse_monthly_10` exist and are both **Waiting for Review**, but neither
@@ -102,20 +101,11 @@ is attached to the `platinum` entitlement yet in the RevenueCat dashboard
 (Product catalog → Products shows an "Attach" action instead of an
 entitlement count for both). Do step 3.2.2 below before testing — a product
 with no entitlement attached will purchase successfully and grant nothing.
-There is no lifetime product on iOS yet; `showLifetime` in `app/platinum.tsx`
-already hides the lifetime option once the store answers with only
-monthly/yearly, so nothing else needs to change to ship without it.
 
 Put monthly and yearly in the **same subscription group** (iOS) / the same
 subscription (Android, two base plans). That is what makes upgrading from
 monthly to yearly a plan change rather than a second concurrent subscription,
 and it is what the Customer Center's "change plan" flow operates on.
-
-Lifetime is not a subscription. It never renews, has no expiry, and cannot be
-cancelled — which is why `EntitlementSnapshot.isLifetime` exists and why the
-UI says "Lifetime access" instead of "Ends at period close". A lifetime holder
-and a cancelled subscriber both report `willRenew: false`; only one of them is
-about to lose access.
 
 ### 3.2 RevenueCat dashboard
 
@@ -124,7 +114,7 @@ about to lose access.
 2. **Entitlements** — create `platinum`. Attach both iOS products
    (`driverse_yearly_100`, `driverse_monthly_10`) — from **Product catalog →
    Products**, click **Attach** on each row and select the `platinum`
-   entitlement. There is no lifetime product to attach yet.
+   entitlement.
 3. **Offerings** — create an offering with identifier `platinum` and mark it
    Current. Add packages using RevenueCat's reserved identifiers:
 
@@ -132,13 +122,12 @@ about to lose access.
    |---|---|---|
    | Monthly | `$rc_monthly` | `driverse_monthly_10` |
    | Annual | `$rc_annual` | `driverse_yearly_100` |
-   | Lifetime | `$rc_lifetime` | *(skip — no lifetime product yet; add when one exists)* |
 
    Use the reserved ids (`PLATINUM_PACKAGE_IDS` in `constants/platinum.ts`).
-   They make `packageType` come back as `MONTHLY` / `ANNUAL` / `LIFETIME`, so
-   `periodOf()` maps packages by type instead of pattern-matching a product
-   name. Custom identifiers still work — there is a fallback — but they are a
-   string match waiting to break.
+   They make `packageType` come back as `MONTHLY` / `ANNUAL`, so `periodOf()`
+   maps packages by type instead of pattern-matching a product name. Custom
+   identifiers still work — there is a fallback — but they are a string match
+   waiting to break.
 
 4. **Webhook** — deploy `supabase/functions/revenuecat-webhook`, set
    `REVENUECAT_WEBHOOK_SECRET`, and point RevenueCat's webhook at it with that
@@ -274,10 +263,9 @@ The full snapshot, when the UI needs more than a boolean:
 ```ts
 const { entitlement } = usePlatinum();
 
-entitlement.isLifetime              // non-expiring purchase
 entitlement.isTrial                 // inside a free trial, not yet charged
 entitlement.willRenew               // false once cancelled
-entitlement.expiresAt               // ISO, null for lifetime
+entitlement.expiresAt               // ISO
 entitlement.billingIssueDetectedAt  // failed charge; usually still in grace
 entitlement.productIdentifier
 entitlement.isSandbox
@@ -367,8 +355,6 @@ production; there is no separate code path. `entitlement.isSandbox` drives the
 ### Worth exercising explicitly
 
 - Buy monthly, then yearly — confirm it reads as a plan change, not two subs.
-- Buy lifetime — the subscription screen must say "Lifetime access" with no
-  date and no "manage at the store" link.
 - Cancel in the store — `willRenew` goes false while `isPlatinum` stays true
   until `expiresAt`. Access must not be revoked early.
 - Restore on a second device signed into the same Supabase account.
@@ -382,7 +368,7 @@ production; there is no separate code path. `entitlement.isSandbox` drives the
 - [ ] `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `_ANDROID_KEY` set in the release
       build's environment. A `test_` key is refused at runtime, but do not rely
       on that as the only check.
-- [ ] All three products **Approved** in both stores, and attached to the
+- [ ] Both products **Approved** in both stores, and attached to the
       `platinum` entitlement and the `platinum` offering.
 - [ ] The `platinum` offering is marked **Current**.
 - [ ] A paywall is attached to the offering, or the app's own screen is the

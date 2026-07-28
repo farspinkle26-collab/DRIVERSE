@@ -78,11 +78,10 @@ import {
 import { supabase } from "@/lib/supabase";
 
 /**
- * Bumped from `driveverse_platinum` when the snapshot gained lifetime, trial
- * and billing-issue fields. A cache entry written by the old shape would read
- * back with those undefined, which is falsy in the right direction for all of
- * them — but a lifetime holder briefly reading as "ends at period close" is
- * exactly the confusion this whole change exists to remove.
+ * Bumped from `driveverse_platinum` when the snapshot gained trial and
+ * billing-issue fields. A cache entry written by the old shape would read
+ * back with those undefined, which is falsy in the right direction for all
+ * of them.
  */
 const CACHE_KEY = "driveverse_platinum_v2";
 
@@ -105,8 +104,7 @@ async function readCache(userId: string): Promise<EntitlementSnapshot | null> {
     const cached = JSON.parse(raw) as CachedEntitlement;
     if (Date.now() - cached.checkedAt > CACHE_TTL_MS) return null;
     // An expiry the store already passed means the cache is describing a
-    // subscription that has since lapsed — don't trust it. A lifetime unlock
-    // has no expiry, so this check correctly never fires for one.
+    // subscription that has since lapsed — don't trust it.
     if (cached.expiresAt && new Date(cached.expiresAt).getTime() < Date.now()) {
       return null;
     }
