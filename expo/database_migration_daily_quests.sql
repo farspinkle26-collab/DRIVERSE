@@ -767,7 +767,7 @@ CREATE OR REPLACE FUNCTION public.quest_on_saved_route()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.distance_km IS NOT NULL AND NEW.distance_km > 0 THEN
-    PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km, NULL);
+    PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km::NUMERIC, NULL);
   END IF;
   RETURN NEW;
 END;
@@ -789,7 +789,7 @@ CREATE OR REPLACE FUNCTION public.quest_on_trip()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.distance_km IS NOT NULL AND NEW.distance_km > 0 THEN
-    PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km, NULL);
+    PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km::NUMERIC, NULL);
   END IF;
   RETURN NEW;
 END;
