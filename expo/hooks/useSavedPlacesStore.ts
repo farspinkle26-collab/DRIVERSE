@@ -25,7 +25,12 @@ import { usePlatinum } from "@/hooks/usePlatinumStore";
 export interface SavedPlace {
   id: string;
   place_id: string;
-  source: "osm" | "user";
+  /**
+   * Widened when the POI provider moved from Overpass to Mapbox. `osm` stays
+   * in the union because rows saved before that swap are still in the table —
+   * this is persisted data, so the old value has to remain readable.
+   */
+  source: "mapbox" | "osm" | "user";
   name: string;
   category: PlaceCategory;
   lat: number;
@@ -37,7 +42,7 @@ export interface SavedPlace {
 /** What a caller passes to bookmark something off the map. */
 export interface SavePlaceInput {
   place_id: string;
-  source?: "osm" | "user";
+  source?: "mapbox" | "osm" | "user";
   name: string;
   category: PlaceCategory;
   lat: number;
@@ -144,7 +149,10 @@ export const [SavedPlacesProvider, useSavedPlaces] = createContextHook(() => {
         .insert({
           user_id: uid,
           place_id: input.place_id,
-          source: input.source ?? "osm",
+          // Callers pass the place's own source; the default only covers a
+          // caller that omits it, and anything not community-submitted now
+          // comes from the provider.
+          source: input.source ?? "mapbox",
           name: input.name,
           category: input.category,
           lat: input.lat,

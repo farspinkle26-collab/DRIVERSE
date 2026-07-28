@@ -1,5 +1,5 @@
 // Client for the /places-nearby and /places-submit Supabase edge functions.
-// Backend contract: { id, name, lat, lng, category, tags, source: "osm" | "user" }
+// Backend contract: { id, name, lat, lng, category, tags, source }
 import { supabase } from "@/lib/supabase";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import type { PlaceCategory } from "@/constants/placesCategories";
@@ -11,7 +11,15 @@ export interface NormalizedPlace {
   lng: number;
   category: PlaceCategory;
   tags: Record<string, string>;
-  source: "osm" | "user";
+  /**
+   * Where the place came from.
+   *
+   * `osm` is not dead: the POI provider changed to Mapbox, but cached rows and
+   * saved places written before that swap still carry it, so anything reading
+   * this must treat "not `user`" as "from the provider" rather than testing for
+   * one provider name.
+   */
+  source: "mapbox" | "osm" | "user";
 }
 
 export interface FetchNearbyPlacesParams {
@@ -31,30 +39,23 @@ const GENERIC_FAILURE = "Nearby places didn't load — the request to the places
 /**
  * How many category requests may be in flight at once.
  *
- * Each one becomes an edge-function invocation which, on a cache miss, makes
- * its own Overpass query — and every one of those leaves Supabase from the
- * same egress IP. `overpass-api.de` hands out a small number of slots per IP
- * (two, by default) and answers everything over that with **429 Too Many
- * Requests**, immediately. Firing all nine ticked categories at once
- * therefore did not fetch nine categories faster; it fetched two or three and
- * turned the rest into `Edge Function returned a non-2xx status code`, which
- * is exactly the error the map was showing.
+ * Each one becomes an edge-function invocation. The cap is about the phone and
+ * the function pool, not the POI provider: nine simultaneous invocations on a
+ * mobile connection queue at the socket anyway, and windowing them keeps the
+ * first categories painting while the rest arrive.
  *
- * Three is one above Overpass's slot count, so a request is queued and ready
- * the moment a slot frees, without piling up rejections.
+ * This used to be justified by Overpass's two-slot-per-IP limit, back when the
+ * edge function queried Overpass directly. That is no longer the constraint —
+ * see `supabase/functions/_shared/placesSource.ts` for why the source changed —
+ * but a bound is still the right shape, so the number stays.
  */
 const MAX_CONCURRENT_CATEGORY_REQUESTS = 3;
-
-/** Overpass rejections are transient by definition — one retry is worth it. */
-const RETRY_DELAY_MS = 900;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * supabase-js collapses every non-2xx into "Edge Function returned a non-2xx
  * status code" and puts the actual response on `error.context`. Reading the
  * status back is the difference between a log line that says something failed
- * and one that says *what* failed — 429 (Overpass rate limit), 502 (Overpass
+ * and one that says *what* failed — 429 (provider rate limit), 502 (provider
  * error), 400 (bad category), 404 (function not deployed) all need different
  * fixes and all look identical without this.
  */
@@ -76,7 +77,7 @@ async function describeInvokeError(error: unknown): Promise<{ status: number | n
 /** One request. Returns the parsed body, or the HTTP status that stopped it. */
 async function requestNearby(
   params: URLSearchParams
-): Promise<{ places: NormalizedPlace[]; error: string | null; status: number | null }> {
+): Promise<{ places: NormalizedPlace[]; error: string | null }> {
   const { data, error } = await supabase.functions.invoke(`places-nearby?${params.toString()}`, {
     method: "GET",
   });
@@ -87,15 +88,15 @@ async function requestNearby(
       `[placesApi] places-nearby ${params.get("category")} failed` +
         `${status != null ? ` (HTTP ${status})` : ""}: ${detail}`
     );
-    return { places: [], error: GENERIC_FAILURE, status };
+    return { places: [], error: GENERIC_FAILURE };
   }
   if (data?.error) {
-    return { places: data.places ?? [], error: data.error, status: 200 };
+    return { places: data.places ?? [], error: data.error };
   }
-  return { places: data?.places ?? [], error: null, status: 200 };
+  return { places: data?.places ?? [], error: null };
 }
 
-/** GET /places-nearby — merged OSM + approved community places for one category. */
+/** GET /places-nearby — merged provider + approved community places for one category. */
 export async function fetchNearbyPlaces({
   lat,
   lng,
@@ -109,18 +110,24 @@ export async function fetchNearbyPlaces({
     category,
   });
 
+  // NO RETRY HERE — ON PURPOSE.
+  //
+  // This used to retry any 5xx after 900ms. The edge function, meanwhile, was
+  // already retrying the POI provider several times across two endpoints before
+  // it ever returned that 5xx. So one ticked category cost up to eight upstream
+  // requests, nine ticked categories cost seventy-two, and every one of them
+  // left Supabase from the same egress IP — into a provider that was refusing
+  // traffic *for making too many concurrent requests*. The retry was not
+  // recovering from the rate limit, it was feeding it, and it doubled the error
+  // log into the bargain (two `console.error`s per category per pan; that is
+  // where "Log 84 of 84" after a few pans came from).
+  //
+  // Retrying belongs at exactly one layer, and that layer is the one nearest
+  // the provider, where it can see the real status and back off per endpoint.
+  // Here, a failure is reported once and the driver can pan to try again.
   try {
-    const first = await requestNearby(params);
-    if (!first.error) return { places: first.places, error: null };
-
-    // 4xx other than 429 means the request itself is wrong — a bad category,
-    // a function that isn't deployed. Retrying that just doubles the failure.
-    const retryable = first.status == null || first.status === 429 || first.status >= 500;
-    if (!retryable) return { places: first.places, error: first.error };
-
-    await sleep(RETRY_DELAY_MS);
-    const second = await requestNearby(params);
-    return { places: second.places, error: second.error };
+    const { places, error } = await requestNearby(params);
+    return { places, error };
   } catch (err) {
     console.error("[placesApi] fetchNearbyPlaces threw:", err);
     return { places: [], error: GENERIC_FAILURE };
@@ -144,11 +151,11 @@ export interface FetchManyResult {
  *
  * They used to run *all* in parallel, on the reasoning that the wall-clock
  * cost is then one round trip however many boxes are ticked. That reasoning
- * held for the four categories the layer shipped with and broke at nine: the
- * bottleneck is not this client, it is Overpass's per-IP slot limit, and past
- * two or three simultaneous queries the extra ones do not queue, they are
- * refused. Windowing them costs a second or two on a cold fetch and is the
- * difference between nine categories loading and three.
+ * held for the four categories the layer shipped with and broke at nine, when
+ * the edge function still queried Overpass and its per-IP slot limit refused
+ * everything past the second concurrent query. The provider swap removed that
+ * particular ceiling, but windowing stays: it costs a second or two on a cold
+ * fetch and it keeps nine simultaneous invocations off a phone's radio.
  *
  * A failure in one category does not fail the others: the driver gets the
  * eight layers that loaded plus a note about the one that did not, which is

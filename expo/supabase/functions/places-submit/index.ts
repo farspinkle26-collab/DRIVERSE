@@ -2,7 +2,7 @@
 // Auto-approves (status='approved') so submissions show up immediately;
 // there's no moderation queue/UI in the app today. Revisit if abuse shows up.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { isPlaceCategory } from "../_shared/overpass.ts";
+import { isPlaceCategory } from "../_shared/placesSource.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",

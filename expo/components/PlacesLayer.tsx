@@ -89,6 +89,22 @@ export const PLACE_SUBMIT_XP = 15;
 /** Marker glyph size. On the spacing scale, per DRIVE_HUB_REFERENCE D-3. */
 const MARKER_GLYPH_SIZE = spacing.spacingLg;
 
+/**
+ * Credit line in the detail sheet, keyed by where the place came from.
+ *
+ * `osm` is still here because it still shows up: it is what every cached row
+ * and every saved place written before the POI provider swap carries, and
+ * those keep rendering with the credit they were actually fetched under.
+ * Attribution is a licensing obligation for both providers, not decoration —
+ * relabelling old OSM rows as Mapbox would be wrong in the direction that
+ * matters.
+ */
+const ATTRIBUTION: Record<NormalizedPlace["source"], string> = {
+  mapbox: " · Mapbox",
+  osm: " · OpenStreetMap",
+  user: " · Community",
+};
+
 /* ------------------------------------------------------------------ *
  * Category filter chips
  * ------------------------------------------------------------------ */
@@ -407,7 +423,7 @@ export function PlaceDetailSheet({
             </Text>
             <Text style={styles.sheetSubtitle}>
               {PLACE_CATEGORY_LABELS[place.category]}
-              {place.source === "user" ? " · Community" : " · OpenStreetMap"}
+              {ATTRIBUTION[place.source] ?? ATTRIBUTION.mapbox}
             </Text>
           </View>
           <Pressable
@@ -438,7 +454,7 @@ export function PlaceDetailSheet({
           </View>
         </View>
 
-        {place.source === "osm" && openingHours ? (
+        {place.source !== "user" && openingHours ? (
           <Text style={styles.sheetLine}>Open {openingHours}</Text>
         ) : null}
         {place.source === "user" ? (

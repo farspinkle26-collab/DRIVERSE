@@ -127,9 +127,22 @@ Two rules the first device pass established the hard way, both in
 - **POIs are fetched for the area on screen**, bounded by a radius and
   refetched when the map centre moves. Both sources obey this — landmarks
   (Mapbox geocoding, `types=poi` + a hard radius, because `proximity` only
-  *ranks*) and OSM places (`expo/lib/placesApi.ts`, windowed three at a time
-  through `expo/lib/concurrency.ts` because Overpass refuses concurrent
-  queries per IP rather than queueing them).
+  *ranks*) and the nine place categories (`expo/lib/placesApi.ts`, windowed
+  three at a time through `expo/lib/concurrency.ts`, into the `places-nearby`
+  edge function, which bounds by `bbox` for the same reason).
+
+  That category layer is served by **Mapbox Search Box**, not OpenStreetMap.
+  It ran on the public Overpass API until Overpass's per-IP concurrency cap —
+  hit from Supabase's *shared* egress IP — turned it into a constant stream of
+  HTTP 502s across every category. Retrying at both the client and the edge
+  function compounded rather than helped (up to 72 upstream requests per pan).
+  The source is quarantined in
+  `expo/supabase/functions/_shared/placesSource.ts`; the `/places-nearby`
+  contract did not change, retries now live only at the layer nearest the
+  provider, and a provider failure serves the stale cache instead of erroring.
+  Rows and saved places written before the swap still carry `source: "osm"`,
+  so anything reading that field must test for `!== "user"` rather than for a
+  provider name. Full account in `expo/MAP_MARKER_REFERENCE.md` §10b.
 - **No marker sets `tracksViewChanges` itself** — every custom marker goes
   through `expo/components/SettledMarker.tsx`. A constant `false` freezes
   Android's marker bitmap before the SVG inside it has drawn, leaving a

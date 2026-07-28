@@ -1,4 +1,4 @@
-import type { NormalizedPlace } from "./overpass.ts";
+import type { NormalizedPlace } from "./placesSource.ts";
 
 const DEDUPE_RADIUS_METERS = 30;
 
@@ -15,14 +15,17 @@ function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number)
 }
 
 /**
- * Merges OSM results with user-submitted places, preferring the OSM entry
- * whenever a user-submitted place sits within DEDUPE_RADIUS_METERS of one
+ * Merges provider results with user-submitted places, preferring the provider
+ * entry whenever a user-submitted place sits within DEDUPE_RADIUS_METERS of one
  * (same spot, avoid showing the same POI twice).
  */
-export function mergePlaces(osmPlaces: NormalizedPlace[], userPlaces: NormalizedPlace[]): NormalizedPlace[] {
+export function mergePlaces(providerPlaces: NormalizedPlace[], userPlaces: NormalizedPlace[]): NormalizedPlace[] {
   const deduped = userPlaces.filter(
     (userPlace) =>
-      !osmPlaces.some((osmPlace) => haversineMeters(userPlace.lat, userPlace.lng, osmPlace.lat, osmPlace.lng) <= DEDUPE_RADIUS_METERS)
+      !providerPlaces.some(
+        (providerPlace) =>
+          haversineMeters(userPlace.lat, userPlace.lng, providerPlace.lat, providerPlace.lng) <= DEDUPE_RADIUS_METERS
+      )
   );
-  return [...osmPlaces, ...deduped];
+  return [...providerPlaces, ...deduped];
 }

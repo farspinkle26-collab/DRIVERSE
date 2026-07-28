@@ -1,17 +1,41 @@
-import { describe, expect, it, mock, afterEach } from "bun:test";
+import { describe, expect, it, mock, afterEach, beforeAll } from "bun:test";
 import {
-  fetchFromOverpass,
+  boundingBoxFor,
+  fetchNearby,
   isPlaceCategory,
-  OverpassError,
+  PlacesSourceError,
   PLACE_CATEGORIES,
   type NormalizedPlace,
-} from "../overpass.ts";
+} from "../placesSource.ts";
 import { mergePlaces } from "../merge.ts";
 import { cacheKeyFor, latLngBucket, isStale } from "../cache.ts";
 
 // Known Jakarta coordinate (Monas) used throughout — matches the manual
 // validation coordinate described in the feature spec.
 const JAKARTA = { lat: -6.1754, lng: 106.8272 };
+
+// The source reads its token from Deno's env, which does not exist under bun.
+// Stubbing it here rather than in each test keeps the failure mode honest: the
+// "missing token" test clears it deliberately and puts it back.
+beforeAll(() => {
+  (globalThis as { Deno?: unknown }).Deno = {
+    env: { get: (key: string) => (key === "MAPBOX_ACCESS_TOKEN" ? "test-token" : undefined) },
+  };
+});
+
+/** Builds a Search Box feature in the shape Mapbox actually returns. */
+function feature(overrides: Record<string, unknown> = {}, props: Record<string, unknown> = {}) {
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [JAKARTA.lng, JAKARTA.lat] },
+    properties: { name: "Kopi Kenangan", mapbox_id: "poi.123", ...props },
+    ...overrides,
+  };
+}
+
+function jsonResponse(features: unknown[]) {
+  return new Response(JSON.stringify({ type: "FeatureCollection", features }), { status: 200 });
+}
 
 describe("isPlaceCategory", () => {
   it("accepts all nine supported categories", () => {
@@ -39,209 +63,231 @@ describe("isPlaceCategory", () => {
   });
 });
 
-describe("fetchFromOverpass", () => {
+// `proximity` only ranks results; `bbox` is what actually bounds them. Getting
+// this wrong puts markers from the next city on the driver's map — the same
+// trap the landmark layer hit (MAP_MARKER_REFERENCE.md §10).
+describe("boundingBoxFor", () => {
+  it("returns minLng,minLat,maxLng,maxLat around the centre", () => {
+    const [minLng, minLat, maxLng, maxLat] = boundingBoxFor(JAKARTA.lat, JAKARTA.lng, 2000)
+      .split(",")
+      .map(Number);
+    expect(minLng).toBeLessThan(JAKARTA.lng);
+    expect(maxLng).toBeGreaterThan(JAKARTA.lng);
+    expect(minLat).toBeLessThan(JAKARTA.lat);
+    expect(maxLat).toBeGreaterThan(JAKARTA.lat);
+  });
+
+  it("grows with the radius", () => {
+    const small = boundingBoxFor(JAKARTA.lat, JAKARTA.lng, 1000).split(",").map(Number);
+    const large = boundingBoxFor(JAKARTA.lat, JAKARTA.lng, 5000).split(",").map(Number);
+    expect(large[0]).toBeLessThan(small[0]);
+    expect(large[2]).toBeGreaterThan(small[2]);
+  });
+
+  it("stays inside legal lng/lat bounds near a pole", () => {
+    const [minLng, minLat, maxLng, maxLat] = boundingBoxFor(89.99, 179.99, 5000).split(",").map(Number);
+    expect(minLng).toBeGreaterThanOrEqual(-180);
+    expect(maxLng).toBeLessThanOrEqual(180);
+    expect(minLat).toBeGreaterThanOrEqual(-90);
+    expect(maxLat).toBeLessThanOrEqual(90);
+  });
+});
+
+describe("fetchNearby", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it("normalizes Overpass elements into { id, name, lat, lng, category, tags, source }", async () => {
+  it("normalizes a feature into { id, name, lat, lng, category, tags, source }", async () => {
     globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { id: 111, lat: JAKARTA.lat, lon: JAKARTA.lng, tags: { name: "Kopi Kenangan", opening_hours: "08:00-22:00" } },
-          ],
-        }),
-        { status: 200 }
-      )
+      jsonResponse([feature({}, { metadata: { open_hours: "08:00-22:00" } })])
     ) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
+    const places = await fetchNearby("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
     expect(places).toHaveLength(1);
     expect(places[0]).toEqual({
-      id: "osm-node-111",
+      id: "mbx-poi.123",
       name: "Kopi Kenangan",
       lat: JAKARTA.lat,
       lng: JAKARTA.lng,
       category: "cafe",
       tags: { name: "Kopi Kenangan", opening_hours: "08:00-22:00" },
-      source: "osm",
+      source: "mapbox",
     });
   });
 
-  // Malls and car parks are mapped as closed ways, not nodes. A node-only
-  // query returned almost nothing for them, which read on the map as "there
-  // is no parking here" rather than as a malformed query.
-  it("takes a way's position from `center`, as `out center` returns it", async () => {
+  it("bounds the request with bbox, not just proximity", async () => {
+    let requested = "";
+    globalThis.fetch = mock(async (input: string) => {
+      requested = String(input);
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    await fetchNearby("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
+    expect(requested).toContain("bbox=");
+    expect(requested).toContain("proximity=");
+  });
+
+  it("falls back to properties.coordinates when geometry is absent", async () => {
     globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            {
-              id: 333,
-              type: "way",
-              center: { lat: JAKARTA.lat, lon: JAKARTA.lng },
-              tags: { name: "Plaza Indonesia", amenity: "parking" },
-            },
-          ],
-        }),
-        { status: 200 }
-      )
+      jsonResponse([
+        feature(
+          { geometry: undefined },
+          { coordinates: { latitude: JAKARTA.lat, longitude: JAKARTA.lng } }
+        ),
+      ])
     ) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("parking", JAKARTA.lat, JAKARTA.lng, 2000);
+    const places = await fetchNearby("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
     expect(places).toHaveLength(1);
     expect(places[0].lat).toBe(JAKARTA.lat);
     expect(places[0].lng).toBe(JAKARTA.lng);
-    expect(places[0].id).toBe("osm-way-333");
   });
 
-  it("namespaces ids by element type so node 42 and way 42 stay distinct", async () => {
+  it("drops a feature with no usable coordinate rather than emitting NaN", async () => {
     globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { id: 42, type: "node", lat: 1, lon: 1, tags: { name: "A" } },
-            { id: 42, type: "way", center: { lat: 2, lon: 2 }, tags: { name: "B" } },
-          ],
-        }),
-        { status: 200 }
-      )
+      jsonResponse([
+        feature({ geometry: undefined }, { name: "Positionless", mapbox_id: "poi.none" }),
+        feature({}, { name: "Fine", mapbox_id: "poi.fine" }),
+      ])
     ) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("shopping", 0, 0, 2000);
-    expect(new Set(places.map((p) => p.id)).size).toBe(2);
-  });
-
-  it("drops an element with no usable coordinate rather than emitting NaN", async () => {
-    globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { id: 1, type: "way", tags: { name: "Geometry-less way" } },
-            { id: 2, type: "node", lat: 3, lon: 4, tags: { name: "Fine" } },
-          ],
-        }),
-        { status: 200 }
-      )
-    ) as unknown as typeof fetch;
-
-    const places = await fetchFromOverpass("parking", 0, 0, 2000);
+    const places = await fetchNearby("parking", 0, 0, 2000);
     expect(places).toHaveLength(1);
     expect(places[0].name).toBe("Fine");
   });
 
-  // Unnamed features cluster in exactly the new categories, so a flat
-  // "Unnamed" would have put a column of identical labels on the map where
-  // the markers are densest.
-  it("falls back to a category name, then to the operator, when unnamed", async () => {
+  // Unnamed features cluster in exactly the newer categories, so a flat
+  // "Unnamed" would put a column of identical labels where markers are densest.
+  it("falls back to the brand, then to a category name, when unnamed", async () => {
     globalThis.fetch = mock(async () =>
-      new Response(
-        JSON.stringify({
-          elements: [
-            { id: 222, type: "node", lat: 0, lon: 0, tags: {} },
-            { id: 223, type: "node", lat: 0, lon: 0, tags: { operator: "PLN" } },
-          ],
-        }),
-        { status: 200 }
-      )
+      jsonResponse([
+        feature({}, { name: undefined, mapbox_id: "poi.a" }),
+        feature({}, { name: undefined, brand: ["PLN"], mapbox_id: "poi.b" }),
+      ])
     ) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("ev_charger", 0, 0, 2000);
+    const places = await fetchNearby("ev_charger", 0, 0, 2000);
     expect(places[0].name).toBe("Charging point");
     expect(places[1].name).toBe("PLN");
   });
 
-  it("throws OverpassError (not a raw exception) when Overpass returns a non-200", async () => {
+  it("throws PlacesSourceError when every canonical id fails", async () => {
     globalThis.fetch = mock(async () => new Response("bad gateway", { status: 502 })) as unknown as typeof fetch;
 
-    await expect(fetchFromOverpass("workshop", 0, 0, 2000)).rejects.toBeInstanceOf(OverpassError);
+    await expect(fetchNearby("workshop", 0, 0, 2000)).rejects.toBeInstanceOf(PlacesSourceError);
   });
 
-  it("throws OverpassError when the request aborts (simulated slow/hung Overpass)", async () => {
+  it("throws PlacesSourceError when the request aborts (simulated hung provider)", async () => {
     globalThis.fetch = mock(async () => {
       const err = new Error("aborted");
       err.name = "AbortError";
       throw err;
     }) as unknown as typeof fetch;
 
-    await expect(fetchFromOverpass("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(OverpassError);
+    await expect(fetchNearby("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(PlacesSourceError);
   });
 
-  // A 429 is Overpass saying "you have too many queries open right now", not
-  // "there is nothing here". Turning it straight into a 502 is what made a
-  // ticked category read on the map as a dead feature.
-  it("retries a 429 and returns the places the retry got", async () => {
+  // `hangout` spans bar + fast_food + park. One id being rejected — including
+  // because it is a canonical id Mapbox does not recognise — is not a reason to
+  // tell the driver there are no hangouts nearby.
+  it("returns what it got when only some canonical ids fail", async () => {
+    globalThis.fetch = mock(async (input: string) => {
+      if (String(input).includes("/bar?")) return new Response("not found", { status: 404 });
+      return jsonResponse([feature({}, { name: "Taman Suropati", mapbox_id: "poi.park" })]);
+    }) as unknown as typeof fetch;
+
+    const places = await fetchNearby("hangout", JAKARTA.lat, JAKARTA.lng, 2000);
+    expect(places.length).toBeGreaterThan(0);
+    expect(places.some((p) => p.name === "Taman Suropati")).toBe(true);
+  });
+
+  it("keeps one marker per place when two canonical ids return the same feature", async () => {
+    globalThis.fetch = mock(async () =>
+      jsonResponse([feature({}, { name: "Plaza Indonesia", mapbox_id: "poi.mall" })])
+    ) as unknown as typeof fetch;
+
+    // `shopping` queries shopping_mall + department_store; both answer here.
+    const places = await fetchNearby("shopping", JAKARTA.lat, JAKARTA.lng, 2000);
+    expect(places).toHaveLength(1);
+  });
+
+  // A 429 is "ask again in a moment", not "there is nothing here". Turning it
+  // straight into a failure is what made a ticked category read as dead.
+  it("retries a 429 and returns what the retry got", async () => {
     let calls = 0;
     globalThis.fetch = mock(async () => {
       calls++;
       if (calls === 1) return new Response("rate limited", { status: 429 });
-      return new Response(
-        JSON.stringify({ elements: [{ id: 7, lat: JAKARTA.lat, lon: JAKARTA.lng, tags: { name: "SPBU 31" } }] }),
-        { status: 200 }
-      );
+      return jsonResponse([feature({}, { name: "SPBU 31", mapbox_id: "poi.spbu" })]);
     }) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("gas_station", JAKARTA.lat, JAKARTA.lng, 2000);
+    const places = await fetchNearby("gas_station", JAKARTA.lat, JAKARTA.lng, 2000);
     expect(calls).toBe(2);
     expect(places).toHaveLength(1);
     expect(places[0].name).toBe("SPBU 31");
   });
 
-  it("falls through to the mirror when the primary instance stays down", async () => {
-    const endpoints: string[] = [];
-    globalThis.fetch = mock(async (input: string) => {
-      endpoints.push(String(input));
-      if (String(input).includes("overpass-api.de")) {
-        return new Response("service unavailable", { status: 503 });
-      }
-      return new Response(JSON.stringify({ elements: [] }), { status: 200 });
-    }) as unknown as typeof fetch;
-
-    const places = await fetchFromOverpass("parking", 0, 0, 2000);
-    expect(places).toEqual([]);
-    expect(endpoints.some((e) => e.includes("overpass-api.de"))).toBe(true);
-    expect(endpoints.some((e) => e.includes("kumi.systems"))).toBe(true);
-  });
-
-  // A malformed query is malformed at every mirror. Retrying it just spends
-  // the driver's time to fail four times instead of once.
-  it("does not retry a 400 on the same endpoint", async () => {
-    const endpoints: string[] = [];
-    globalThis.fetch = mock(async (input: string) => {
-      endpoints.push(String(input));
+  // A malformed request is malformed on every attempt. Retrying it just spends
+  // the driver's time to fail three times instead of once.
+  it("does not retry a 400", async () => {
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls++;
       return new Response("bad request", { status: 400 });
     }) as unknown as typeof fetch;
 
-    await expect(fetchFromOverpass("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(OverpassError);
-    // One attempt per endpoint, no retry within an endpoint.
-    expect(endpoints).toHaveLength(2);
+    await expect(fetchNearby("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(PlacesSourceError);
+    expect(calls).toBe(1);
+  });
+
+  it("fails loudly when the token is not configured, rather than querying anonymously", async () => {
+    const stub = (globalThis as { Deno?: { env: { get: (k: string) => string | undefined } } }).Deno!;
+    const restore = stub.env.get;
+    stub.env.get = () => undefined;
+    try {
+      await expect(fetchNearby("cafe", 0, 0, 2000)).rejects.toBeInstanceOf(PlacesSourceError);
+    } finally {
+      stub.env.get = restore;
+    }
   });
 });
 
 describe("mergePlaces", () => {
-  const osm: NormalizedPlace[] = [
-    { id: "osm-1", name: "Warkop OSM", lat: JAKARTA.lat, lng: JAKARTA.lng, category: "cafe", tags: {}, source: "osm" },
+  const provider: NormalizedPlace[] = [
+    { id: "mbx-1", name: "Warkop", lat: JAKARTA.lat, lng: JAKARTA.lng, category: "cafe", tags: {}, source: "mapbox" },
   ];
 
-  it("keeps a user place that is far from any OSM entry", () => {
+  it("keeps a user place that is far from any provider entry", () => {
     const user: NormalizedPlace[] = [
       { id: "user-1", name: "My Cafe", lat: JAKARTA.lat + 1, lng: JAKARTA.lng + 1, category: "cafe", tags: {}, source: "user" },
     ];
-    const merged = mergePlaces(osm, user);
+    const merged = mergePlaces(provider, user);
     expect(merged).toHaveLength(2);
     expect(merged.some((p) => p.id === "user-1")).toBe(true);
   });
 
-  it("prefers the OSM entry when a user place is within ~30m of it (dedupe)", () => {
+  it("prefers the provider entry when a user place is within ~30m of it (dedupe)", () => {
     const user: NormalizedPlace[] = [
       // ~0.0002 deg ~= 22m north — inside the 30m dedupe radius
       { id: "user-2", name: "Same Cafe (duplicate)", lat: JAKARTA.lat + 0.0002, lng: JAKARTA.lng, category: "cafe", tags: {}, source: "user" },
     ];
-    const merged = mergePlaces(osm, user);
+    const merged = mergePlaces(provider, user);
     expect(merged).toHaveLength(1);
-    expect(merged[0].source).toBe("osm");
+    expect(merged[0].source).toBe("mapbox");
+  });
+
+  // Rows cached before the provider swap still carry `osm` and must keep
+  // deduping against community submissions exactly as they did.
+  it("still dedupes against rows cached under the previous provider", () => {
+    const legacy: NormalizedPlace[] = [
+      { id: "osm-node-1", name: "Warkop OSM", lat: JAKARTA.lat, lng: JAKARTA.lng, category: "cafe", tags: {}, source: "osm" },
+    ];
+    const user: NormalizedPlace[] = [
+      { id: "user-3", name: "Same spot", lat: JAKARTA.lat + 0.0002, lng: JAKARTA.lng, category: "cafe", tags: {}, source: "user" },
+    ];
+    expect(mergePlaces(legacy, user)).toHaveLength(1);
   });
 });
 
