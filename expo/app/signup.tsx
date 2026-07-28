@@ -9,11 +9,9 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
-  Dimensions,
   Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
 import {
@@ -26,16 +24,22 @@ import {
   Phone,
   Car,
   ChevronRight,
-  Circle,
   CheckCircle2,
-  MapPin,
   Search,
   Navigation,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countries";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+import { CutCornerButton, CutCornerChip, CutCornerSurface } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import {
+  borderWidth,
+  colors,
+  fontFamily,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 
 const STEPS = ["account", "nation", "profile", "car"] as const;
 type Step = (typeof STEPS)[number];
@@ -211,11 +215,9 @@ export default function SignUpScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
-
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1, paddingTop: insets.top + 20 }}
+        style={{ flex: 1, paddingTop: insets.top + spacing.spacingLg }}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -224,7 +226,7 @@ export default function SignUpScreen() {
             onPress={() => (stepIndex === 0 ? router.back() : prevStep())}
             activeOpacity={0.7}
           >
-            <ArrowLeft size={22} color="#FFFFFF" />
+            <ArrowLeft size={22} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
           </TouchableOpacity>
 
           <View style={styles.progressWrap}>
@@ -238,7 +240,7 @@ export default function SignUpScreen() {
                 return (
                   <View key={s} style={[styles.stepDot, done && styles.stepDotDone, active && styles.stepDotActive]}>
                     {done ? (
-                      <CheckCircle2 size={14} color="#FFFFFF" />
+                      <CheckCircle2 size={12} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
                     ) : (
                       <Text style={[styles.stepDotText, active && styles.stepDotTextActive]}>{i + 1}</Text>
                     )}
@@ -251,15 +253,15 @@ export default function SignUpScreen() {
 
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.spacingXxl }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           {/* Error */}
           {error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
+            <Text style={styles.errorText} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
           ) : null}
 
           {/* Step titles */}
@@ -289,11 +291,11 @@ export default function SignUpScreen() {
             {step === "account" && (
               <View style={styles.stepForm}>
                 <View style={styles.inputWrapper}>
-                  <User size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <User size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Full Name"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     value={name}
                     onChangeText={setName}
                     autoCapitalize="words"
@@ -301,11 +303,11 @@ export default function SignUpScreen() {
                 </View>
 
                 <View style={styles.inputWrapper}>
-                  <Mail size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Mail size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Email address"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -315,11 +317,11 @@ export default function SignUpScreen() {
                 </View>
 
                 <View style={styles.inputWrapper}>
-                  <Phone size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Phone size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Phone number (optional)"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     keyboardType="phone-pad"
                     value={phone}
                     onChangeText={setPhone}
@@ -327,26 +329,30 @@ export default function SignUpScreen() {
                 </View>
 
                 <View style={styles.inputWrapper}>
-                  <Lock size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Lock size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={[styles.input, { flex: 1 }]}
                     placeholder="Password (min. 6 chars)"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     secureTextEntry={!showPassword}
                     value={password}
                     onChangeText={setPassword}
                   />
                   <TouchableOpacity onPress={() => setShowPassword((v) => !v)} activeOpacity={0.7}>
-                    {showPassword ? <EyeOff size={18} color="#5A5A6E" /> : <Eye size={18} color="#5A5A6E" />}
+                    {showPassword ? (
+                      <EyeOff size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    ) : (
+                      <Eye size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    )}
                   </TouchableOpacity>
                 </View>
 
                 <View style={styles.inputWrapper}>
-                  <Lock size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Lock size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Confirm password"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     secureTextEntry
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
@@ -356,52 +362,40 @@ export default function SignUpScreen() {
                 {/* Divider */}
                 <View style={styles.divider}>
                   <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or sign up with</Text>
+                  <Text style={styles.dividerText}>OR SIGN UP WITH</Text>
                   <View style={styles.dividerLine} />
                 </View>
 
                 {/* Social Sign Up */}
                 <View style={styles.socialGroup}>
-                  <TouchableOpacity
-                    style={styles.googleBtn}
-                    activeOpacity={0.7}
+                  <CutCornerButton
+                    title="Continue with Google"
+                    variant="ghost"
                     onPress={handleGoogleSignUp}
                     disabled={socialLoading !== null || loading}
-                  >
-                    <View style={styles.googleContent}>
-                      {socialLoading === "google" ? (
-                        <ActivityIndicator color="#FFFFFF" size="small" />
+                    icon={
+                      socialLoading === "google" ? (
+                        <ActivityIndicator size="small" color={colors.textPrimary} />
                       ) : (
-                        <>
-                          <View style={styles.googleIcon}>
-                            <Text style={styles.googleIconText}>G</Text>
-                          </View>
-                          <Text style={styles.googleText}>Continue with Google</Text>
-                        </>
-                      )}
-                    </View>
-                  </TouchableOpacity>
+                        <Text style={styles.socialGlyph}>G</Text>
+                      )
+                    }
+                  />
 
                   {Platform.OS === "ios" && (
-                    <TouchableOpacity
-                      style={styles.googleBtn}
-                      activeOpacity={0.7}
+                    <CutCornerButton
+                      title="Continue with Apple"
+                      variant="ghost"
                       onPress={handleAppleSignUp}
                       disabled={socialLoading !== null || loading}
-                    >
-                      <View style={styles.googleContent}>
-                        {socialLoading === "apple" ? (
-                          <ActivityIndicator color="#FFFFFF" size="small" />
+                      icon={
+                        socialLoading === "apple" ? (
+                          <ActivityIndicator size="small" color={colors.textPrimary} />
                         ) : (
-                          <>
-                            <View style={styles.googleIcon}>
-                              <Text style={styles.googleIconText}></Text>
-                            </View>
-                            <Text style={styles.googleText}>Continue with Apple</Text>
-                          </>
-                        )}
-                      </View>
-                    </TouchableOpacity>
+                          <Text style={styles.socialGlyph}></Text>
+                        )
+                      }
+                    />
                   )}
                 </View>
               </View>
@@ -411,21 +405,19 @@ export default function SignUpScreen() {
             {step === "nation" && (
               <View style={styles.stepForm}>
                 {/* GPS auto-detect */}
-                <TouchableOpacity
-                  style={styles.detectBtn}
+                <CutCornerButton
+                  title={detectingCountry ? "Detecting your location…" : "Detect with GPS"}
+                  variant="outline"
                   onPress={detectCountry}
-                  activeOpacity={0.8}
                   disabled={detectingCountry}
-                >
-                  {detectingCountry ? (
-                    <ActivityIndicator color="#FF6B35" size="small" />
-                  ) : (
-                    <Navigation size={18} color="#FF6B35" />
-                  )}
-                  <Text style={styles.detectBtnText}>
-                    {detectingCountry ? "Detecting your location…" : "Detect with GPS"}
-                  </Text>
-                </TouchableOpacity>
+                  icon={
+                    detectingCountry ? (
+                      <ActivityIndicator size="small" color={colors.racingRed} />
+                    ) : (
+                      <Navigation size={18} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                    )
+                  }
+                />
 
                 {detectError ? <Text style={styles.detectError}>{detectError}</Text> : null}
 
@@ -434,17 +426,17 @@ export default function SignUpScreen() {
                   <View style={styles.selectedCountry}>
                     <Text style={styles.selectedCountryFlag}>{selectedCountry.flag}</Text>
                     <Text style={styles.selectedCountryName}>{selectedCountry.name}</Text>
-                    <CheckCircle2 size={18} color="#22C55E" />
+                    <CheckCircle2 size={18} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
                   </View>
                 )}
 
                 {/* Search */}
                 <View style={styles.inputWrapper}>
-                  <Search size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Search size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Search nations"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     value={countryQuery}
                     onChangeText={setCountryQuery}
                     autoCapitalize="words"
@@ -465,7 +457,7 @@ export default function SignUpScreen() {
                       >
                         <Text style={styles.countryFlag}>{c.flag}</Text>
                         <Text style={[styles.countryName, active && styles.countryNameActive]}>{c.name}</Text>
-                        {active && <CheckCircle2 size={16} color="#FF6B35" />}
+                        {active && <CheckCircle2 size={16} color={colors.textPrimary} strokeWidth={ICON_STROKE} />}
                       </TouchableOpacity>
                     );
                   })}
@@ -483,32 +475,30 @@ export default function SignUpScreen() {
                 <Text style={styles.sectionLabel}>Car Make</Text>
                 <View style={styles.makeGrid}>
                   {CAR_MAKES.map((make) => (
-                    <TouchableOpacity
+                    <CutCornerChip
                       key={make}
-                      style={[styles.makeChip, selectedMake === make && styles.makeChipSelected]}
+                      label={make}
+                      active={selectedMake === make}
                       onPress={() => setSelectedMake(make)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.makeChipText, selectedMake === make && styles.makeChipTextSelected]}>
-                        {make}
-                      </Text>
-                    </TouchableOpacity>
+                    />
                   ))}
                 </View>
 
                 {/* Car Year */}
-                <Text style={[styles.sectionLabel, { marginTop: 20 }]}>Year</Text>
-                <TextInput
-                  style={styles.inputWrapper}
-                  placeholder="e.g. 2024"
-                  placeholderTextColor="#5A5A6E"
-                  keyboardType="number-pad"
-                  value={carYear}
-                  onChangeText={setCarYear}
-                />
+                <Text style={[styles.sectionLabel, { marginTop: spacing.spacingXl }]}>Year</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 2024"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    value={carYear}
+                    onChangeText={setCarYear}
+                  />
+                </View>
 
                 {/* Color picker */}
-                <Text style={[styles.sectionLabel, { marginTop: 20 }]}>Color</Text>
+                <Text style={[styles.sectionLabel, { marginTop: spacing.spacingXl }]}>Color</Text>
                 <View style={styles.colorGrid}>
                   {CAR_COLORS.map((c) => (
                     <TouchableOpacity
@@ -521,7 +511,9 @@ export default function SignUpScreen() {
                       onPress={() => setSelectedColor(c)}
                       activeOpacity={0.7}
                     >
-                      {selectedColor?.hex === c.hex && <CheckCircle2 size={16} color="#FFFFFF" />}
+                      {selectedColor?.hex === c.hex && (
+                        <CheckCircle2 size={16} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+                      )}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -532,33 +524,35 @@ export default function SignUpScreen() {
             {step === "car" && (
               <View style={styles.stepForm}>
                 <View style={styles.carPreview}>
-                  <LinearGradient
-                    colors={[selectedColor?.hex ?? "#FF6B35", selectedColor?.hex ?? "#FF8A50"]}
+                  <CutCornerSurface
+                    fill={selectedColor?.hex ?? colors.racingRed}
+                    borderColor={colors.hairline}
                     style={styles.carPreviewBadge}
+                    contentStyle={styles.carPreviewBadgeContent}
                   >
-                    <Car size={40} color="#FFFFFF" />
-                  </LinearGradient>
+                    <Car size={36} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                  </CutCornerSurface>
                   <Text style={styles.carPreviewMake}>{selectedMake || "Your Car"}</Text>
                 </View>
 
                 <View style={styles.inputWrapper}>
-                  <Car size={18} color="#8A8A9A" style={styles.inputIcon} />
+                  <Car size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Car nickname (e.g. 'Night Fury')"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     value={carName}
                     onChangeText={setCarName}
                     autoCapitalize="words"
                   />
                 </View>
 
-                <View style={[styles.inputWrapper, { marginTop: 14 }]}>
-                  <Car size={18} color="#8A8A9A" style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, { marginTop: spacing.spacingMd }]}>
+                  <Car size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="License plate (optional)"
-                    placeholderTextColor="#5A5A6E"
+                    placeholderTextColor={colors.textSecondary}
                     value={licensePlate}
                     onChangeText={setLicensePlate}
                     autoCapitalize="characters"
@@ -568,32 +562,18 @@ export default function SignUpScreen() {
             )}
 
             {/* Action button */}
-            <TouchableOpacity
-              style={[styles.actionBtn, !canGoNext() && styles.actionBtnDisabled]}
+            <CutCornerButton
+              title={step === "car" ? "Create Account" : "Next"}
               onPress={step === "car" ? handleSignUp : nextStep}
-              activeOpacity={0.8}
               disabled={loading || !canGoNext()}
-            >
-              <LinearGradient
-                colors={canGoNext() ? ["#FF6B35", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.actionBtnGradient}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : step === "car" ? (
-                  <>
-                    <Text style={styles.actionBtnText}>Create Account</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.actionBtnText}>Next</Text>
-                    <ChevronRight size={18} color="#FFFFFF" />
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+              style={styles.actionBtn}
+              trailingIcon={
+                !loading && step !== "car" ? (
+                  <ChevronRight size={18} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                ) : undefined
+              }
+              icon={loading ? <ActivityIndicator size="small" color={colors.voidBlack} /> : undefined}
+            />
           </View>
 
           {/* Sign In link */}
@@ -612,160 +592,124 @@ export default function SignUpScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#060609",
-  },
-  bg: {
-    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.voidBlack,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 16,
-    marginBottom: 10,
+    paddingHorizontal: spacing.spacingLg,
+    gap: spacing.spacingLg,
+    marginBottom: spacing.spacingSm,
   },
   backBtn: {
-    paddingVertical: 8,
-    paddingRight: 4,
+    paddingVertical: spacing.spacingSm,
+    paddingRight: spacing.spacingXs,
   },
   progressWrap: {
     flex: 1,
-    gap: 10,
+    gap: spacing.spacingSm,
   },
   progressTrack: {
-    height: 3,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 2,
-    overflow: "hidden",
+    height: borderWidth.hairline * 3,
+    backgroundColor: colors.hairline,
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#FF6B35",
-    borderRadius: 2,
+    backgroundColor: colors.racingRed,
   },
   stepDots: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.spacingSm,
   },
   stepDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   stepDotDone: {
-    backgroundColor: "#22C55E",
-    borderColor: "#22C55E",
+    backgroundColor: colors.hairline,
+    borderColor: colors.textPrimary,
   },
   stepDotActive: {
-    backgroundColor: "#FF6B3520",
-    borderColor: "#FF6B35",
+    backgroundColor: colors.carbonSurface,
+    borderColor: colors.racingRed,
   },
   stepDotText: {
+    ...textStyle("caption", { fontFamily: fontFamily.dataMedium }),
     fontSize: 11,
-    fontWeight: "700",
-    color: "#5A5A6E",
+    color: colors.textSecondary,
   },
   stepDotTextActive: {
-    color: "#FF6B35",
-  },
-  errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
-    borderRadius: 12,
-    padding: 14,
-    marginHorizontal: 24,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.2)",
+    color: colors.racingRed,
   },
   errorText: {
-    fontSize: 13,
-    color: "#EF4444",
+    ...textStyle("caption"),
+    color: colors.racingRed,
     textAlign: "center",
-    fontWeight: "600",
+    marginHorizontal: spacing.spacingXl,
+    marginBottom: spacing.spacingLg,
   },
   stepTitleSection: {
-    paddingHorizontal: 24,
-    marginBottom: 24,
+    paddingHorizontal: spacing.spacingXl,
+    marginBottom: spacing.spacingXl,
   },
   stepTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 4,
+    ...textStyle("displayXl"),
+    color: colors.textPrimary,
+    marginBottom: spacing.spacingXs,
   },
   stepSubtitle: {
-    fontSize: 15,
-    color: "#8A8A9A",
-    fontWeight: "500",
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   formContent: {
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.spacingXl,
   },
   stepForm: {
-    gap: 14,
+    gap: spacing.spacingMd,
   },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 16,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
     height: 52,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: spacing.spacingMd,
   },
   input: {
     flex: 1,
-    fontSize: 15,
-    color: "#FFFFFF",
-    fontWeight: "500",
+    color: colors.textPrimary,
+    ...textStyle("body"),
   },
   sectionLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#5A5A6E",
+    ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold }),
+    color: colors.textSecondary,
     letterSpacing: 1,
-    textTransform: "uppercase" as const,
   },
   // Nation step
-  detectBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "rgba(255, 107, 53, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 107, 53, 0.4)",
-  },
-  detectBtnText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#FF6B35",
-  },
   detectError: {
-    fontSize: 13,
-    color: "#EF4444",
-    fontWeight: "600",
+    ...textStyle("caption"),
+    color: colors.racingRed,
   },
   selectedCountry: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.3)",
-    borderRadius: 14,
-    paddingHorizontal: 16,
+    gap: spacing.spacingMd,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.textPrimary,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
     height: 52,
   },
   selectedCountryFlag: {
@@ -773,200 +717,129 @@ const styles = StyleSheet.create({
   },
   selectedCountryName: {
     flex: 1,
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.textPrimary,
   },
   countryList: {
-    gap: 6,
+    gap: spacing.spacingXs,
   },
   countryRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
+    gap: spacing.spacingMd,
+    paddingHorizontal: spacing.spacingLg,
     height: 48,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   countryRowActive: {
-    backgroundColor: "rgba(255, 107, 53, 0.15)",
-    borderColor: "#FF6B35",
+    backgroundColor: colors.hairline,
+    borderColor: colors.textPrimary,
   },
   countryFlag: {
     fontSize: 20,
   },
   countryName: {
     flex: 1,
+    ...textStyle("body", { fontFamily: fontFamily.bodyMedium }),
     fontSize: 14,
-    fontWeight: "600",
-    color: "#C8C8D4",
+    color: colors.textSecondary,
   },
   countryNameActive: {
-    color: "#FFFFFF",
+    color: colors.textPrimary,
   },
   countryEmpty: {
-    fontSize: 13,
-    color: "#5A5A6E",
-    fontWeight: "500",
+    ...textStyle("caption"),
+    color: colors.textSecondary,
     textAlign: "center",
-    paddingVertical: 16,
+    paddingVertical: spacing.spacingLg,
   },
   makeGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-  },
-  makeChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  makeChipSelected: {
-    backgroundColor: "rgba(255, 107, 53, 0.15)",
-    borderColor: "#FF6B35",
-  },
-  makeChipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#8A8A9A",
-  },
-  makeChipTextSelected: {
-    color: "#FF6B35",
+    gap: spacing.spacingSm,
+    marginTop: spacing.spacingSm,
   },
   colorGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginTop: 8,
+    gap: spacing.spacingMd,
+    marginTop: spacing.spacingSm,
   },
   colorSwatch: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: radius.sharp,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
   },
   colorSwatchSelected: {
-    borderColor: "#FFFFFF",
-    shadowColor: "#FFFFFF",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    borderWidth: borderWidth.emphasis,
+    borderColor: colors.textPrimary,
   },
   carPreview: {
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: spacing.spacingXl,
   },
   carPreviewBadge: {
     width: 80,
     height: 80,
-    borderRadius: 24,
+    marginBottom: spacing.spacingMd,
+  },
+  carPreviewBadgeContent: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 12,
   },
   carPreviewMake: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#FFFFFF",
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
   },
   actionBtn: {
-    borderRadius: 14,
-    overflow: "hidden",
-    marginTop: 24,
-  },
-  actionBtnDisabled: {
-    opacity: 0.5,
-  },
-  actionBtnGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    height: 52,
-  },
-  actionBtnText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    marginTop: spacing.spacingXl,
   },
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 32,
-    paddingBottom: 20,
+    marginTop: spacing.spacingXxl,
+    paddingBottom: spacing.spacingLg,
   },
   footerText: {
-    fontSize: 14,
-    color: "#8A8A9A",
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   footerLink: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FF6B35",
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.racingRed,
   },
   // Divider
   divider: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 22,
-    marginBottom: 18,
-    gap: 12,
+    marginTop: spacing.spacingXl,
+    marginBottom: spacing.spacingLg,
+    gap: spacing.spacingMd,
   },
   dividerLine: {
     flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    height: borderWidth.hairline,
+    backgroundColor: colors.hairline,
   },
   dividerText: {
-    fontSize: 12,
-    color: "#5A5A6E",
-    fontWeight: "600",
+    ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold }),
+    color: colors.textSecondary,
+    letterSpacing: 1,
   },
   // Social
   socialGroup: {
-    gap: 12,
+    gap: spacing.spacingMd,
   },
-  googleBtn: {
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderRadius: 14,
-    height: 52,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  googleContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  googleIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  googleIconText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#000000",
-  },
-  googleText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#FFFFFF",
+  socialGlyph: {
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.textPrimary,
   },
 });
