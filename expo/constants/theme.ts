@@ -294,6 +294,25 @@ export const surface = {
   } as ViewStyle,
 } as const;
 
+/**
+ * Text drawn directly on map tiles.
+ *
+ * The one sanctioned `textShadow` in the app, and the only exception to
+ * "separation comes from hairlines, not shadows". Marker names and
+ * distances have no surface behind them and disappear entirely over light
+ * tiles, which the map's light/dark tile toggle makes reachable in one tap.
+ * This is a legibility device, not an elevation one — see
+ * MAP_SCREEN_REFERENCE.md D-6.
+ *
+ * Do not use it for text on a `carbonSurface`. If there is a surface, the
+ * surface is the separation.
+ */
+export const mapLabelShadow = {
+  textShadowColor: alpha(colors.voidBlack, 0.9),
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 3,
+} as const;
+
 /* ------------------------------------------------------------------ *
  * MOTION
  * ------------------------------------------------------------------ */

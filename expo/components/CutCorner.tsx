@@ -397,12 +397,19 @@ export interface CutCornerChipProps {
   /** Colour the caller should draw `icon` in — active vs inactive. */
   onPress?: () => void;
   accessibilityLabel?: string;
+  /**
+   * `button` (default) for a single-select segment, `checkbox` for a chip
+   * that toggles independently of its neighbours — the map's category
+   * filters. Additive: existing callers keep the single-select semantics
+   * they were written against.
+   */
+  accessibilityRole?: "button" | "checkbox";
   corners?: CutCornerName | CutCornerName[];
   style?: StyleProp<ViewStyle>;
 }
 
 /**
- * A single-select filter / segment control.
+ * A filter / segment control, single- or multi-select.
  *
  * The header comment above says chips stay plain rectangles, and for a
  * *tag* — an inert label attached to a value, like the location pill on a
@@ -428,13 +435,20 @@ export function CutCornerChip({
   icon,
   onPress,
   accessibilityLabel,
+  accessibilityRole = "button",
   corners = "topRight",
   style,
 }: CutCornerChipProps) {
   return (
     <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
+      accessibilityRole={accessibilityRole}
+      // A checkbox announces `checked`; a segment announces `selected`.
+      // Sending the wrong one makes a toggle read as inert to a screen
+      // reader, which for the map's filters is the same failure the
+      // rebuild was asked to eliminate visually.
+      accessibilityState={
+        accessibilityRole === "checkbox" ? { checked: active } : { selected: active }
+      }
       accessibilityLabel={accessibilityLabel ?? label}
       onPress={onPress}
       style={({ pressed }) => [styles.chipHit, pressed && styles.chipPressed, style]}

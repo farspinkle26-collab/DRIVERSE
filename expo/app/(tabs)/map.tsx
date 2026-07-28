@@ -41,6 +41,8 @@ import {
   Image,
   TextInput,
   Keyboard,
+  Modal,
+  ScrollView,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -48,7 +50,17 @@ import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import { usePlaces } from "@/hooks/usePlaces";
-import { PLACE_CATEGORY_LABELS } from "@/constants/placesCategories";
+import { useMapFilters } from "@/hooks/useMapFilters";
+import {
+  MAP_LAYERS,
+  PLACE_CATEGORIES,
+  PLACE_CATEGORY_ICONS,
+  PLACE_CATEGORY_LABELS,
+  MAP_LAYER_DESCRIPTIONS,
+  type MapLayerId,
+  type PlaceCategory,
+} from "@/constants/placesCategories";
+import { CATEGORY_COLORS, ON_CATEGORY } from "@/constants/mapCategoryColors";
 import type { NormalizedPlace } from "@/lib/placesApi";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -111,6 +123,7 @@ import {
   CHROME_ICON_STROKE,
   DestinationMark,
   DriverMark,
+  HeadingChevron,
   MAP_GLYPHS,
   MAP_GLYPH_STROKE,
   ProblemGlyph,
@@ -123,6 +136,7 @@ import {
   colors,
   cut,
   fontFamily,
+  mapLabelShadow,
   onRacingRed,
   radius,
   spacing,
@@ -176,8 +190,13 @@ const INDONESIAN_CITIES = [
   { name: "Jayapura", lat: -2.5916, lng: 140.6690 },
 ];
 
-type LandmarkCategory = "cafe" | "restaurant" | "spbu" | "shopping" | "carwash" | "charging" | "workshop";
-
+/**
+ * Landmarks and Places used to carry two different vocabularies for the
+ * same nine things — `spbu`/`carwash`/`charging` here, `gas_station`/
+ * `car_wash`/`ev_charger` in the Places layer — which is why a single
+ * Filters panel could not cover both. There is now one set of category
+ * ids, owned by `constants/mapLayers.ts`, and both marker sources speak it.
+ */
 interface CafePOI {
   id: string;
   name: string;
@@ -186,18 +205,20 @@ interface CafePOI {
   rating?: number;
   vicinity?: string;
   types: string[];
-  category: LandmarkCategory;
+  category: PlaceCategory;
 }
 
 // --- Mapbox Geocoding search terms used to populate each landmark category ---
-const LANDMARK_CATEGORY_QUERIES: { category: LandmarkCategory; query: string }[] = [
+const LANDMARK_CATEGORY_QUERIES: { category: PlaceCategory; query: string }[] = [
   { category: "cafe", query: "cafe" },
   { category: "restaurant", query: "restaurant" },
-  { category: "spbu", query: "gas station" },
+  { category: "gas_station", query: "gas station" },
   { category: "shopping", query: "shopping mall" },
-  { category: "carwash", query: "car wash" },
+  { category: "car_wash", query: "car wash" },
   { category: "workshop", query: "car repair" },
-  { category: "charging", query: "ev charging station" },
+  { category: "ev_charger", query: "ev charging station" },
+  { category: "parking", query: "parking" },
+  { category: "hangout", query: "park" },
 ];
 
 type SelectedDestination =
@@ -507,15 +528,10 @@ function problemAge(since: string): string {
 // HUD mockup visually. Do not treat it as a real regulatory speed limit.
 const PLACEHOLDER_SPEED_LIMIT_KMH = 50;
 
-const CAT_LABELS: Record<LandmarkCategory, string> = {
-  cafe: "Cafes",
-  restaurant: "Food",
-  spbu: "Fuel",
-  shopping: "Shops",
-  carwash: "Car Wash",
-  charging: "Charging",
-  workshop: "Workshop",
-};
+// Labels and glyphs both come from the shared layer vocabulary now. The
+// local `CAT_LABELS` / `CAT_GLYPHS` maps they replace were a second copy of
+// the same table, keyed by a second set of ids.
+const CAT_LABELS = PLACE_CATEGORY_LABELS;
 
 /**
  * Landmark category → glyph.
@@ -564,15 +580,7 @@ const BOTTOM_STACK_OFFSET = spacing.spacingXxxl * 4; // 192
 const ROUTE_CASING_WIDTH = 8;
 const ROUTE_CORE_WIDTH = 4;
 
-const CAT_GLYPHS: Record<LandmarkCategory, MapGlyphComponent> = {
-  cafe: MAP_GLYPHS.cafe,
-  restaurant: MAP_GLYPHS.food,
-  spbu: MAP_GLYPHS.fuel,
-  shopping: MAP_GLYPHS.shopping,
-  carwash: MAP_GLYPHS.carwash,
-  charging: MAP_GLYPHS.charging,
-  workshop: MAP_GLYPHS.workshop,
-};
+const CAT_GLYPHS = PLACE_CATEGORY_ICONS;
 
 /**
  * The rank frame on a driver marker fills the same 42pt outer slot the
@@ -654,11 +662,14 @@ function ActionRow({
  */
 function FilterRow({
   label,
+  description,
   checked,
   onToggle,
   children,
 }: {
   label: string;
+  /** One line under the label saying what the layer actually contains. */
+  description?: string;
   checked: boolean;
   onToggle: () => void;
   children: React.ReactNode;
@@ -668,11 +679,17 @@ function FilterRow({
       accessibilityRole="checkbox"
       accessibilityState={{ checked }}
       accessibilityLabel={`${label} layer`}
+      accessibilityHint={description}
       style={({ pressed }) => [styles.filterRow, pressed && styles.pressed]}
       onPress={onToggle}
     >
       {children}
-      <Text style={styles.filterLabel} numberOfLines={1}>{label}</Text>
+      <View style={styles.filterLabelBox}>
+        <Text style={styles.filterLabel} numberOfLines={1}>{label}</Text>
+        {description ? (
+          <Text style={styles.filterDescription} numberOfLines={2}>{description}</Text>
+        ) : null}
+      </View>
       {/* The tick is `textPrimary`, not the accent. Every layer is on by
           default, so an accent-coloured tick meant nine red squares in one
           popover — which is the opposite of a sparingly-used accent. */}
@@ -917,17 +934,30 @@ export default function MapScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [visibleCats, setVisibleCats] = useState<Record<LandmarkCategory, boolean>>({
-    cafe: true,
-    restaurant: true,
-    spbu: true,
-    shopping: true,
-    carwash: true,
-    charging: true,
-    workshop: true,
-  });
-  const [showEventsLayer, setShowEventsLayer] = useState(true);
-  const [showDriversLayer, setShowDriversLayer] = useState(true);
+  // Layer visibility is one persisted store now, not three pieces of local
+  // state (`visibleCats`, `showEventsLayer`, `showDriversLayer`) that reset
+  // on every app launch. `isLayerVisible` is the single predicate every
+  // marker render site below goes through — that is what makes the toggles
+  // real rather than decorative, and it is unit-tested in
+  // `hooks/__tests__/mapFiltersState.test.ts`.
+  const {
+    isVisible: isLayerVisible,
+    toggle: toggleLayer,
+    setAll: setAllLayers,
+    activeCategories,
+    visibleCount: visibleLayerCount,
+    ready: filtersReady,
+  } = useMapFilters();
+  const showEventsLayer = isLayerVisible("events");
+  const showDriversLayer = isLayerVisible("users");
+  const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
+  /** Last region the map reported. Drives the clustering threshold. */
+  const [mapRegion, setMapRegion] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
   const weatherFetchedRef = useRef(false);
 
   // POI badges no longer load a bitmap — the category glyphs are drawn in
@@ -1592,18 +1622,66 @@ export default function MapScreen() {
     setShowDropPinHint(false);
   }, [showDropPinHint]);
 
-  // --- Nearby places (OSM + community): fetch on category change or map pan ---
-  useEffect(() => {
-    if (!placesLayerOpen || !userLocation) return;
-    places.fetchForRegion(userLocation.latitude, userLocation.longitude, places.category);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placesLayerOpen, places.category, userLocation]);
+  // --- Nearby places (OSM + community): fetch on filter change or map pan ---
+  //
+  // `activeCategories` is the switched-on subset, so unticking a category
+  // stops its Overpass traffic as well as its markers. With nine categories
+  // live that is the difference between one round trip and nine.
+  //
+  // `categoryKey` rather than the array itself in the dependency list:
+  // `activeCategories` is a fresh array on every filter change, and an
+  // array identity in a dep list would re-fire this effect on every render
+  // that touches filters at all.
+  const categoryKey = activeCategories.join(",");
 
-  const handlePlacesRegionChange = useCallback((region: { latitude: number; longitude: number }) => {
-    if (!placesLayerOpen) return;
-    places.fetchForRegion(region.latitude, region.longitude, places.category);
+  useEffect(() => {
+    if (!placesLayerOpen || !userLocation || !filtersReady) return;
+    places.fetchForRegion(userLocation.latitude, userLocation.longitude, activeCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placesLayerOpen, places.category]);
+  }, [placesLayerOpen, categoryKey, userLocation, filtersReady]);
+
+  const handlePlacesRegionChange = useCallback(
+    (nextRegion: {
+      latitude: number;
+      longitude: number;
+      latitudeDelta: number;
+      longitudeDelta: number;
+    }) => {
+      // Tracked unconditionally, not just while the Places layer is open:
+      // `latitudeDelta` is what decides whether markers cluster, and the
+      // landmark layer is on screen the whole time.
+      setMapRegion(nextRegion);
+      if (!placesLayerOpen || !filtersReady) return;
+      places.fetchForRegion(nextRegion.latitude, nextRegion.longitude, activeCategories);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [placesLayerOpen, categoryKey, filtersReady]
+  );
+
+  /**
+   * Tapping a cluster zooms into it rather than opening a sheet.
+   *
+   * Halving the region's height per tap is the behaviour every map has
+   * trained drivers to expect, and it converges: two or three taps on any
+   * cluster drops below the clustering threshold and breaks it into its
+   * members. Opening a list sheet instead would need a second selection
+   * model for something the map can already express.
+   */
+  const zoomToCluster = useCallback(
+    (cluster: { lat: number; lng: number }) => {
+      const delta = Math.max((mapRegion?.latitudeDelta ?? 0.05) / 2, 0.004);
+      mapRef.current?.animateToRegion(
+        {
+          latitude: cluster.lat,
+          longitude: cluster.lng,
+          latitudeDelta: delta,
+          longitudeDelta: delta,
+        },
+        350
+      );
+    },
+    [mapRegion?.latitudeDelta]
+  );
 
   // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
   const handleMapLongPress = useCallback((event: any) => {
@@ -1864,7 +1942,7 @@ export default function MapScreen() {
 
   // Nearest POI per category — same haversine approach as `nearestPoi` below,
   // fixed to the 4 categories the driving HUD's "Nearby" card shows.
-  const nearestOfCategory = (cat: LandmarkCategory): (CafePOI & { dist: number }) | null => {
+  const nearestOfCategory = (cat: PlaceCategory): (CafePOI & { dist: number }) | null => {
     if (!userLocation) return null;
     let best: (CafePOI & { dist: number }) | null = null;
     for (const c of cafes) {
@@ -1876,7 +1954,7 @@ export default function MapScreen() {
   };
   const nearbyCafe = nearestOfCategory("cafe") ?? nearestOfCategory("restaurant");
   const nearbyWorkshop = nearestOfCategory("workshop");
-  const nearbyFuel = nearestOfCategory("spbu");
+  const nearbyFuel = nearestOfCategory("gas_station");
   let nearbyMeet: (DriveEvent & { dist: number }) | null = null;
   if (userLocation) {
     for (const e of events) {
@@ -2099,11 +2177,14 @@ export default function MapScreen() {
       >
         <MapboxTileLayer dark={mapStyleDark} />
 
-        {placesLayerOpen && (
+        {placesLayerOpen && filtersReady && (
           <PlacesMarkers
             places={places.places}
             onSelect={setSelectedPlace}
+            onSelectCluster={zoomToCluster}
             selectedId={selectedPlace?.id ?? null}
+            origin={userLocation}
+            latitudeDelta={mapRegion?.latitudeDelta}
           />
         )}
 
@@ -2112,9 +2193,12 @@ export default function MapScreen() {
             party/chat state, so the map's POI layer never disappears
             mid-session.
 
-            Category is carried by the glyph; colour only says whether the
-            marker is idle, selected, or the confirmed destination. */}
-        {cafes.filter((poi) => visibleCats[poi.category]).map((poi) => {
+            The category badge is filled with the category's own colour and
+            the glyph drawn in `ON_CATEGORY` on top. Selected is still
+            racingRed on every category, so "the one you tapped" can never be
+            read as "this is a car wash". Nothing renders without asking
+            `isLayerVisible` first. */}
+        {filtersReady && cafes.filter((poi) => isLayerVisible(poi.category)).map((poi) => {
           const isSelected = selectedDestination?.type === "cafe" && selectedDestination.data.id === poi.id;
           const Glyph = CAT_GLYPHS[poi.category];
           const isChosen = isSelected && locationChosen;
@@ -2135,8 +2219,8 @@ export default function MapScreen() {
                     clips a badge that grew after capture. */}
                 <View style={styles.poiBadgeBox}>
                   <CutCornerSurface
-                    fill={isSelected ? colors.racingRed : colors.carbonSurface}
-                    borderColor={isSelected ? colors.racingRed : colors.hairline}
+                    fill={isSelected ? colors.racingRed : CATEGORY_COLORS[poi.category]}
+                    borderColor={isSelected ? colors.racingRed : alpha(colors.voidBlack, 0.55)}
                     borderWidth={isChosen ? borderWidth.emphasis : borderWidth.hairline}
                     cutSize={spacing.spacingSm}
                     corners="topRight"
@@ -2149,7 +2233,7 @@ export default function MapScreen() {
                   >
                     <Glyph
                       size={isChosen ? spacing.spacingXl : isSelected ? spacing.spacingLg : spacing.spacingMd}
-                      color={isSelected ? onRacingRed : colors.textPrimary}
+                      color={isSelected ? onRacingRed : ON_CATEGORY}
                     />
                   </CutCornerSurface>
                 </View>
@@ -2299,7 +2383,7 @@ export default function MapScreen() {
               coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
               anchor={{ x: 0.5, y: 0.36 }}
               onPress={() => setSelectedOnlineUser(onlineUser)}
-              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}`}
+              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}-${Math.round(onlineUser.heading / 15)}`}
               ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
             >
               <View style={styles.playerMarkerWrap} collapsable={false}>
@@ -2360,6 +2444,27 @@ export default function MapScreen() {
                       <Users size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
                     </View>
                   ) : null}
+                  {/* Direction of travel, pinned to the top of the ring box
+                      and rotated to the driver's last reported bearing.
+
+                      A heading of exactly 0 is treated as "no bearing yet",
+                      not as due north: `useOnlineUsers` defaults a null
+                      heading to 0, so every parked driver would otherwise
+                      sprout a north-pointing arrow. The cost is that a
+                      driver genuinely heading due north loses the chevron —
+                      a 1-in-360 cosmetic miss against a wrong arrow on every
+                      stationary marker on the map. */}
+                  {Number.isFinite(onlineUser.heading) && onlineUser.heading > 0 ? (
+                    <View
+                      style={[
+                        styles.playerHeading,
+                        { transform: [{ rotate: `${onlineUser.heading}deg` }] },
+                      ]}
+                      pointerEvents="none"
+                    >
+                      <HeadingChevron size={10} color={ringColor} />
+                    </View>
+                  ) : null}
                 </View>
                 <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
                 {problem && (
@@ -2380,9 +2485,17 @@ export default function MapScreen() {
           const isSelected = selectedEventId === ev.id;
           const timeLabel = fmtEventTime(ev.starts_at, ev.is_live);
           const accented = ev.is_live || isSelected;
-          const markerFill = isSelected ? colors.racingRed : colors.carbonSurface;
-          const markerBorder = accented ? colors.racingRed : colors.hairline;
-          const glyphColor = isSelected ? onRacingRed : colors.textPrimary;
+          // Events take their category colour like every other layer, with
+          // one exception kept from before: a *live* event still gets the
+          // accent, because "happening right now" is operational state and
+          // has to beat category identity. Selected wins over both.
+          const markerFill = isSelected
+            ? colors.racingRed
+            : CATEGORY_COLORS.events;
+          const markerBorder = accented
+            ? colors.racingRed
+            : alpha(colors.voidBlack, 0.55);
+          const glyphColor = isSelected ? onRacingRed : ON_CATEGORY;
           return (
             <SettledMarker
               key={`event-${ev.id}`}
@@ -2481,10 +2594,12 @@ export default function MapScreen() {
       {placesLayerOpen && !isRecording && (
         <>
           <PlacesFilterBar
-            active={places.category}
-            onChange={(cat) => {
-              places.setCategory(cat);
-              setSelectedPlace(null);
+            isActive={isLayerVisible}
+            onToggle={(cat) => {
+              toggleLayer(cat);
+              // A place whose category has just been hidden must not keep
+              // its callout open over an empty map.
+              if (isLayerVisible(cat)) setSelectedPlace(null);
             }}
             style={[styles.placesFilterBar, { top: insets.top + spacing.spacingMd }]}
           />
@@ -2492,7 +2607,7 @@ export default function MapScreen() {
             <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
               <ActivityIndicator size="small" color={colors.racingRed} />
               <Text style={styles.placesStatusText}>
-                Loading {PLACE_CATEGORY_LABELS[places.category].toLowerCase()} spots near you…
+                Loading nearby places…
               </Text>
             </View>
           )}
@@ -2702,7 +2817,7 @@ export default function MapScreen() {
                 <NearbyRow
                   glyph={MAP_GLYPHS.charging}
                   label="Charging"
-                  meters={nearestOfCategory("charging")?.dist}
+                  meters={nearestOfCategory("ev_charger")?.dist}
                 />
               </>
             )}
@@ -3233,6 +3348,31 @@ export default function MapScreen() {
             />
           </MapChromeButton>
 
+          {/* Places — the OSM + community layer.
+              This button was added in #88 and removed again in #89, which
+              left `setPlacesLayerOpen` with no caller: every other part of
+              the feature shipped, but no driver could reach it. It is back
+              because the marker rebuild extended that layer from four
+              categories to nine and wired it to the Filters panel, and a
+              layer nobody can open is a layer nobody can filter. */}
+          <MapChromeButton
+            label="Places"
+            active={placesLayerOpen}
+            accessibilityLabel="Nearby places layer"
+            onPress={() => {
+              setPlacesLayerOpen((v) => !v);
+              setSelectedPlace(null);
+              if (searchOpen) closeSearch();
+              setFiltersOpen(false);
+            }}
+          >
+            <MAP_GLYPHS.cafe
+              size={spacing.spacingLg}
+              color={placesLayerOpen ? colors.racingRed : colors.textPrimary}
+              strokeWidth={CHROME_ICON_STROKE}
+            />
+          </MapChromeButton>
+
           <MapChromeButton
             label="Event"
             accessibilityLabel="Create an event"
@@ -3379,37 +3519,54 @@ export default function MapScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.filtersTitle}>MAP LAYERS</Text>
-          {/* The coloured dot per row is gone — it repeated the seven POI
-              hues the marker set just dropped. The category glyph says
-              which layer it is; the tick says whether it is on. */}
-          {(Object.keys(CAT_LABELS) as LandmarkCategory[]).map((cat) => {
-            const Glyph = CAT_GLYPHS[cat];
-            return (
-              <FilterRow
-                key={cat}
-                label={CAT_LABELS[cat]}
-                checked={visibleCats[cat]}
-                onToggle={() => setVisibleCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
-              >
-                <Glyph size={spacing.spacingLg} color={colors.textSecondary} />
-              </FilterRow>
-            );
-          })}
-          <FilterRow
-            label="Events"
-            checked={showEventsLayer}
-            onToggle={() => setShowEventsLayer((v) => !v)}
+          <View style={styles.filtersHeaderRow}>
+            <Text style={styles.filtersTitle}>MAP LAYERS</Text>
+            {/* One control, two states — "Hide all" while anything is on,
+                "Show all" once everything is off. A driver who has hidden
+                nine categories one at a time needs one tap back, not nine. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                visibleLayerCount > 0 ? "Hide all map layers" : "Show all map layers"
+              }
+              hitSlop={spacing.spacingSm}
+              onPress={() => setAllLayers(visibleLayerCount === 0)}
+              style={({ pressed }) => [pressed && styles.pressed]}
+            >
+              <Text style={styles.filtersBulkAction}>
+                {visibleLayerCount > 0 ? "HIDE ALL" : "SHOW ALL"}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Each row's glyph carries its category colour — the same value
+              its marker is filled with, so the panel is a legend as well as
+              a control. The tick stays `textPrimary`: every layer is on by
+              default, and an accent-coloured tick meant eleven red squares
+              in one popover (MAP_SCREEN_REFERENCE §3). */}
+          <ScrollView
+            style={styles.filtersScroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            <MAP_GLYPHS.event size={spacing.spacingLg} color={colors.textSecondary} />
-          </FilterRow>
-          <FilterRow
-            label="Drivers"
-            checked={showDriversLayer}
-            onToggle={() => setShowDriversLayer((v) => !v)}
-          >
-            <MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textSecondary} />
-          </FilterRow>
+            {MAP_LAYERS.map((layer) => {
+              const Glyph = PLACE_CATEGORY_ICONS[layer];
+              return (
+                <FilterRow
+                  key={layer}
+                  label={PLACE_CATEGORY_LABELS[layer]}
+                  description={MAP_LAYER_DESCRIPTIONS[layer]}
+                  checked={isLayerVisible(layer)}
+                  onToggle={() => toggleLayer(layer)}
+                >
+                  <Glyph
+                    size={spacing.spacingLg}
+                    color={CATEGORY_COLORS[layer as PlaceCategory] ?? colors.textSecondary}
+                  />
+                </FilterRow>
+              );
+            })}
+          </ScrollView>
         </CutCornerSurface>
       )}
 
@@ -3654,6 +3811,106 @@ export default function MapScreen() {
       )}
 
       {/* ===================================================== */}
+      {/*   MAP PRIVACY SHEET                                    */}
+      {/* ===================================================== */}
+      {/* Opened by tapping the status card's body. It answers the question
+          the card raises but has no room for: what exactly is being shared,
+          and with whom.
+
+          KNOWN GAP — visibility is all-or-nothing. There is no friends-only
+          or convoy-only setting, because the presence layer has no audience
+          concept: `useOnlineUsers` broadcasts to one channel every signed-in
+          driver subscribes to, and `user_locations` is readable by any
+          authenticated user. Scoping it is a schema change (an audience
+          column plus RLS on the read path), not a UI toggle, so this sheet
+          states the limit plainly rather than implying a control that does
+          not exist. Tracked in MAP_MARKER_REFERENCE.md §7. */}
+      <Modal
+        visible={privacySheetOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPrivacySheetOpen(false)}
+      >
+        <Pressable
+          style={styles.privacyOverlay}
+          accessibilityRole="button"
+          accessibilityLabel="Close privacy settings"
+          onPress={() => setPrivacySheetOpen(false)}
+        >
+          <Pressable style={styles.privacySheetWrap} onPress={() => {}}>
+            <CutCornerSurface
+              fill={colors.carbonSurface}
+              borderColor={colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.lg}
+              corners="topRight"
+              contentStyle={styles.privacySheet}
+            >
+              <View style={styles.privacyHeader}>
+                <Text style={styles.privacyTitle}>MAP PRIVACY</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  hitSlop={spacing.spacingSm}
+                  onPress={() => setPrivacySheetOpen(false)}
+                >
+                  <X size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                </Pressable>
+              </View>
+
+              <View style={styles.privacyRow}>
+                <VisibilityGlyph
+                  visible={isUserOnline}
+                  color={colors.textPrimary}
+                  size={spacing.spacingLg}
+                />
+                <View style={styles.privacyRowText}>
+                  <Text style={styles.privacyRowTitle}>
+                    {isUserOnline ? "You're on the map" : "You're hidden"}
+                  </Text>
+                  <Text style={styles.privacyRowSub}>
+                    {isUserOnline
+                      ? "Every signed-in driver can see your position, your name, your level and your car — live, while the app is open."
+                      : "Nobody can see your position. You can still see other drivers."}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.privacyRow}>
+                <MAP_GLYPHS.driver size={spacing.spacingLg} color={colors.textPrimary} />
+                <View style={styles.privacyRowText}>
+                  <Text style={styles.privacyRowTitle}>Hiding other drivers is separate</Text>
+                  <Text style={styles.privacyRowSub}>
+                    The Drivers switch in Filters clears them off your map. It does
+                    not change what they can see of you — only this does.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Stated, not implied. A driver deciding whether to go online
+                  needs to know the choice is all-or-nothing before they make
+                  it, not after they go looking for a setting that isn't there. */}
+              <Text style={styles.privacyNote}>
+                Visibility is all-or-nothing today — there's no friends-only or
+                convoy-only option yet.
+              </Text>
+
+              <CutCornerButton
+                title={isUserOnline ? "Go Offline" : "Go Online"}
+                variant={isUserOnline ? "primary" : "ghost"}
+                corners="topRight"
+                onPress={() => {
+                  if (isUserOnline) goOffline();
+                  else goOnline();
+                  setPrivacySheetOpen(false);
+                }}
+              />
+            </CutCornerSurface>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ===================================================== */}
       {/*   ONLINE STATUS BANNER — compact, above the tab bar    */}
       {/* ===================================================== */}
       {!isRecording && !routeInfo && !selectedDestination && !selectedPlace && recordedPath.length === 0 && (() => {
@@ -3705,7 +3962,15 @@ export default function MapScreen() {
                 corners="topRight"
                 contentStyle={styles.onlineBanner}
               >
-                <View style={styles.onlineBannerLeft}>
+                {/* The body opens the privacy sheet; the switch flips
+                    visibility. Two targets in one card, so "what is shared?"
+                    and "stop sharing" are never the same tap. */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Map privacy and visibility"
+                  onPress={() => setPrivacySheetOpen(true)}
+                  style={({ pressed }) => [styles.onlineBannerLeft, pressed && styles.pressed]}
+                >
                   <View style={styles.onlineBannerDot} />
                   <View style={styles.onlineBannerTextWrap}>
                     <Text style={styles.onlineBannerTitle}>VISIBILITY OFF</Text>
@@ -3713,7 +3978,7 @@ export default function MapScreen() {
                       Other drivers can't see you. Flip the switch to share your position.
                     </Text>
                   </View>
-                </View>
+                </Pressable>
                 <Pressable
                   style={styles.visibilitySwitchTrack}
                   onPress={goOnline}
@@ -3741,7 +4006,12 @@ export default function MapScreen() {
                 corners="topRight"
                 contentStyle={styles.onlineBanner}
               >
-                <View style={styles.onlineBannerLeft}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Map privacy and visibility"
+                  onPress={() => setPrivacySheetOpen(true)}
+                  style={({ pressed }) => [styles.onlineBannerLeft, pressed && styles.pressed]}
+                >
                   <Animated.View
                     style={[
                       styles.onlineBannerDot,
@@ -3764,7 +4034,7 @@ export default function MapScreen() {
                           : "Position shared. Reconnecting to the live map — drivers may take a few seconds to appear."}
                     </Text>
                   </View>
-                </View>
+                </Pressable>
                 <Pressable
                   style={[styles.visibilitySwitchTrack, styles.visibilitySwitchTrackOn]}
                   onPress={goOffline}
@@ -4310,11 +4580,9 @@ const SCREEN_MARGIN = spacing.spacingLg;
  * disappear over light tiles. This is the one place the screen uses a
  * shadow, and it is a legibility device rather than an elevation one.
  */
-const mapLabelShadow = {
-  textShadowColor: alpha(colors.voidBlack, 0.9),
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 3,
-} as const;
+// `mapLabelShadow` now lives in `constants/theme.ts` — the Places layer
+// needs the same device for its marker labels, and two copies of a
+// legibility rule is how they drift apart.
 
 const styles = StyleSheet.create({
   container: {
@@ -4760,11 +5028,62 @@ const styles = StyleSheet.create({
     padding: spacing.spacingLg,
   },
 
+  /* ---------------- Map privacy sheet ---------------- */
+  privacyOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: alpha(colors.voidBlack, 0.75),
+  },
+  privacySheetWrap: {
+    padding: spacing.spacingMd,
+  },
+  privacySheet: {
+    padding: spacing.spacingXl,
+    gap: spacing.spacingLg,
+  },
+  privacyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  privacyTitle: {
+    ...textStyle("displayMd"),
+    color: colors.textPrimary,
+  },
+  privacyRow: {
+    flexDirection: "row",
+    gap: spacing.spacingMd,
+    alignItems: "flex-start",
+  },
+  privacyRowText: {
+    flex: 1,
+    gap: spacing.spacingXs,
+  },
+  privacyRowTitle: {
+    ...textStyle("body"),
+    fontFamily: fontFamily.bodySemiBold,
+    color: colors.textPrimary,
+  },
+  privacyRowSub: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  privacyNote: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
+  },
+
   /* ---------------- Filters popover ---------------- */
   filtersPopover: {
     position: "absolute",
     right: spacing.spacingXxxl + spacing.spacingXl + spacing.spacingSm,
-    width: spacing.spacingXxxl * 4,
+    // 240, up from 192: each row now carries a description line under its
+    // label, and at the old width "Other drivers on the map. Hiding them
+    // does not hide you." wrapped to four lines.
+    width: spacing.spacingXxxl * 5,
     zIndex: 240,
   },
   filtersContent: {
@@ -4780,16 +5099,41 @@ const styles = StyleSheet.create({
     marginTop: spacing.spacingSm,
     marginBottom: spacing.spacingXs,
   },
+  filtersHeaderRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+  },
+  filtersBulkAction: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 12,
+    lineHeight: 15,
+    letterSpacing: 1,
+    color: colors.textPrimary,
+  },
+  // Eleven rows with a description line each overflow the popover on a
+  // small screen. The list scrolls; the MAP STYLE control above it and the
+  // bulk action stay pinned, so the two things a driver reaches for most
+  // never scroll out of view.
+  filtersScroll: {
+    maxHeight: spacing.spacingXxxl * 6, // 288
+  },
   filterRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.spacingMd,
     paddingVertical: spacing.spacingSm,
   },
-  filterLabel: {
+  filterLabelBox: {
     flex: 1,
+  },
+  filterLabel: {
     ...textStyle("body"),
     color: colors.textPrimary,
+  },
+  filterDescription: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
   },
   filterCheck: {
     width: spacing.spacingXl,
@@ -5865,6 +6209,14 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.hairline,
     justifyContent: "center",
     alignItems: "center",
+  },
+  // Pinned inside `playerRingBox`, which is 46 square. Absolutely positioned
+  // children with negative offsets get clipped out of the native marker
+  // snapshot, so this sits at the top edge rather than above it.
+  playerHeading: {
+    position: "absolute",
+    top: 0,
+    alignSelf: "center",
   },
   playerLevelBadgeText: {
     ...textStyle("dataSm"),

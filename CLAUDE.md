@@ -105,3 +105,20 @@ Full detail, including the ingestion/enrichment/learning-loop pipeline and the
 `chat-server/` is a small local Node.js server (no dependencies) that serves a
 chat UI at `localhost` and answers questions about this repo by shelling out
 to `claude -p`. See `chat-server/README.md` to run it.
+
+**Map markers** — the map's marker system (`expo/app/(tabs)/map.tsx`,
+`expo/components/PlacesLayer.tsx`) draws eleven filterable layers: nine
+OSM/community place categories plus `events` and `users`. The vocabulary —
+ids, order, labels — is owned by `expo/constants/mapLayers.ts` and nothing
+else may define a category id. Layer visibility is one persisted store
+(`expo/hooks/useMapFilters.ts`) over a pure, tested rule
+(`expo/hooks/mapFiltersState.ts`); `isLayerVisible` is the single predicate
+every marker render site goes through, and a hidden category is not fetched
+either. Per-category marker colours live in
+`expo/constants/mapCategoryColors.ts`, deliberately quarantined there
+because they reverse the "category is shape, state is colour" rule that
+`expo/MAP_SCREEN_REFERENCE.md` §2 established — read that file's header
+before using one. Clustering is `expo/lib/mapClustering.ts` (grid-based,
+per-category), because `react-native-maps` has none of its own. Full detail,
+including what is still unverified on device, in
+`expo/MAP_MARKER_REFERENCE.md`.

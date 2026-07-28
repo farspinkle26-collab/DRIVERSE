@@ -3,7 +3,16 @@
 // or OSM tag shapes — swapping the POI source later (self-hosted Overpass,
 // a paid provider) means changing this file, not the /places-nearby contract.
 
-export type PlaceCategory = "cafe" | "gas_station" | "workshop" | "hangout";
+export type PlaceCategory =
+  | "cafe"
+  | "restaurant"
+  | "gas_station"
+  | "workshop"
+  | "hangout"
+  | "shopping"
+  | "parking"
+  | "ev_charger"
+  | "car_wash";
 
 export interface NormalizedPlace {
   id: string;
@@ -19,25 +28,59 @@ const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const OVERPASS_TIMEOUT_MS = 12_000;
 
 // Category -> one or more OSM tags, OR'd together in the query.
+//
+// `restaurant` used to live inside `hangout`'s tag list. It is its own
+// category now: it is the single densest POI type in a city, so it swamped
+// the bars and parks it was pooled with, and a driver looking for somewhere
+// to eat and a driver looking for somewhere to park up are not the same
+// search.
 const CATEGORY_TAGS: Record<PlaceCategory, { key: string; value: string }[]> = {
   cafe: [{ key: "amenity", value: "cafe" }],
+  restaurant: [{ key: "amenity", value: "restaurant" }],
   gas_station: [{ key: "amenity", value: "fuel" }],
   workshop: [{ key: "shop", value: "car_repair" }],
   hangout: [
     { key: "amenity", value: "bar" },
     { key: "amenity", value: "fast_food" },
     { key: "leisure", value: "park" },
-    { key: "amenity", value: "restaurant" },
   ],
+  shopping: [
+    { key: "shop", value: "mall" },
+    { key: "shop", value: "department_store" },
+  ],
+  parking: [{ key: "amenity", value: "parking" }],
+  ev_charger: [{ key: "amenity", value: "charging_station" }],
+  car_wash: [{ key: "shop", value: "car_wash" }],
 };
+
+/** Every category this service can answer for. Exported so callers can
+ *  build an accurate error message instead of hardcoding a stale list. */
+export const PLACE_CATEGORIES = Object.keys(CATEGORY_TAGS) as PlaceCategory[];
 
 export function isPlaceCategory(value: string): value is PlaceCategory {
   return value in CATEGORY_TAGS;
 }
 
+/**
+ * Queries `nw` (nodes *and* ways), not `node` alone, and closes with
+ * `out center`.
+ *
+ * The node-only query this replaced quietly under-reported half the new
+ * categories. A car park, a mall and a department store are almost always
+ * mapped in OSM as a closed way — the polygon of the building or the lot —
+ * with no node carrying the tag at all; `amenity=parking` in particular is
+ * overwhelmingly a way. Asking only for nodes returned a near-empty result
+ * that looked like "there is no parking here" rather than "the query is
+ * wrong shape". `out center` makes Overpass hand back a single
+ * representative point per way, which is what a marker needs anyway.
+ *
+ * Relations are left out: multipolygon parking and malls exist but are rare
+ * enough that the extra query cost is not worth it, and any that matter are
+ * usually also mapped as ways.
+ */
 function buildOverpassQuery(category: PlaceCategory, lat: number, lng: number, radiusMeters: number): string {
   const filters = CATEGORY_TAGS[category]
-    .map(({ key, value }) => `node["${key}"="${value}"](around:${radiusMeters},${lat},${lng});`)
+    .map(({ key, value }) => `nw["${key}"="${value}"](around:${radiusMeters},${lat},${lng});`)
     .join("\n  ");
 
   return `
@@ -45,7 +88,7 @@ function buildOverpassQuery(category: PlaceCategory, lat: number, lng: number, r
 (
   ${filters}
 );
-out body;
+out center;
 `.trim();
 }
 
@@ -96,17 +139,64 @@ export async function fetchFromOverpass(
   }
 
   const elements = Array.isArray(data.elements) ? data.elements : [];
-  return elements.map((el) => normalizeElement(el, category));
+  // A way whose geometry Overpass could not centre has no usable position;
+  // dropping it here keeps `NormalizedPlace.lat/lng` honestly non-nullable
+  // rather than pushing NaN coordinates onto a marker.
+  return elements
+    .map((el) => normalizeElement(el, category))
+    .filter((p): p is NormalizedPlace => p !== null);
 }
 
-function normalizeElement(element: unknown, category: PlaceCategory): NormalizedPlace {
-  const e = element as { id: number; lat: number; lon: number; tags?: Record<string, string> };
+/**
+ * Fallback names, used when an OSM feature carries no `name` tag.
+ *
+ * This is not cosmetic. The categories added in the marker rebuild are
+ * exactly the ones OSM most often leaves unnamed — a car park or a charging
+ * point usually has an operator at best — so the old flat `"Unnamed"` would
+ * have put a column of identical labels on the map precisely where the new
+ * markers are densest. A driver does not need a car park's name; they need
+ * to know it is a car park.
+ */
+const UNNAMED_FALLBACK: Record<PlaceCategory, string> = {
+  cafe: "Cafe",
+  restaurant: "Restaurant",
+  gas_station: "Fuel station",
+  workshop: "Workshop",
+  hangout: "Hangout spot",
+  shopping: "Shopping",
+  parking: "Parking",
+  ev_charger: "Charging point",
+  car_wash: "Car wash",
+};
+
+type OverpassElement = {
+  id: number;
+  type?: string;
+  lat?: number;
+  lon?: number;
+  /** Present on ways when the query ends `out center`. */
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
+};
+
+function normalizeElement(element: unknown, category: PlaceCategory): NormalizedPlace | null {
+  const e = element as OverpassElement;
   const tags = e.tags ?? {};
+  // A node carries lat/lon directly; a way carries it under `center`.
+  const lat = e.lat ?? e.center?.lat;
+  const lng = e.lon ?? e.center?.lon;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  // The id is namespaced by element type: OSM node 42 and way 42 are
+  // different features, and `osm-42` for both would let one evict the other
+  // from the cache and from any keyed list on the client.
+  const kind = e.type === "way" ? "way" : "node";
+
   return {
-    id: `osm-${e.id}`,
-    name: tags.name ?? "Unnamed",
-    lat: e.lat,
-    lng: e.lon,
+    id: `osm-${kind}-${e.id}`,
+    name: tags.name ?? tags.operator ?? UNNAMED_FALLBACK[category],
+    lat: lat as number,
+    lng: lng as number,
     category,
     tags,
     source: "osm",

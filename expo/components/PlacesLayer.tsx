@@ -1,18 +1,30 @@
 /**
  * Driveverse — the OSM + community "nearby places" layer.
  *
- * Four pieces, all rebuilt on the Phase 1 tokens:
- *   PlacesFilterBar   cafe / gas / workshop / hangout, cut-corner chips
- *   PlacesMarkers     the map markers themselves
+ *   PlacesFilterBar   the nine category chips, multi-select
+ *   PlacesMarkers     the map markers themselves, clustered
  *   PlaceDetailSheet  the callout for a tapped place
  *   SubmitPlaceFab    + SubmitPlaceModal, the community submission flow
  *
- * The colour rule for the whole layer: **category is shape, state is
- * colour.** Each category has its own hand-drawn glyph (MapGlyphs.tsx) at
- * one stroke weight, and the only colour that varies is whether the thing
- * is active/selected (racingRed) or not (hairline + textSecondary). That
- * is what lets four categories live inside a six-value palette; the
- * previous version needed a hue per category and spent four of the six.
+ * COLOUR — READ THIS
+ *   This layer used to follow the rule "category is shape, state is
+ *   colour": one hand-drawn glyph per category, and the only colour that
+ *   varied was selected vs not. The marker rebuild replaced that with a
+ *   per-category hue from `constants/mapCategoryColors.ts`, on an explicit
+ *   instruction to try colour and judge it on screen.
+ *
+ *   Two things were kept from the old rule, because they are what stop the
+ *   coloured version becoming unreadable:
+ *
+ *   - **The glyphs still carry the category on their own.** No category is
+ *     identified by hue alone, so the layer degrades correctly for a
+ *     colourblind driver and in greyscale.
+ *   - **Selection is still red, and no category is.** `racingRed` remains
+ *     reserved, so "this is the one you tapped" can never be confused with
+ *     "this is a restaurant".
+ *
+ *   Reverting is deleting `mapCategoryColors.ts` and the `tint` lookups
+ *   below. See `MAP_MARKER_REFERENCE.md` §2.
  */
 
 import React, { useState } from "react";
@@ -50,6 +62,8 @@ import {
   borderWidth,
   colors,
   cut,
+  fontFamily,
+  mapLabelShadow,
   onRacingRed,
   radius,
   spacing,
@@ -67,6 +81,8 @@ import {
   PLACE_CATEGORY_LABELS,
   type PlaceCategory,
 } from "@/constants/placesCategories";
+import { CATEGORY_COLORS, ON_CATEGORY } from "@/constants/mapCategoryColors";
+import { clusterPlaces, isCluster, type Cluster } from "@/lib/mapClustering";
 
 export const PLACE_SUBMIT_XP = 15;
 
@@ -78,17 +94,20 @@ const MARKER_GLYPH_SIZE = spacing.spacingLg;
  * ------------------------------------------------------------------ */
 
 /**
- * One chip per category, drawn by the shared `CutCornerChip` — the same
- * component the profile's Garage / Trips / Friends selector uses, so a
- * single-select control looks identical wherever it appears.
+ * One chip per category, drawn by the shared `CutCornerChip`.
+ *
+ * Multi-select now, not single-select. The chips are a shortcut into the
+ * same filter state the Filters panel writes — tapping "Fuel" here and
+ * unticking "Fuel" there are the same operation on the same store, so the
+ * two controls can never disagree about what is on the map.
  */
 export function PlacesFilterBar({
-  active,
-  onChange,
+  isActive,
+  onToggle,
   style,
 }: {
-  active: PlaceCategory;
-  onChange: (category: PlaceCategory) => void;
+  isActive: (category: PlaceCategory) => boolean;
+  onToggle: (category: PlaceCategory) => void;
   style?: StyleProp<ViewStyle>;
 }) {
   return (
@@ -104,18 +123,26 @@ export function PlacesFilterBar({
     >
       {PLACE_CATEGORIES.map((cat) => {
         const Glyph = PLACE_CATEGORY_ICONS[cat];
-        const isActive = active === cat;
+        const active = isActive(cat);
         return (
           <CutCornerChip
             key={cat}
             label={PLACE_CATEGORY_LABELS[cat]}
-            active={isActive}
-            accessibilityLabel={`Show ${PLACE_CATEGORY_LABELS[cat]} places`}
-            onPress={() => onChange(cat)}
+            active={active}
+            // `checkbox`, not `button`: each chip is an independent on/off,
+            // so a screen reader should announce its state rather than
+            // implying picking one deselects the rest.
+            accessibilityRole="checkbox"
+            accessibilityLabel={`${PLACE_CATEGORY_LABELS[cat]} places`}
+            onPress={() => onToggle(cat)}
             icon={
+              // The chip's glyph takes the category tint when off and the
+              // chip's own content colour when on — on an active chip the
+              // fill is already carrying state, and a tinted glyph on top of
+              // it would put two colours in a 12pt control.
               <Glyph
                 size={spacing.spacingMd}
-                color={chipContentColor(isActive)}
+                color={active ? chipContentColor(true) : CATEGORY_COLORS[cat]}
               />
             }
           />
@@ -129,39 +156,119 @@ export function PlacesFilterBar({
  * Markers (render as a child of <MapView>)
  * ------------------------------------------------------------------ */
 
+/**
+ * Metres between two coordinates. Equirectangular rather than haversine:
+ * this runs per marker per region change, and at the sub-5km ranges a
+ * marker label shows, the error is well under the rounding.
+ */
+function metresBetween(
+  a: { latitude: number; longitude: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6_371_000;
+  const dLat = ((b.lat - a.latitude) * Math.PI) / 180;
+  const dLng = ((b.lng - a.longitude) * Math.PI) / 180;
+  const meanLat = ((b.lat + a.latitude) / 2) * (Math.PI / 180);
+  const x = dLng * Math.cos(meanLat);
+  return Math.sqrt(x * x + dLat * dLat) * R;
+}
+
+/**
+ * The places layer's markers.
+ *
+ * LAYOUT
+ *   Stacked: a colour-filled badge carrying the category glyph, the place
+ *   name under it, the distance under that. The name and distance sit
+ *   directly on map tiles with no surface behind them, so both carry
+ *   `mapLabelShadow` — the legibility device described in
+ *   MAP_SCREEN_REFERENCE D-6, not an elevation one.
+ *
+ * FIXED BOUNDS
+ *   Every box below is a literal pixel value, not a spacing token, and the
+ *   outer wrapper does not change size when a marker is selected. Android
+ *   snapshots each custom marker view into a bitmap at capture time; a
+ *   marker that grows after capture is what produced the half-size icon bug
+ *   recorded in MAP_SCREEN_REFERENCE D-5. Selection changes fill and stroke
+ *   only — never geometry.
+ */
 export function PlacesMarkers({
   places,
   onSelect,
+  onSelectCluster,
   selectedId,
+  origin,
+  latitudeDelta,
 }: {
   places: NormalizedPlace[];
   onSelect: (place: NormalizedPlace) => void;
+  /** A cluster was tapped — the screen zooms to it rather than opening a sheet. */
+  onSelectCluster?: (cluster: Cluster<NormalizedPlace>) => void;
   selectedId?: string | null;
+  /** The driver, for the distance line. Omitted before the first GPS fix. */
+  origin?: { latitude: number; longitude: number } | null;
+  /** Current region height, which decides whether anything clusters. */
+  latitudeDelta?: number;
 }) {
+  // `NormalizedPlace` already satisfies `Clusterable` — id, lat, lng and a
+  // `category` that is a string subtype — so it clusters as itself and the
+  // members come back fully typed.
+  const clusters = clusterPlaces(places, { latitudeDelta: latitudeDelta ?? 0 });
+
   return (
     <>
-      {places.map((place) => {
+      {clusters.map((cluster) => {
+        // Per-category clustering means `category` is always set here. The
+        // fallback covers only the mixed-cluster case `global` mode can
+        // produce, which this call site does not use.
+        const category = (cluster.category ?? "cafe") as PlaceCategory;
+        const tint = CATEGORY_COLORS[category];
+
+        if (isCluster(cluster)) {
+          return (
+            <Marker
+              key={cluster.id}
+              coordinate={{ latitude: cluster.lat, longitude: cluster.lng }}
+              onPress={() => onSelectCluster?.(cluster)}
+              tracksViewChanges={false}
+              accessibilityLabel={`${cluster.count} ${PLACE_CATEGORY_LABELS[category]} here. Tap to zoom in.`}
+            >
+              <View style={styles.markerBox} collapsable={false}>
+                <ClusterBadge count={cluster.count} tint={tint} />
+              </View>
+            </Marker>
+          );
+        }
+
+        const place = cluster.items[0];
         const Glyph = PLACE_CATEGORY_ICONS[place.category];
         const isSelected = selectedId === place.id;
-        // A community submission gets the accent outline; an OSM import
-        // gets the hairline. One bit of information, one colour step.
-        const isCommunity = place.source === "user";
-        const borderColor = isSelected
-          ? colors.racingRed
-          : isCommunity
-            ? alpha(colors.racingRed, 0.55)
-            : colors.hairline;
+        const distance = origin ? metresBetween(origin, place) : null;
+
         return (
           <Marker
             key={place.id}
             coordinate={{ latitude: place.lat, longitude: place.lng }}
             onPress={() => onSelect(place)}
             tracksViewChanges={false}
+            accessibilityLabel={`${place.name}, ${
+              PLACE_CATEGORY_LABELS[place.category]
+            }${distance != null ? `, ${formatDistanceLabel(distance)} away` : ""}`}
           >
             <View style={styles.markerBox} collapsable={false}>
               <CutCornerSurface
-                fill={isSelected ? colors.racingRed : colors.carbonSurface}
-                borderColor={borderColor}
+                // Selected is red on every category, so "the one you tapped"
+                // is never confusable with "this is a restaurant".
+                fill={isSelected ? colors.racingRed : tint}
+                borderColor={
+                  isSelected
+                    ? colors.racingRed
+                    : // A community submission keeps its lighter outline; an
+                      // OSM import gets a dark one that reads as a rim rather
+                      // than a second colour.
+                      place.source === "user"
+                      ? colors.textPrimary
+                      : alpha(colors.voidBlack, 0.55)
+                }
                 borderWidth={borderWidth.hairline}
                 cutSize={spacing.spacingSm}
                 corners="topRight"
@@ -170,15 +277,46 @@ export function PlacesMarkers({
               >
                 <Glyph
                   size={MARKER_GLYPH_SIZE}
-                  color={isSelected ? onRacingRed : colors.textPrimary}
+                  // One ink for every category badge — see the luminance
+                  // constraint in `mapCategoryColors.ts`.
+                  color={isSelected ? onRacingRed : ON_CATEGORY}
                   strokeWidth={MAP_GLYPH_STROKE}
                 />
               </CutCornerSurface>
+              <Text style={styles.markerName} numberOfLines={1}>
+                {place.name}
+              </Text>
+              {distance != null ? (
+                <Text style={styles.markerDistance}>{formatDistanceLabel(distance)}</Text>
+              ) : null}
             </View>
           </Marker>
         );
       })}
     </>
+  );
+}
+
+/**
+ * A cluster badge: the count in mono, on the category's colour.
+ *
+ * No glyph. At this size the count is the information — a driver zoomed out
+ * far enough to see a cluster is asking "how many, and roughly where", and
+ * the colour already says which category it is.
+ */
+function ClusterBadge({ count, tint }: { count: number; tint: string }) {
+  return (
+    <CutCornerSurface
+      fill={tint}
+      borderColor={alpha(colors.voidBlack, 0.55)}
+      borderWidth={borderWidth.emphasis}
+      cutSize={spacing.spacingSm}
+      corners="topRight"
+      style={styles.clusterBadge}
+      contentStyle={styles.markerBadgeContent}
+    >
+      <Text style={styles.clusterCount}>{count > 99 ? "99+" : count}</Text>
+    </CutCornerSurface>
   );
 }
 
@@ -190,6 +328,20 @@ export function PlacesMarkers({
 function formatDistance(meters: number): { value: string; unit: string } {
   if (meters < 1000) return { value: String(Math.round(meters)), unit: "m" };
   return { value: (meters / 1000).toFixed(1), unit: "km" };
+}
+
+/**
+ * The same distance as one string, for the marker label.
+ *
+ * The callout splits value from unit so the number can be mono and the unit
+ * Inter (DRIVE_HUB D-9: no letters inside a mono readout). A marker label
+ * is a single 10pt line with no column to align to, so it stays whole —
+ * splitting it there would buy nothing and cost a second `Text` node on
+ * every marker on screen.
+ */
+function formatDistanceLabel(meters: number): string {
+  const { value, unit } = formatDistance(meters);
+  return `${value} ${unit}`;
 }
 
 /**
@@ -705,23 +857,58 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.spacingSm,
   },
-  /* Markers */
-  // Fixed outer box: the native Android marker bitmap is sized at capture
-  // time, so the bounds must not depend on content that lays out later.
+  /* Markers
+   *
+   * Every value here is a literal pixel count, deliberately NOT a spacing
+   * token — MAP_SCREEN_REFERENCE D-5 and checklist item 12. Android sizes a
+   * custom marker's bitmap when it captures the view, so these bounds must
+   * not move when the content inside them changes on select. All are even
+   * numbers so the badge centres on a whole pixel.
+   *
+   * 110 tall: 44 badge + 4 gap + ~28 of two label lines, plus slack so a
+   * two-line name never pushes the distance outside the captured bitmap. */
   markerBox: {
-    width: spacing.spacingXxxl,
-    height: spacing.spacingXxxl,
+    width: 110,
+    height: 110,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
   },
   markerBadge: {
-    width: spacing.spacingXl + spacing.spacingSm,
-    height: spacing.spacingXl + spacing.spacingSm,
+    width: 44,
+    height: 44,
   },
   markerBadgeContent: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  clusterBadge: {
+    width: 44,
+    height: 44,
+  },
+  clusterCount: {
+    ...textStyle("dataSm"),
+    color: ON_CATEGORY,
+  },
+  // Both labels sit straight on map tiles with no surface behind them, so
+  // they carry the shadow described in MAP_SCREEN_REFERENCE D-6. It is a
+  // legibility device over light tiles, not an elevation one.
+  markerName: {
+    ...textStyle("caption"),
+    fontFamily: fontFamily.displaySemiBold,
+    color: colors.textPrimary,
+    marginTop: spacing.spacingXs,
+    maxWidth: 104,
+    textAlign: "center",
+    ...mapLabelShadow,
+  },
+  markerDistance: {
+    ...textStyle("dataSm"),
+    fontSize: 11,
+    lineHeight: 14,
+    color: colors.textPrimary,
+    textAlign: "center",
+    ...mapLabelShadow,
   },
   /* Detail sheet */
   sheetWrap: {

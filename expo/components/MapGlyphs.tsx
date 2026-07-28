@@ -320,6 +320,39 @@ export function DriverMark({ size = 36 }: { size?: number }) {
 }
 
 /**
+ * Direction of travel on another driver's marker.
+ *
+ * A solid chevron rather than an outlined one: at 10pt an outline is two
+ * hairlines with a gap, which closes up to a smudge on a photographic tile.
+ * This is the one filled shape in the set, and it earns it by being the
+ * smallest.
+ *
+ * The caller rotates it — a `transform: rotate` on the wrapping view, since
+ * `react-native-maps` `rotation` would spin the whole marker including the
+ * name label. Points up at 0°, so the rotation is the compass bearing
+ * unchanged.
+ */
+export function HeadingChevron({
+  size = 10,
+  color = colors.textPrimary,
+}: {
+  size?: number;
+  color?: string;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 12 12" fill="none">
+      <Path
+        d="M6 0 L11 11 L6 8 L1 11 Z"
+        fill={color}
+        stroke={colors.voidBlack}
+        strokeWidth={1}
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
+/**
  * Visibility toggle glyph: open eye when the driver is on the map,
  * slashed when hidden.
  */

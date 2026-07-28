@@ -20,6 +20,7 @@ import { RoutesProvider } from "@/hooks/useRoutesStore";
 import { PlatinumProvider } from "@/hooks/usePlatinumStore";
 import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
 import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
+import { MapFiltersContext } from "@/hooks/useMapFilters";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 import { useAppFonts } from "@/hooks/useAppFonts";
@@ -118,8 +119,15 @@ export default function RootLayout() {
                                   <ActiveCarProvider>
                                     <SavedPlacesProvider>
                                       <CosmeticsProvider>
-                                        <RootLayoutNav />
-                                        <NotificationBanner />
+                                        {/* Map layer filters. No dependency
+                                            on any store above — it reads
+                                            AsyncStorage and nothing else —
+                                            so it sits at the bottom where
+                                            it is cheapest to mount. */}
+                                        <MapFiltersContext>
+                                          <RootLayoutNav />
+                                          <NotificationBanner />
+                                        </MapFiltersContext>
                                       </CosmeticsProvider>
                                     </SavedPlacesProvider>
                                   </ActiveCarProvider>

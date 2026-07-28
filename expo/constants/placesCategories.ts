@@ -1,38 +1,57 @@
-// Shared metadata for the OSM/community "nearby places" feature.
-// Keep the category ids in sync with supabase/functions/_shared/overpass.ts.
+// Glyph binding for the map's place layers.
 //
-// There is deliberately no colour-per-category map here any more. The old
-// one pulled four hues out of `constants/colors.ts` (purple cafe, amber
-// fuel, orange workshop, blue hangout), which is four values the six-value
-// palette has no room for — and it meant a filter chip's colour said
-// "cafe" while the same colour elsewhere in the app said "info".
+// The vocabulary itself — ids, ordering, labels, descriptions — lives in
+// `constants/mapLayers.ts` and is re-exported here so every existing
+// `from "@/constants/placesCategories"` import keeps working. The split
+// exists so the filter rule can be unit-tested without pulling
+// `react-native-svg` in behind it; see that file's header.
 //
-// Under the token system the split is:
-//   category → the glyph shape (components/MapGlyphs.tsx)
-//   state    → the colour (racingRed when active/selected, hairline when not)
+// COLOUR
+//   Category colours live in `constants/mapCategoryColors.ts`, quarantined
+//   there because they contradict the documented "category is shape, state
+//   is colour" rule. Read that file's header before using one.
 import {
   CafeGlyph,
+  ChargeGlyph,
+  DriverGlyph,
+  EventGlyph,
+  FoodGlyph,
   FuelGlyph,
   HangoutGlyph,
+  ParkingGlyph,
+  ShopGlyph,
+  WashGlyph,
   WorkshopGlyph,
   type MapGlyphComponent,
 } from "@/components/MapGlyphs";
+import type { MapLayerId } from "@/constants/mapLayers";
 
-export type PlaceCategory = "cafe" | "gas_station" | "workshop" | "hangout";
+export {
+  isPlaceCategory,
+  MAP_LAYER_DESCRIPTIONS,
+  MAP_LAYERS,
+  PLACE_CATEGORIES,
+  PLACE_CATEGORY_LABELS,
+} from "@/constants/mapLayers";
+export type { MapLayerId, PlaceCategory } from "@/constants/mapLayers";
 
-export const PLACE_CATEGORIES: PlaceCategory[] = ["cafe", "gas_station", "workshop", "hangout"];
-
-export const PLACE_CATEGORY_LABELS: Record<PlaceCategory, string> = {
-  cafe: "Cafe",
-  gas_station: "Gas",
-  workshop: "Workshop",
-  hangout: "Hangout",
-};
-
-export const PLACE_CATEGORY_ICONS: Record<PlaceCategory, MapGlyphComponent> = {
-  cafe: CafeGlyph,
+/**
+ * One purpose-drawn glyph per layer — no shared icons, no default pins.
+ *
+ * `hangout` was lucide's `MapPin` before the Phase 3 pass: a generic map
+ * pin standing in for a category, which says "somewhere" rather than "a
+ * place drivers park up together".
+ */
+export const PLACE_CATEGORY_ICONS: Record<MapLayerId, MapGlyphComponent> = {
   gas_station: FuelGlyph,
+  ev_charger: ChargeGlyph,
   workshop: WorkshopGlyph,
-  // Was lucide's `MapPin` — a generic map pin standing in for a category.
+  car_wash: WashGlyph,
+  parking: ParkingGlyph,
+  cafe: CafeGlyph,
+  restaurant: FoodGlyph,
   hangout: HangoutGlyph,
+  shopping: ShopGlyph,
+  events: EventGlyph,
+  users: DriverGlyph,
 };
