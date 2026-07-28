@@ -1,17 +1,18 @@
 // Background refresh for stale osm_places_cache rows, so real user requests
-// never wait on a live Overpass call if avoidable.
+// never wait on a live provider call if avoidable.
 //
-// Not wired to user traffic — schedule it with Supabase's cron
-// (dashboard: Edge Functions -> places-refresh-cache -> Schedule, e.g. every
-// 6 hours) or pg_cron calling this function's URL. Refreshes the oldest
-// stale rows first and stops after a small batch so one run can't itself
-// hammer Overpass or run long.
+// SCHEDULE THIS. It is not wired to user traffic, and an unscheduled warmer is
+// the difference between "the cache absorbs provider outages" and "the cache
+// only ever holds what a driver already waited for". Supabase dashboard:
+// Edge Functions -> places-refresh-cache -> Schedule, every 6 hours; or pg_cron
+// against this function's URL. Refreshes the oldest stale rows first and stops
+// after a small batch so one run can't itself run long or spike provider spend.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { fetchFromOverpass, isPlaceCategory, OverpassError } from "../_shared/overpass.ts";
+import { fetchNearby, isPlaceCategory, PlacesSourceError } from "../_shared/placesSource.ts";
 import { isStale, setCached } from "../_shared/cache.ts";
 
 const BATCH_SIZE = 20;
-const OVERPASS_RADIUS_METERS = 2000;
+const FETCH_RADIUS_METERS = 2000;
 
 Deno.serve(async () => {
   const supabase = createClient(
@@ -39,13 +40,13 @@ Deno.serve(async () => {
     const lat = row.lat_bucket / 100;
     const lng = row.lng_bucket / 100;
     try {
-      const places = await fetchFromOverpass(row.category, lat, lng, OVERPASS_RADIUS_METERS);
+      const places = await fetchNearby(row.category, lat, lng, FETCH_RADIUS_METERS);
       await setCached(supabase, row.category, lat, lng, places);
       refreshed++;
     } catch (err) {
       failed++;
-      if (err instanceof OverpassError) {
-        console.error(`[places-refresh-cache] Overpass error for ${row.cache_key}: ${err.message}`);
+      if (err instanceof PlacesSourceError) {
+        console.error(`[places-refresh-cache] provider error for ${row.cache_key}: ${err.message}`);
       } else {
         console.error(`[places-refresh-cache] unexpected error for ${row.cache_key}:`, err);
       }

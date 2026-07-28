@@ -12,7 +12,7 @@
  * function contract.
  *
  * Keep the category ids in sync with
- * `supabase/functions/_shared/overpass.ts`.
+ * `supabase/functions/_shared/placesSource.ts`.
  */
 
 /* ------------------------------------------------------------------ *

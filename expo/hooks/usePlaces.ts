@@ -14,7 +14,7 @@ const FETCH_DEBOUNCE_MS = 600;
 const DEFAULT_RADIUS_METERS = 2000;
 
 /**
- * Drives the OSM + community places layer.
+ * Drives the provider + community places layer.
  *
  * WHAT CHANGED WITH THE MARKER REBUILD
  *   This used to hold a single `category` and swap the whole marker set when
@@ -28,11 +28,11 @@ const DEFAULT_RADIUS_METERS = 2000;
  *   off stops its network traffic as well as its markers. This is the reason
  *   the filter predicate is not applied at render time only: with nine
  *   categories live, fetching all of them and drawing two would mean the
- *   driver pays for seven Overpass round trips they asked not to see.
+ *   driver pays for seven provider round trips they asked not to see.
  *
  * PARTIAL FAILURE IS NOT TOTAL FAILURE
  *   Requests run in parallel and are folded together per category. If
- *   Overpass times out on one, the other eight still render and the error
+ *   the provider fails on one, the other eight still render and the error
  *   names the one that did not — an empty map with a generic error was the
  *   previous behaviour and it made a single flaky category look like a dead
  *   feature.

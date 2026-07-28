@@ -1,18 +1,17 @@
 // GET /places-nearby?lat=&lng=&radius=&category=
 //
-// Returns merged OSM (cached, from Overpass) + approved community places.
-// Contract stays stable regardless of where POIs come from — swap Overpass
-// for a self-hosted instance or a paid provider by editing _shared/overpass.ts
-// only.
+// Returns merged provider (cached) + approved community places. Contract stays
+// stable regardless of where POIs come from — swap the provider by editing
+// _shared/placesSource.ts only.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  fetchFromOverpass,
+  fetchNearby,
   isPlaceCategory,
-  OverpassError,
+  PlacesSourceError,
   PLACE_CATEGORIES,
   type NormalizedPlace,
-} from "../_shared/overpass.ts";
-import { getCached, setCached } from "../_shared/cache.ts";
+} from "../_shared/placesSource.ts";
+import { getCachedEntry, setCached } from "../_shared/cache.ts";
 import { mergePlaces } from "../_shared/merge.ts";
 
 const DEFAULT_RADIUS_METERS = 2000;
@@ -59,25 +58,41 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
-  let osmPlaces: NormalizedPlace[];
-  const cached = await getCached(supabase, category, lat, lng);
-  if (cached) {
+  // Cache-first, and — this is the part that matters — cache-last too.
+  //
+  // The previous version returned 502 the moment the POI provider failed, even
+  // when it was holding a perfectly good copy of this exact bucket from an hour
+  // earlier. That turned every provider hiccup into an empty map and a red
+  // error in the driver's face. POIs do not move: a stale answer is very nearly
+  // as good as a fresh one, and enormously better than nothing. So the only
+  // request that can still fail is one for a bucket that has never been fetched.
+  let providerPlaces: NormalizedPlace[];
+  const cached = await getCachedEntry(supabase, category, lat, lng);
+
+  if (cached && !cached.stale) {
     console.log(`[places-nearby] cache hit category=${category} lat=${lat} lng=${lng}`);
-    osmPlaces = cached;
+    providerPlaces = cached.payload;
   } else {
-    console.log(`[places-nearby] cache miss category=${category} lat=${lat} lng=${lng} -> querying Overpass`);
+    const reason = cached ? "stale" : "miss";
+    console.log(`[places-nearby] cache ${reason} category=${category} lat=${lat} lng=${lng} -> querying provider`);
     try {
-      osmPlaces = await fetchFromOverpass(category, lat, lng, DEFAULT_RADIUS_METERS);
-      await setCached(supabase, category, lat, lng, osmPlaces);
+      providerPlaces = await fetchNearby(category, lat, lng, DEFAULT_RADIUS_METERS);
+      await setCached(supabase, category, lat, lng, providerPlaces);
     } catch (error) {
-      if (error instanceof OverpassError) {
-        console.error(`[places-nearby] Overpass error: ${error.message}`);
+      if (!(error instanceof PlacesSourceError)) throw error;
+
+      if (cached) {
+        console.warn(
+          `[places-nearby] provider error (${error.message}) — serving stale cache for category=${category}`
+        );
+        providerPlaces = cached.payload;
+      } else {
+        console.error(`[places-nearby] provider error, nothing cached: ${error.message}`);
         return jsonResponse(
           { error: "Couldn't load nearby places, try again.", places: [] },
           502
         );
       }
-      throw error;
     }
   }
 
@@ -111,6 +126,6 @@ Deno.serve(async (req) => {
     source: "user" as const,
   }));
 
-  const merged = mergePlaces(osmPlaces, userPlaces);
+  const merged = mergePlaces(providerPlaces, userPlaces);
   return jsonResponse({ places: merged });
 });

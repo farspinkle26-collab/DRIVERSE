@@ -24,7 +24,7 @@ from a decision that document made.
 | `lib/mapClustering.ts` | **New.** Grid clustering, per-category by default. |
 | `hooks/usePlaces.ts` | Single category → a set of categories, fetched in parallel, partial failure tolerated. |
 | `lib/placesApi.ts` | +`fetchNearbyPlacesMany`. |
-| `supabase/functions/_shared/overpass.ts` | Four categories → nine; `node` → `nw` + `out center`; type-namespaced ids; category-aware fallback names. |
+| `supabase/functions/_shared/placesSource.ts` | Four categories → nine; namespaced ids; category-aware fallback names. Replaced `_shared/overpass.ts` when the POI source moved off Overpass — see §10b. |
 | `components/PlacesLayer.tsx` | Multi-select chips; markers rebuilt as badge + name + distance, clustered. |
 | `components/CutCorner.tsx` | `CutCornerChip` gained an optional `accessibilityRole` so a chip can be a checkbox. Additive. |
 | `constants/theme.ts` | `mapLabelShadow` promoted out of `map.tsx` — two files need it now. |
@@ -101,7 +101,7 @@ sources speak it.
 **One store.** The filter chips over the Places layer and the tick boxes in
 the panel write the same state, so they cannot disagree.
 
-**Hidden means not fetched.** `activeCategories` feeds the Overpass request,
+**Hidden means not fetched.** `activeCategories` feeds the provider request,
 so unticking a category stops its network traffic too. With nine categories
 live that is the difference between one round trip and nine.
 
@@ -233,14 +233,17 @@ path), not a UI toggle. The privacy sheet states this plainly rather than
 implying a control that does not exist. **Follow-up task.**
 
 **Two POI sources still overlap.** Landmarks (Mapbox geocoding, always on)
-and Places (Overpass + community, always on — see §9) can both draw a
-marker for the same real-world place. They now share one vocabulary and one
+and Places (Mapbox Search Box + community, always on — see §9) can both draw a
+marker for the same real-world place. They are now the same vendor but not the
+same endpoint, so this is still two answers, not one. They now share one vocabulary and one
 filter, so it is coherent, but the deduplication `mergePlaces` does within
 the Places layer does not run across the two.
 
 **`hangout` lost `amenity=restaurant`** to the new `restaurant` category.
-Cached Overpass responses keyed on the old tag list will serve the old
-grouping until they age out (7 days).
+Cached responses keyed on the old grouping serve it until they age out
+(7 days) — which now also covers rows cached under Overpass, whose payloads
+still carry `source: "osm"` and OSM tag shapes. Everything downstream treats
+"not `user`" as "from the provider" for exactly this reason.
 
 ---
 
@@ -320,34 +323,54 @@ POIs instead of streets and regions, and a hard `maxDistanceMeters` radius in
 The radius is the load-bearing part: `types=poi` narrows the *class* of
 answer, only the radius bounds *where* it can be.
 
-### 10b. Nine parallel Overpass queries, from one IP
+### 10b. Nine parallel Overpass queries, from one IP — and why the source changed
 
 `fetchNearbyPlacesMany` fired every ticked category at once, on the reasoning
 that the wall-clock cost is then one round trip however many boxes are ticked.
-That held at four categories and broke at nine. The bottleneck is not the
+That held at four categories and broke at nine. The bottleneck was never the
 client: each request becomes an edge-function invocation making its own
 Overpass query, all leaving Supabase from **one egress IP**, and
 `overpass-api.de` refuses anything past its small per-IP slot count with an
-immediate **429** rather than queueing it. Past two or three, extra
-parallelism converts into failures, not speed — which surfaced as
-`Edge Function returned a non-2xx status code` for whichever categories lost
-the race.
+immediate **429** rather than queueing it.
 
-Fixed at both ends:
+The first fix windowed the client to three at a time and added retries at both
+ends. **It was not enough, and the retries made it worse.** The egress IP is
+shared with every other Supabase project in the region, so the app was never
+only competing with itself, and the two layers of retry compounded: the edge
+function tried up to four times across two endpoints, the client then retried
+the resulting 502 once, so *one ticked category cost up to eight upstream
+requests and nine categories cost seventy-two* — all aimed at a service that
+was refusing traffic for making too many requests. The retry was feeding the
+rate limit it was meant to survive. On device this read as a wall of
+`[placesApi] places-nearby <category> failed (HTTP 502)`, two per category per
+pan, across every category, continuously.
 
-- **Client** (`lib/placesApi.ts`) windows the requests through
-  `mapWithConcurrency` (`lib/concurrency.ts`, pure and unit-tested) at three
-  at a time, and retries once on 429/5xx. It also reads the real status off
-  `error.context`, so the log now says *which* failure it was — 429, 502, 400
-  and 404 all need different fixes and were previously indistinguishable.
-- **Server** (`_shared/overpass.ts`) retries a retryable status twice per
-  endpoint and falls through to the kumi.systems mirror. A 429 is "ask again
-  in a moment", not "there are no places here", and turning it straight into a
-  502 is what made a ticked category read as a dead feature.
+**The resolution was to stop depending on Overpass.** `_shared/placesSource.ts`
+now queries Mapbox Search Box — paid, SLA-backed, and using a vendor the app
+already depends on for tiles, geocoding and directions. Three rules came out of
+it:
 
-A malformed request (4xx that is not 429) is *not* retried at either end —
-it fails the same way at every mirror, and retrying only spends the driver's
-time to fail four times instead of once.
+- **Retry at one layer only, the one nearest the provider.** It is the only
+  layer that can see the real status and back off per endpoint. `placesApi.ts`
+  now reports a failure once and lets the driver pan to retry. It still reads
+  the status off `error.context`, so a log line names *which* failure it was.
+- **A stale cache row beats an error.** `places-nearby` serves the cached
+  bucket when the provider fails and only 502s for a bucket it has never
+  fetched. POIs do not move; an eight-day-old cafe list is a far better answer
+  than an empty map.
+- **Partial failure is not total failure, within a category as well as
+  across.** `hangout` spans three canonical Mapbox categories; one being
+  rejected returns the other two rather than claiming there are no hangouts.
+
+A malformed request (4xx that is not 429) is still not retried anywhere — it
+fails the same way every time, and retrying only spends the driver's time to
+fail three times instead of once.
+
+The canonical category ids are the one part of this no unit test can prove: a
+wrong id is a well-formed request for a category that does not exist, and it
+fails soft (that sub-query contributes nothing) rather than loudly. Verify them
+against `/search/searchbox/v1/list/category` before trusting a deploy — see
+`supabase/functions/README.md`.
 
 ### 10c. `tracksViewChanges={false}` froze the marker bitmap before it drew
 
