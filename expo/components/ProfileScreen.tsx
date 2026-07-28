@@ -620,6 +620,29 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     };
   }, [isAuthenticated, user, targetId]);
 
+  // Live-update the notifications bell as friend requests arrive/resolve,
+  // so a new request lands in the inbox without needing a manual refresh.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const channel = supabase
+      .channel(`friends_${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friends" },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as { user_id?: string; friend_id?: string } | null;
+          if (row?.user_id !== user.id && row?.friend_id !== user.id) return;
+          loadInboxes();
+          loadFriends();
+          loadFriendState();
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadAll();
