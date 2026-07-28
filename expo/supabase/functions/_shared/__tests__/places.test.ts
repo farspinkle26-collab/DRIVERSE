@@ -1,5 +1,11 @@
 import { describe, expect, it, mock, afterEach } from "bun:test";
-import { fetchFromOverpass, isPlaceCategory, OverpassError, type NormalizedPlace } from "../overpass.ts";
+import {
+  fetchFromOverpass,
+  isPlaceCategory,
+  OverpassError,
+  PLACE_CATEGORIES,
+  type NormalizedPlace,
+} from "../overpass.ts";
 import { mergePlaces } from "../merge.ts";
 import { cacheKeyFor, latLngBucket, isStale } from "../cache.ts";
 
@@ -8,15 +14,27 @@ import { cacheKeyFor, latLngBucket, isStale } from "../cache.ts";
 const JAKARTA = { lat: -6.1754, lng: 106.8272 };
 
 describe("isPlaceCategory", () => {
-  it("accepts the four supported categories", () => {
-    expect(isPlaceCategory("cafe")).toBe(true);
-    expect(isPlaceCategory("gas_station")).toBe(true);
-    expect(isPlaceCategory("workshop")).toBe(true);
-    expect(isPlaceCategory("hangout")).toBe(true);
+  it("accepts all nine supported categories", () => {
+    for (const category of [
+      "cafe",
+      "restaurant",
+      "gas_station",
+      "workshop",
+      "hangout",
+      "shopping",
+      "parking",
+      "ev_charger",
+      "car_wash",
+    ]) {
+      expect(isPlaceCategory(category)).toBe(true);
+    }
+    expect(PLACE_CATEGORIES).toHaveLength(9);
   });
 
   it("rejects anything else", () => {
-    expect(isPlaceCategory("restaurant")).toBe(false);
+    expect(isPlaceCategory("petrol")).toBe(false);
+    expect(isPlaceCategory("users")).toBe(false);
+    expect(isPlaceCategory("events")).toBe(false);
     expect(isPlaceCategory("")).toBe(false);
   });
 });
@@ -42,7 +60,7 @@ describe("fetchFromOverpass", () => {
     const places = await fetchFromOverpass("cafe", JAKARTA.lat, JAKARTA.lng, 2000);
     expect(places).toHaveLength(1);
     expect(places[0]).toEqual({
-      id: "osm-111",
+      id: "osm-node-111",
       name: "Kopi Kenangan",
       lat: JAKARTA.lat,
       lng: JAKARTA.lng,
@@ -52,13 +70,87 @@ describe("fetchFromOverpass", () => {
     });
   });
 
-  it("falls back to 'Unnamed' when tags.name is missing", async () => {
+  // Malls and car parks are mapped as closed ways, not nodes. A node-only
+  // query returned almost nothing for them, which read on the map as "there
+  // is no parking here" rather than as a malformed query.
+  it("takes a way's position from `center`, as `out center` returns it", async () => {
     globalThis.fetch = mock(async () =>
-      new Response(JSON.stringify({ elements: [{ id: 222, lat: 0, lon: 0, tags: {} }] }), { status: 200 })
+      new Response(
+        JSON.stringify({
+          elements: [
+            {
+              id: 333,
+              type: "way",
+              center: { lat: JAKARTA.lat, lon: JAKARTA.lng },
+              tags: { name: "Plaza Indonesia", amenity: "parking" },
+            },
+          ],
+        }),
+        { status: 200 }
+      )
     ) as unknown as typeof fetch;
 
-    const places = await fetchFromOverpass("gas_station", 0, 0, 2000);
-    expect(places[0].name).toBe("Unnamed");
+    const places = await fetchFromOverpass("parking", JAKARTA.lat, JAKARTA.lng, 2000);
+    expect(places).toHaveLength(1);
+    expect(places[0].lat).toBe(JAKARTA.lat);
+    expect(places[0].lng).toBe(JAKARTA.lng);
+    expect(places[0].id).toBe("osm-way-333");
+  });
+
+  it("namespaces ids by element type so node 42 and way 42 stay distinct", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(
+        JSON.stringify({
+          elements: [
+            { id: 42, type: "node", lat: 1, lon: 1, tags: { name: "A" } },
+            { id: 42, type: "way", center: { lat: 2, lon: 2 }, tags: { name: "B" } },
+          ],
+        }),
+        { status: 200 }
+      )
+    ) as unknown as typeof fetch;
+
+    const places = await fetchFromOverpass("shopping", 0, 0, 2000);
+    expect(new Set(places.map((p) => p.id)).size).toBe(2);
+  });
+
+  it("drops an element with no usable coordinate rather than emitting NaN", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(
+        JSON.stringify({
+          elements: [
+            { id: 1, type: "way", tags: { name: "Geometry-less way" } },
+            { id: 2, type: "node", lat: 3, lon: 4, tags: { name: "Fine" } },
+          ],
+        }),
+        { status: 200 }
+      )
+    ) as unknown as typeof fetch;
+
+    const places = await fetchFromOverpass("parking", 0, 0, 2000);
+    expect(places).toHaveLength(1);
+    expect(places[0].name).toBe("Fine");
+  });
+
+  // Unnamed features cluster in exactly the new categories, so a flat
+  // "Unnamed" would have put a column of identical labels on the map where
+  // the markers are densest.
+  it("falls back to a category name, then to the operator, when unnamed", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(
+        JSON.stringify({
+          elements: [
+            { id: 222, type: "node", lat: 0, lon: 0, tags: {} },
+            { id: 223, type: "node", lat: 0, lon: 0, tags: { operator: "PLN" } },
+          ],
+        }),
+        { status: 200 }
+      )
+    ) as unknown as typeof fetch;
+
+    const places = await fetchFromOverpass("ev_charger", 0, 0, 2000);
+    expect(places[0].name).toBe("Charging point");
+    expect(places[1].name).toBe("PLN");
   });
 
   it("throws OverpassError (not a raw exception) when Overpass returns a non-200", async () => {

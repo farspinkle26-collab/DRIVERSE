@@ -195,6 +195,33 @@ export function DriverGlyph(props: GlyphProps) {
   );
 }
 
+/**
+ * Parking — a squared "P" standing inside two bay corner-markers.
+ *
+ * The only glyph in the set built on a letterform, and it earns the
+ * exception: the P painted on a bay floor is the actual signage drivers
+ * read on the road, so borrowing it is the same move `DestinationMark`
+ * makes by borrowing a reticle. It is drawn as strokes on the 24-unit
+ * grid with a mitred bowl rather than set in a typeface, so it stays in
+ * register with the rest of the set instead of importing Rajdhani's
+ * curves onto the map surface.
+ *
+ * The corner markers are what stop it reading as a bare letter: they are
+ * the painted bay corners, and they also separate it from `HangoutGlyph`
+ * (cars on a kerb — "drivers park up together") which is a social place,
+ * not a parking facility.
+ */
+export function ParkingGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <Path d="M3 8V3h5" />
+      <Path d="M21 16v5h-5" />
+      <Path d="M9 6v12" />
+      <Path d="M9 6h6v5H9" />
+    </Glyph>
+  );
+}
+
 /** Charging — plug body with the bolt cut through it. */
 export function ChargeGlyph(props: GlyphProps) {
   return (
@@ -293,6 +320,39 @@ export function DriverMark({ size = 36 }: { size?: number }) {
 }
 
 /**
+ * Direction of travel on another driver's marker.
+ *
+ * A solid chevron rather than an outlined one: at 10pt an outline is two
+ * hairlines with a gap, which closes up to a smudge on a photographic tile.
+ * This is the one filled shape in the set, and it earns it by being the
+ * smallest.
+ *
+ * The caller rotates it — a `transform: rotate` on the wrapping view, since
+ * `react-native-maps` `rotation` would spin the whole marker including the
+ * name label. Points up at 0°, so the rotation is the compass bearing
+ * unchanged.
+ */
+export function HeadingChevron({
+  size = 10,
+  color = colors.textPrimary,
+}: {
+  size?: number;
+  color?: string;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 12 12" fill="none">
+      <Path
+        d="M6 0 L11 11 L6 8 L1 11 Z"
+        fill={color}
+        stroke={colors.voidBlack}
+        strokeWidth={1}
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
+/**
  * Visibility toggle glyph: open eye when the driver is on the map,
  * slashed when hidden.
  */
@@ -349,6 +409,7 @@ export type MapGlyphKey =
   | "workshop"
   | "hangout"
   | "shopping"
+  | "parking"
   | "carwash"
   | "charging"
   | "event"
@@ -363,6 +424,7 @@ export const MAP_GLYPHS: Record<MapGlyphKey, MapGlyphComponent> = {
   workshop: WorkshopGlyph,
   hangout: HangoutGlyph,
   shopping: ShopGlyph,
+  parking: ParkingGlyph,
   carwash: WashGlyph,
   charging: ChargeGlyph,
   event: EventGlyph,

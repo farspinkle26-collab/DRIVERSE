@@ -1,0 +1,251 @@
+# Map markers — the rebuild
+
+Companion to `MAP_SCREEN_REFERENCE.md`, which re-skinned the map screen onto
+the Phase 1 tokens. This pass changes what the markers *mean*: nine POI
+categories instead of four, per-category colour, working persisted filters,
+clustering, and a heading indicator on live drivers.
+
+Read `MAP_SCREEN_REFERENCE.md` first. This file only records what is new,
+and — more importantly — the three places where this work knowingly departs
+from a decision that document made.
+
+---
+
+## 1. What changed, file by file
+
+| File | Change |
+|---|---|
+| `constants/mapLayers.ts` | **New.** The layer vocabulary: nine categories + `events` + `users`, their order, labels and descriptions. No React, no glyphs, so the filter rule can be unit-tested. |
+| `constants/mapCategoryColors.ts` | **New, and quarantined.** Ten category hues. See §2. |
+| `constants/placesCategories.ts` | Reduced to the glyph binding; re-exports the vocabulary so existing imports keep working. |
+| `components/MapGlyphs.tsx` | +`ParkingGlyph` (the one genuinely missing category icon), +`HeadingChevron`. |
+| `hooks/mapFiltersState.ts` | **New.** The pure filter rule. `isLayerVisible` is the single predicate the whole map renders through. |
+| `hooks/useMapFilters.ts` | **New.** AsyncStorage-backed store around that rule. |
+| `lib/mapClustering.ts` | **New.** Grid clustering, per-category by default. |
+| `hooks/usePlaces.ts` | Single category → a set of categories, fetched in parallel, partial failure tolerated. |
+| `lib/placesApi.ts` | +`fetchNearbyPlacesMany`. |
+| `supabase/functions/_shared/overpass.ts` | Four categories → nine; `node` → `nw` + `out center`; type-namespaced ids; category-aware fallback names. |
+| `components/PlacesLayer.tsx` | Multi-select chips; markers rebuilt as badge + name + distance, clustered. |
+| `components/CutCorner.tsx` | `CutCornerChip` gained an optional `accessibilityRole` so a chip can be a checkbox. Additive. |
+| `constants/theme.ts` | `mapLabelShadow` promoted out of `map.tsx` — two files need it now. |
+| `app/(tabs)/map.tsx` | One category vocabulary instead of two; filters wired to the store; Places layer entry point restored; privacy sheet added; heading chevron on driver markers. |
+| `app/_layout.tsx` | Mounts `MapFiltersContext`. |
+
+Tests: 139 passing, up from 105. The new ones are `mapFiltersState.test.ts`
+(17) and `mapClustering.test.ts` (17).
+
+---
+
+## 2. Category colour — a documented decision, reversed
+
+`MAP_SCREEN_REFERENCE.md` §2 and its checklist item 10 say **category is
+shape, state is colour**, and the Phase 3 pass deleted both
+`PLACE_CATEGORY_COLORS` and a seven-hue `CAT_COLORS` map to get there.
+
+This pass puts colour back, on an explicit instruction to try it and judge
+it on screen. The conflict was raised before any of it was built.
+
+**What is being traded.** The palette is six values; there are now ten more
+in `mapCategoryColors.ts`. That file exists specifically so the experiment
+is one file to delete rather than ten hues to unpick from the token system.
+Nothing outside the map surface imports it.
+
+**What was kept, and why it matters.** Two rules from the old system
+survived, because without them the coloured version does not work:
+
+1. **The glyphs still carry the category on their own.** No category is
+   identified by hue alone. The layer stays readable in greyscale and for a
+   colourblind driver — which matters more here than usual, because the
+   warm end of the set (`restaurant` 17°, `cafe` 33°, `gas_station` 47°) is
+   crowded and is separated on luminance, not hue.
+2. **Selection is still `racingRed`, and no category is.** Nothing sits
+   between hue 340° and 10°. "The one you tapped" can never read as "this is
+   a restaurant".
+
+**Constraints the ten hues are built on** (full detail in the file header):
+mid-luminance so they survive the light/dark tile toggle; all above ~0.20
+relative luminance so a single dark ink works on every badge.
+
+**To revert:** delete `constants/mapCategoryColors.ts`, and the `tint` /
+`CATEGORY_COLORS` lookups in `PlacesLayer.tsx` and `map.tsx` go back to
+`carbonSurface` + `textPrimary`.
+
+---
+
+## 3. Filters actually filter
+
+The rebuild's second non-negotiable. The premise it was written against —
+that the panel rendered a toggled-looking checkbox over markers that still
+drew — was **not true of the landmark layer**, which already gated on
+`visibleCats`. It *was* true of everything else about the feature:
+
+- Preferences reset on every app launch.
+- There was no `parking` layer at all.
+- The OSM Places layer had its own separate, single-select category picker
+  that the Filters panel did not touch.
+- The Places layer had no entry point, so none of it was reachable anyway
+  (`MAP_SCREEN_REFERENCE.md` §8).
+
+All four are fixed. The structure that makes it hard to regress:
+
+**One predicate.** `isLayerVisible(state, layer)` in `mapFiltersState.ts`.
+Every marker render site asks it; nothing draws without asking. It is pure
+and unit-tested.
+
+**One vocabulary.** Landmarks and Places used to carry different ids for the
+same things (`spbu`/`carwash`/`charging` against
+`gas_station`/`car_wash`/`ev_charger`). That is why one panel could not
+cover both. There is now one set of ids in `constants/mapLayers.ts` and both
+sources speak it.
+
+**One store.** The filter chips over the Places layer and the tick boxes in
+the panel write the same state, so they cannot disagree.
+
+**Hidden means not fetched.** `activeCategories` feeds the Overpass request,
+so unticking a category stops its network traffic too. With nine categories
+live that is the difference between one round trip and nine.
+
+**The acceptance test is automated.** The brief asks for "turn one category
+off, confirm only that category vanishes" — run per category. That is
+`isolating a layer hides only that layer` in
+`hooks/__tests__/mapFiltersState.test.ts`, executed for all eleven layers on
+every run. What the test *cannot* prove is that each render site actually
+calls the predicate; that is a greppable one-line contract and still wants a
+device pass (§7).
+
+---
+
+## 4. Clustering
+
+`react-native-maps` has no clustering — the `ShapeSource cluster` property
+the brief specifies belongs to `@rnmapbox/maps`, which this app does not use
+(§6). Grouping happens in JS before anything reaches the map, which is the
+right place anyway: the cost being avoided is not "drawing 400 symbols" but
+"laying out and rasterising 400 view trees", because each marker is a React
+view Android snapshots into a bitmap.
+
+**Grid, not distance-based.** O(n) with no distance matrix, and stable under
+panning — a marker's cell depends only on its own coordinate and the zoom,
+so dragging half a screen does not reshuffle the groupings. Agglomerative
+clustering re-seeds from what is in view and makes clusters visibly jump.
+
+**Per-category by default.** A cluster is always "5 cafes", never "5
+things". A mixed cluster has no honest colour — with category colours
+carrying the meaning of a marker, a cafe + car park + charger cluster could
+only draw neutral, throwing away the signal at exactly the zoom where the
+map is busiest. It is also not actionable: "7 places here" answers no
+question a driver has.
+
+The cost is real: at a dense city zoom this can leave up to one cluster per
+category per cell where global clustering leaves one. `mode: "global"` is
+implemented and tested, so switching is a one-line change.
+
+**Threshold:** clustering is off below `latitudeDelta` 0.02 (~2 km of
+visible height). Zoomed in that far, collapsing two cafes on the same street
+into a "2" is worse than a little overlap.
+
+---
+
+## 5. Driver markers
+
+The rank colour comes from `RankFrameRing`, which resolves through
+`constants/ranks.ts` — the same source of truth as the Profile Frame system,
+per the brief. No second colour mapping was created. Level badges were
+already `textStyle("dataSm")`, i.e. JetBrains Mono.
+
+**Heading chevron.** `HeadingChevron`, rotated to the driver's last reported
+bearing, pinned inside the ring box (absolutely-positioned children with
+negative offsets get clipped out of the native marker snapshot). The
+rotation is on a wrapping `View`, not the `Marker`'s `rotation` prop, which
+would spin the name label too.
+
+A heading of exactly 0 is treated as "no bearing yet", not due north:
+`useOnlineUsers` defaults a null heading to 0, so every parked driver would
+otherwise sprout a north-pointing arrow. A driver genuinely heading due
+north loses the chevron — a 1-in-360 cosmetic miss against a wrong arrow on
+every stationary marker.
+
+**The "You" marker stays red.** The reference design shows green; green
+collides with rank tier 2, *Street Explorer* (`#4F9E5A`, levels 10–19), one
+of the most populated tiers. The driver's own marker keeps `DriverMark` — a
+red chevron in a bearing ring — and is separated from other drivers by
+*form*, not hue. No rank tier uses `racingRed`.
+
+**No animation on markers.** Unchanged, and now for a third reason on top of
+the two in `rankFrames.ts`: a clustered marker set re-lays-out on every
+region change.
+
+---
+
+## 6. The renderer the brief assumed does not exist
+
+The brief specifies `@rnmapbox/maps` throughout — `ShapeSource`,
+`SymbolLayer`, `addImage`, layer `filter` expressions, built-in clustering.
+**That package is not a dependency.** The app renders on
+`react-native-maps` 1.20.1: no style layers, no image registry, no filter
+expressions. Markers are React views snapshotted to bitmaps.
+
+Every requirement was met against the renderer that is actually here:
+
+| Brief | Built as |
+|---|---|
+| `addImage` + `SymbolLayer` per category | Hand-drawn SVG glyphs in React marker views |
+| Layer `filter` expression per toggle | `isLayerVisible` gating the render, plus dropping the category from the fetch |
+| `ShapeSource` clustering | `lib/mapClustering.ts` |
+
+Switching to `@rnmapbox/maps` would mean rewriting all ~6,400 lines of
+`map.tsx` against a different marker, camera and gesture API, and adding a
+native module to a Rork-managed Expo build. It was not attempted, and
+nothing here forecloses it: the glyphs are SVG (rasterisable for `addImage`),
+the filter rule is pure data, and the clustering module has the same
+input/output shape as a `ShapeSource` cluster.
+
+---
+
+## 7. Known gaps
+
+**Not verified on a device.** This is the significant one. The brief's
+acceptance test — toggle each category off, screenshot, confirm only that
+category vanished — has been automated at the state layer but **not run on
+hardware**. `react-native-maps` has no web renderer in this build (the same
+limitation `MAP_SCREEN_REFERENCE.md` §8 records), so no screenshot of an
+actual marker over actual tiles was possible here. Specifically unverified:
+
+- Whether ten category hues are distinguishable at 24 px over real tiles —
+  the whole point of the colour experiment, and the thing most likely to
+  come back "no". The warm ramp (`restaurant` / `cafe` / `gas_station`) is
+  the first place to look.
+- Whether per-category or global clustering reads better at a dense city
+  zoom. Both are implemented; the comparison is a one-line change.
+- Marker bitmap bounds on Android with the new two-line label.
+- That every render site honours the predicate.
+
+**Visibility is all-or-nothing.** There is no friends-only or convoy-only
+option. `useOnlineUsers` broadcasts to one channel every signed-in driver
+subscribes to, and `user_locations` is readable by any authenticated user —
+scoping it is a schema change (an audience column plus RLS on the read
+path), not a UI toggle. The privacy sheet states this plainly rather than
+implying a control that does not exist. **Follow-up task.**
+
+**Two POI sources still overlap.** Landmarks (Mapbox geocoding, always on)
+and Places (Overpass + community, behind the Places button) can both draw a
+marker for the same real-world place. They now share one vocabulary and one
+filter, so it is coherent, but the deduplication `mergePlaces` does within
+the Places layer does not run across the two.
+
+**`hangout` lost `amenity=restaurant`** to the new `restaurant` category.
+Cached Overpass responses keyed on the old tag list will serve the old
+grouping until they age out (7 days).
+
+---
+
+## 8. Checklist additions
+
+Everything in `MAP_SCREEN_REFERENCE.md` §9 still applies, plus:
+
+14. There is one layer vocabulary, in `constants/mapLayers.ts`. Do not add a
+    category id anywhere else.
+15. Nothing renders a marker without asking `isLayerVisible`.
+16. A hidden category should cost no network.
+17. Category colour is an experiment quarantined in one file. If you find
+    yourself importing it outside the map surface, stop.

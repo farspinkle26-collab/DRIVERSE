@@ -57,6 +57,53 @@ export async function fetchNearbyPlaces({
   }
 }
 
+export interface FetchManyResult {
+  places: NormalizedPlace[];
+  /** Categories whose request failed. Empty on a clean fetch. */
+  failed: PlaceCategory[];
+}
+
+/**
+ * Fetches several categories at once.
+ *
+ * One request per category rather than one request for all of them, because
+ * `/places-nearby` caches per `(category, ~1km bucket)` — a combined
+ * endpoint would either lose that granularity or re-fetch categories the
+ * cache already holds. They run in parallel, so the wall-clock cost is one
+ * round trip regardless of how many boxes are ticked.
+ *
+ * A failure in one category does not fail the others: the driver gets the
+ * eight layers that loaded plus a note about the one that did not, which is
+ * strictly better than an empty map. Callers get the failed ids back so they
+ * can say which.
+ */
+export async function fetchNearbyPlacesMany({
+  lat,
+  lng,
+  radius = 2000,
+  categories,
+}: {
+  lat: number;
+  lng: number;
+  radius?: number;
+  categories: PlaceCategory[];
+}): Promise<FetchManyResult> {
+  const results = await Promise.all(
+    categories.map(async (category) => ({
+      category,
+      result: await fetchNearbyPlaces({ lat, lng, radius, category }),
+    }))
+  );
+
+  const places: NormalizedPlace[] = [];
+  const failed: PlaceCategory[] = [];
+  for (const { category, result } of results) {
+    places.push(...result.places);
+    if (result.error) failed.push(category);
+  }
+  return { places, failed };
+}
+
 export interface SubmitPlaceInput {
   name: string;
   lat: number;
