@@ -37,7 +37,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#060609"
       },
-      "package": "app.rork.towinggo-indonesia-cgk2hnw9-65uwf2yh-rx6q4ojf-1n3ggg51",
+      "package": "app.rork.driverse",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628"
@@ -93,12 +93,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./local/assets/notification_icon.png",
           "color": "#ffffff",
           "defaultChannel": "default",
-          "sounds": [
-            "./local/assets/notification_sound.wav"
-          ],
           "enableBackgroundRemoteNotifications": false
         }
       ],
