@@ -31,8 +31,8 @@
 export const PLATINUM_ENTITLEMENT_ID = "platinum";
 
 /**
- * RevenueCat offering id carrying the monthly, yearly and lifetime packages.
- * It is also the offering the RevenueCat-hosted paywall is attached to.
+ * RevenueCat offering id carrying the monthly and yearly packages. It is
+ * also the offering the RevenueCat-hosted paywall is attached to.
  */
 export const PLATINUM_OFFERING_ID = "platinum";
 
@@ -46,32 +46,21 @@ export const PLATINUM_OFFERING_ID = "platinum";
  * before the "r", see `app.json`), not the "driveverse" spelling used
  * elsewhere in copy and code. Get this wrong in App Store Connect and the
  * product silently never matches what RevenueCat expects.
- *
- * `lifetime` is a NON-CONSUMABLE (iOS) / one-time product (Android), not an
- * auto-renewing subscription. It grants the same `platinum` entitlement with
- * no expiry, which is why `EntitlementSnapshot.isLifetime` exists: a lifetime
- * holder and a cancelled subscriber both report `willRenew: false`, and only
- * one of them is about to lose access. No lifetime product exists in App
- * Store Connect yet — `app/platinum.tsx` already handles that (`showLifetime`
- * hides the option once the store answers with no lifetime package), so
- * nothing else needs to change to ship monthly/yearly alone.
  */
 export const PLATINUM_PRODUCTS = {
   monthly: "driverse_monthly_10",
   yearly: "driverse_yearly_100",
-  lifetime: "driverse_platinum_lifetime", // not yet created in App Store Connect
 } as const;
 
 /**
  * The RevenueCat package identifiers the offering uses. These are RevenueCat's
- * own reserved ids for the Monthly / Annual / Lifetime slots — using them
- * means `packageType` comes back as MONTHLY / ANNUAL / LIFETIME and the app
- * never has to pattern-match a product name. See `periodOf` in `lib/purchases.ts`.
+ * own reserved ids for the Monthly / Annual slots — using them means
+ * `packageType` comes back as MONTHLY / ANNUAL and the app never has to
+ * pattern-match a product name. See `periodOf` in `lib/purchases.ts`.
  */
 export const PLATINUM_PACKAGE_IDS = {
   monthly: "$rc_monthly",
   yearly: "$rc_annual",
-  lifetime: "$rc_lifetime",
 } as const;
 
 /**
@@ -83,7 +72,6 @@ export const PLATINUM_PACKAGE_IDS = {
 export const PLATINUM_FALLBACK_PRICE = {
   monthly: "Rp 49.000",
   yearly: "Rp 449.000",
-  lifetime: "Rp 1.499.000",
 } as const;
 
 /* ------------------------------------------------------------------ *

@@ -31,19 +31,9 @@ larger effort. It cannot replace IAP on iOS, so it is an addition, not a
 substitute. Nothing here blocks it: `isPlatinum` is the only entitlement
 question the app asks, and a second provider would answer the same question.
 
-### Three products, and why lifetime is not just a third price
+### Two products
 
 Monthly and yearly are auto-renewing subscriptions in one subscription group.
-**Lifetime is a non-consumable**, and the difference is not cosmetic: it never
-renews, has no expiry, and cannot be cancelled.
-
-RevenueCat reports a lifetime holder as `willRenew: false` with
-`expirationDate: null` — which is *also* what a cancelled subscriber looks like
-apart from the null. A `willRenew ? … : …` would therefore tell someone who
-paid once, for good, that their access ends at period close.
-`EntitlementSnapshot.isLifetime` exists to stop exactly that, and it is derived
-from the null expiry rather than from the product id, so a renamed product
-can't break it.
 
 ### Test Store
 
@@ -149,7 +139,7 @@ the values shipped; all four are one-line changes in `TIER_LIMITS` +
 | Saved places cap | **10** | Suggested in the brief. Enough for a driver's real regular spots; low enough that an enthusiast hits it. |
 | Convoy capacity | **2 → 8** | Top of the suggested 6–8. 8 is a plausible weekend convoy and makes the 4× jump legible. |
 | AI showcase allowance | **5 / month** | Real per-image cost. Uncapped is an uncapped bill; 5 covers a typical garage and bounds the worst case. |
-| Pricing | **Rp 49.000 / month, Rp 449.000 / year** (~24% off), **Rp 1.499.000 lifetime** | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store. Lifetime is ~3.3× the annual price — roughly the point where it beats a subscription for a driver who stays past year three, which is the horizon the tier is worth planning against. **Wants your confirmation.** |
+| Pricing | **Rp 49.000 / month, Rp 449.000 / year** (~24% off) | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store. **Wants your confirmation.** |
 
 ### "Route Discovery" — needs your confirmation
 
@@ -279,21 +269,15 @@ in the middle of doing.
   number in the app. The yearly saving is computed against 12× the monthly price
   and is shown **only** when both prices came from the store; deriving a discount
   from the fallback strings would advertise a number nobody is charging.
-- Lifetime sits below the pair as a full-width row, not a third column. It is a
-  one-time purchase rather than a third subscription term, and a six-figure
-  rupiah price gets cropped at the width three cards leave. It is offered only
-  when the store returned a lifetime package, or when the store returned nothing
-  at all (the "explain the tier offline" state) — never when the store answered
-  and had no lifetime product, which would be advertising something unbuyable.
 - CTA: racingRed solid CutCorner. Platinum owns chrome, but "the button you
   press" is red everywhere in Driveverse and this is not the screen to break it.
   It says "Start Free Trial" **only** when the store reported an intro offer at
   price 0 on the selected product; the app never invents a trial.
 - "Restore Purchases": present as required by App Store guideline 3.1.1,
   deliberately not prominent.
-- Already subscribed: renewal state — which distinguishes lifetime, free trial,
-  renewing and cancelled, four states a `willRenew` boolean collapses into two
-  wrong ones — a grace-period notice when the store reports a failed charge, and
+- Already subscribed: renewal state — which distinguishes free trial, renewing
+  and cancelled, three states a `willRenew` boolean collapses into two wrong
+  ones — a grace-period notice when the store reports a failed charge, and
   "Manage Subscription", which opens the Customer Center.
 
 **Contextual trigger.** Friction points call `openPaywall(benefit)`, which
@@ -396,8 +380,8 @@ whole integration.
   in the store and by the trigger, and `activeEventLimit` / `atEventLimit` are
   exported ready for the composer — but there is no screen on which to show the
   friction-point prompt. It will work the moment one is built.
-- The four product numbers in §4, the lifetime price, and the "Route Discovery"
-  interpretation want your confirmation.
+- The product numbers in §4 and the "Route Discovery" interpretation want
+  your confirmation.
 - **The RevenueCat dashboard is still empty.** Products, the `platinum`
   offering, the hosted paywall and the Customer Center all need creating before
   any of this transacts — `REVENUECAT_SETUP.md` is the runbook. Until then the

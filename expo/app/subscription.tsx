@@ -216,14 +216,12 @@ function ManageFallback({
         <Text style={styles.status}>
           {!isPlatinum
             ? "Regular"
-            : entitlement.isLifetime
-              ? "Platinum — lifetime"
-              : entitlement.isTrial
-                ? "Platinum — free trial"
-                : "Platinum"}
+            : entitlement.isTrial
+              ? "Platinum — free trial"
+              : "Platinum"}
         </Text>
 
-        {isPlatinum && !entitlement.isLifetime && renewsOn && (
+        {isPlatinum && renewsOn && (
           <Text style={styles.detail}>
             {entitlement.willRenew ? `Renews ${renewsOn}` : `Ends ${renewsOn}`}
           </Text>
@@ -277,9 +275,7 @@ function ManageFallback({
         </CutCornerSurface>
       )}
 
-      {/* Lifetime is a non-consumable: there is nothing to manage at the store
-          and nothing to cancel, so offering the link would only confuse. */}
-      {isPlatinum && !entitlement.isLifetime && (
+      {isPlatinum && (
         <CutCornerButton
           title="Manage at the store"
           variant="ghost"

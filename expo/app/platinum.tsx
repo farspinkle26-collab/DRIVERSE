@@ -114,12 +114,10 @@ const BENEFIT_ICONS: Record<string, React.FC<{ size: number; color: string; stro
 /**
  * What the driver's Platinum access is actually doing right now.
  *
- * Four states that a naive `willRenew ? … : …` collapses into two wrong ones:
- * a lifetime holder and a cancelled subscriber both report `willRenew: false`,
- * and a driver mid-trial has not been charged yet.
+ * Three states that a naive `willRenew ? … : …` collapses into two wrong
+ * ones: a driver mid-trial has not been charged yet.
  */
 function renewalState(entitlement: EntitlementSnapshot): string {
-  if (entitlement.isLifetime) return "Lifetime access";
   if (entitlement.isTrial) {
     return entitlement.willRenew
       ? "Free trial — converts at period end"
@@ -130,15 +128,13 @@ function renewalState(entitlement: EntitlementSnapshot): string {
 
 /**
  * The CTA. Says "start free trial" only when the store actually reported an
- * introductory offer on the selected product, and says "get" rather than
- * "upgrade to" for lifetime, which is a purchase and not a subscription.
+ * introductory offer on the selected product.
  */
 function ctaTitle(
-  period: PlatinumPeriod,
   introOffer: StoreProduct["introPrice"]
 ): string {
   if (introOffer && introOffer.price === 0) return "Start Free Trial";
-  return period === "lifetime" ? "Get Platinum for Life" : "Upgrade to Platinum";
+  return "Upgrade to Platinum";
 }
 
 export default function PlatinumPaywallScreen() {
@@ -190,25 +186,12 @@ export default function PlatinumPaywallScreen() {
 
   const monthly = packages.find((p) => p.period === "monthly") ?? null;
   const yearly = packages.find((p) => p.period === "yearly") ?? null;
-  const lifetime = packages.find((p) => p.period === "lifetime") ?? null;
 
   const packageFor = useCallback(
-    (p: PlatinumPeriod) =>
-      p === "yearly" ? yearly : p === "lifetime" ? lifetime : monthly,
-    [monthly, yearly, lifetime]
+    (p: PlatinumPeriod) => (p === "yearly" ? yearly : monthly),
+    [monthly, yearly]
   );
   const selected = packageFor(period);
-
-  /**
-   * Whether to offer lifetime at all.
-   *
-   * Shown when the store returned a lifetime package, or when the store
-   * returned nothing whatsoever — the latter being the "explain the tier with
-   * fallback prices" state this screen is built for. Deliberately NOT shown
-   * when the store answered and had no lifetime product: advertising a
-   * one-time unlock that cannot be bought is worse than not mentioning it.
-   */
-  const showLifetime = lifetime !== null || packages.length === 0;
 
   /**
    * Yearly saving against twelve months at the monthly rate. Only shown when
@@ -394,13 +377,9 @@ export default function PlatinumPaywallScreen() {
               corners="topRight"
               contentStyle={styles.activeCard}
             >
-              <Text style={styles.overline}>
-                {entitlement.isLifetime ? "PURCHASE" : "SUBSCRIPTION"}
-              </Text>
+              <Text style={styles.overline}>SUBSCRIPTION</Text>
               <Text style={styles.activeState}>{renewalState(entitlement)}</Text>
-              {/* A lifetime unlock has no expiry, so there is no date to show
-                  and no "ends on" to imply. */}
-              {entitlement.expiresAt && !entitlement.isLifetime && (
+              {entitlement.expiresAt && (
                 <Text style={styles.activeDate}>
                   {new Date(entitlement.expiresAt).toLocaleDateString(undefined, {
                     year: "numeric",
@@ -426,9 +405,7 @@ export default function PlatinumPaywallScreen() {
                 which is exactly what the Customer Center does. Without the
                 native module this falls back to the store's own screen. */}
             <CutCornerButton
-              title={
-                entitlement.isLifetime ? "Manage Purchase" : "Manage Subscription"
-              }
+              title="Manage Subscription"
               variant="ghost"
               size="md"
               corners="topRight"
@@ -456,20 +433,6 @@ export default function PlatinumPaywallScreen() {
               />
             </View>
 
-            {/* Lifetime is a one-time purchase, not a third subscription, so it
-                sits apart from the monthly/yearly pair rather than squeezing a
-                third column that would crop a six-figure rupiah price. */}
-            {showLifetime && (
-              <PeriodOption
-                wide
-                label="Lifetime"
-                price={priceFor("lifetime")}
-                note="one payment, yours for good"
-                active={period === "lifetime"}
-                onPress={() => setPeriod("lifetime")}
-              />
-            )}
-
             {loadingPackages && (
               <View style={styles.pricesLoading}>
                 <ActivityIndicator color={platinum.chrome} />
@@ -478,7 +441,7 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <CutCornerButton
-              title={busy === "purchase" ? "Opening store…" : ctaTitle(period, introOffer)}
+              title={busy === "purchase" ? "Opening store…" : ctaTitle(introOffer)}
               variant="primary"
               size="lg"
               corners="topRight"
@@ -494,9 +457,7 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <Text style={styles.terms}>
-              {period === "lifetime"
-                ? `A single payment through ${STORE_NAME}. Nothing renews and there is nothing to cancel.`
-                : `Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
+              {`Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
             </Text>
 
             {/* App Store guideline 3.1.1 requires restore to be reachable
@@ -567,10 +528,7 @@ function BenefitRow({
 /**
  * Period selector. The price is a number, so JetBrains Mono.
  *
- * `wide` lays the same content out horizontally for a full-width row. It
- * exists for lifetime: a third column would crop a six-figure rupiah price at
- * the width three cards leave, and lifetime is categorically a different thing
- * from the two subscription terms anyway.
+ * `wide` lays the same content out horizontally for a full-width row.
  */
 function PeriodOption({
   label,
