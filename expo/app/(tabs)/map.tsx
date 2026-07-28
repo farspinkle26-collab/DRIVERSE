@@ -849,6 +849,11 @@ export default function MapScreen() {
   // Id of the just-recorded drive once it has been saved to the profile.
   // Drives the Save button's "Saved" state. Sharing does not depend on it.
   const [savedRouteId, setSavedRouteId] = useState<string | null>(null);
+  // Id of the `trips` row written automatically when the drive ended, so the
+  // name entered in the Save Route sheet can be written back onto it — the
+  // trips row is otherwise never named, even though the Drive Hub and trip
+  // detail screen both prefer `trip.name` when it is set.
+  const [lastTripId, setLastTripId] = useState<string | null>(null);
   // Why the automatic `trips` write failed, if it did. Surfaced on the trip
   // summary rather than swallowed into the console.
   const [tripSaveError, setTripSaveError] = useState<string | null>(null);
@@ -1686,6 +1691,7 @@ export default function MapScreen() {
     setRecordedPath([]);
     setXpEarned(null);
     setSavedRouteId(null);
+    setLastTripId(null);
     setTripSaveError(null);
     setWasFaster(false);
     setLeveledUp(false);
@@ -1787,11 +1793,12 @@ export default function MapScreen() {
         car_id: activeCar?.id ?? null,
         started_at: new Date(tripStartMs ?? now).toISOString(),
         completed_at: new Date(now).toISOString(),
-      }).then(
-        ({ error }) => {
+      }).select("id").single().then(
+        ({ data, error }) => {
           // A failed trip write used to be console-only, so the driver was
           // told the drive was recorded while nothing had been stored.
           if (error) setTripSaveError(describeSaveFailure(error));
+          else setLastTripId((data as { id: string } | null)?.id ?? null);
         },
         (err: unknown) => setTripSaveError(describeSaveFailure(err))
       );
@@ -4229,6 +4236,7 @@ export default function MapScreen() {
         topSpeedKmh={tripTopSpeed}
         xpEarned={xpEarned ?? 0}
         carId={activeCar?.id ?? null}
+        tripId={lastTripId}
         originName="Current Location"
         destinationName={
           selectedDestination?.type === "cafe"
