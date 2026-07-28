@@ -42,16 +42,24 @@ export const PLATINUM_OFFERING_ID = "platinum";
  * setup checklist in REVENUECAT_SETUP.md — runtime code never hardcodes
  * a product, it reads whatever the offering returns.
  *
+ * iOS ids match the app's actual bundle id (`app.rork.driverse` — no "e"
+ * before the "r", see `app.json`), not the "driveverse" spelling used
+ * elsewhere in copy and code. Get this wrong in App Store Connect and the
+ * product silently never matches what RevenueCat expects.
+ *
  * `lifetime` is a NON-CONSUMABLE (iOS) / one-time product (Android), not an
  * auto-renewing subscription. It grants the same `platinum` entitlement with
  * no expiry, which is why `EntitlementSnapshot.isLifetime` exists: a lifetime
  * holder and a cancelled subscriber both report `willRenew: false`, and only
- * one of them is about to lose access.
+ * one of them is about to lose access. No lifetime product exists in App
+ * Store Connect yet — `app/platinum.tsx` already handles that (`showLifetime`
+ * hides the option once the store answers with no lifetime package), so
+ * nothing else needs to change to ship monthly/yearly alone.
  */
 export const PLATINUM_PRODUCTS = {
-  monthly: "driveverse_platinum_monthly",
-  yearly: "driveverse_platinum_yearly",
-  lifetime: "driveverse_platinum_lifetime",
+  monthly: "driverse_monthly_10",
+  yearly: "driverse_yearly_100",
+  lifetime: "driverse_platinum_lifetime", // not yet created in App Store Connect
 } as const;
 
 /**

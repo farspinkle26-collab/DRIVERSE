@@ -86,11 +86,25 @@ Create these in App Store Connect and Google Play Console. Product ids live in
 product, it reads whatever the offering returns, so these are a reference for
 the dashboard rather than a contract with the app.
 
+iOS product ids follow the app's real bundle id, `app.rork.driverse` (no "e"
+before the "r" — see `app.json`), not the "driveverse" spelling used in copy
+and code elsewhere:
+
 | Period | Product id | iOS type | Android type |
 |---|---|---|---|
-| Monthly | `driveverse_platinum_monthly` | Auto-renewable subscription | Subscription, monthly base plan |
-| Yearly | `driveverse_platinum_yearly` | Auto-renewable subscription | Subscription, annual base plan |
-| Lifetime | `driveverse_platinum_lifetime` | **Non-consumable** | **One-time product** |
+| Monthly | `driverse_monthly_10` | Auto-renewable subscription | Subscription, monthly base plan |
+| Yearly | `driverse_yearly_100` | Auto-renewable subscription | Subscription, annual base plan |
+| Lifetime | *(none yet — not created in App Store Connect)* | **Non-consumable** | **One-time product** |
+
+As of the current App Store Connect setup, `driverse_yearly_100` and
+`driverse_monthly_10` exist and are both **Waiting for Review**, but neither
+is attached to the `platinum` entitlement yet in the RevenueCat dashboard
+(Product catalog → Products shows an "Attach" action instead of an
+entitlement count for both). Do step 3.2.2 below before testing — a product
+with no entitlement attached will purchase successfully and grant nothing.
+There is no lifetime product on iOS yet; `showLifetime` in `app/platinum.tsx`
+already hides the lifetime option once the store answers with only
+monthly/yearly, so nothing else needs to change to ship without it.
 
 Put monthly and yearly in the **same subscription group** (iOS) / the same
 subscription (Android, two base plans). That is what makes upgrading from
@@ -107,15 +121,18 @@ about to lose access.
 
 1. **Project → Apps** — add the iOS and Android apps. iOS also needs an
    In-App Purchase Key uploaded, or StoreKit 2 purchases fail.
-2. **Entitlements** — create `platinum`. Attach all three products.
+2. **Entitlements** — create `platinum`. Attach both iOS products
+   (`driverse_yearly_100`, `driverse_monthly_10`) — from **Product catalog →
+   Products**, click **Attach** on each row and select the `platinum`
+   entitlement. There is no lifetime product to attach yet.
 3. **Offerings** — create an offering with identifier `platinum` and mark it
-   Current. Add three packages using RevenueCat's reserved identifiers:
+   Current. Add packages using RevenueCat's reserved identifiers:
 
    | Package | Identifier | Attach |
    |---|---|---|
-   | Monthly | `$rc_monthly` | `driveverse_platinum_monthly` |
-   | Annual | `$rc_annual` | `driveverse_platinum_yearly` |
-   | Lifetime | `$rc_lifetime` | `driveverse_platinum_lifetime` |
+   | Monthly | `$rc_monthly` | `driverse_monthly_10` |
+   | Annual | `$rc_annual` | `driverse_yearly_100` |
+   | Lifetime | `$rc_lifetime` | *(skip — no lifetime product yet; add when one exists)* |
 
    Use the reserved ids (`PLATINUM_PACKAGE_IDS` in `constants/platinum.ts`).
    They make `packageType` come back as `MONTHLY` / `ANNUAL` / `LIFETIME`, so
