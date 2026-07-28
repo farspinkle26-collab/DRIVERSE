@@ -47,7 +47,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
-import { PlacesFilterBar, PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
+import { PlacesMarkers, PlaceDetailSheet, SubmitPlaceFab, SubmitPlaceModal } from "@/components/PlacesLayer";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import { usePlaces } from "@/hooks/usePlaces";
 import { useMapFilters } from "@/hooks/useMapFilters";
@@ -815,9 +815,12 @@ export default function MapScreen() {
   const [cafes, setCafes] = useState<CafePOI[]>([]);
   const [loadingCafes, setLoadingCafes] = useState(false);
 
-  // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass)
+  // OSM + community "nearby places" layer (cafes/gas/workshop/hangout via Overpass).
+  // Always on — gated only by the Filters popover's per-category toggles, the
+  // same predicate the landmark layer uses. There used to be a second "Places"
+  // chrome button that opened/closed this layer independently of Filters; it
+  // just hid the layer behind an extra tap and left two controls doing one job.
   const places = usePlaces();
-  const [placesLayerOpen, setPlacesLayerOpen] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<NormalizedPlace | null>(null);
   const [submitPlaceCoord, setSubmitPlaceCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [showSubmitPlaceModal, setShowSubmitPlaceModal] = useState(false);
@@ -1635,10 +1638,10 @@ export default function MapScreen() {
   const categoryKey = activeCategories.join(",");
 
   useEffect(() => {
-    if (!placesLayerOpen || !userLocation || !filtersReady) return;
+    if (!userLocation || !filtersReady) return;
     places.fetchForRegion(userLocation.latitude, userLocation.longitude, activeCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placesLayerOpen, categoryKey, userLocation, filtersReady]);
+  }, [categoryKey, userLocation, filtersReady]);
 
   const handlePlacesRegionChange = useCallback(
     (nextRegion: {
@@ -1647,15 +1650,14 @@ export default function MapScreen() {
       latitudeDelta: number;
       longitudeDelta: number;
     }) => {
-      // Tracked unconditionally, not just while the Places layer is open:
       // `latitudeDelta` is what decides whether markers cluster, and the
       // landmark layer is on screen the whole time.
       setMapRegion(nextRegion);
-      if (!placesLayerOpen || !filtersReady) return;
+      if (!filtersReady) return;
       places.fetchForRegion(nextRegion.latitude, nextRegion.longitude, activeCategories);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [placesLayerOpen, categoryKey, filtersReady]
+    [categoryKey, filtersReady]
   );
 
   /**
@@ -1683,9 +1685,8 @@ export default function MapScreen() {
     [mapRegion?.latitudeDelta]
   );
 
-  // --- Long-press the map (while the Places layer is open) to drop a pin and submit a new place ---
+  // --- Long-press the map to drop a pin and submit a new place ---
   const handleMapLongPress = useCallback((event: any) => {
-    if (!placesLayerOpen) return;
     if (!user) {
       Alert.alert(
         "Submitting a place needs an account",
@@ -1696,7 +1697,7 @@ export default function MapScreen() {
     const { latitude, longitude } = event.nativeEvent.coordinate;
     setSubmitPlaceCoord({ latitude, longitude });
     setShowSubmitPlaceModal(true);
-  }, [placesLayerOpen, user]);
+  }, [user]);
 
   const handleJoinEvent = useCallback(async (ev: DriveEvent) => {
     setEventActionBusy(true);
@@ -2177,7 +2178,7 @@ export default function MapScreen() {
       >
         <MapboxTileLayer dark={mapStyleDark} />
 
-        {placesLayerOpen && filtersReady && (
+        {filtersReady && (
           <PlacesMarkers
             places={places.places}
             onSelect={setSelectedPlace}
@@ -2591,18 +2592,12 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   NEARBY PLACES LAYER (OSM + community submissions)    */}
       {/* ===================================================== */}
-      {placesLayerOpen && !isRecording && (
+      {/* The category chip bar this used to render up top is gone — the
+          Filters popover (right column) already toggles every one of these
+          categories, and having two controls for the same nine toggles was
+          the redundant one. */}
+      {!isRecording && (
         <>
-          <PlacesFilterBar
-            isActive={isLayerVisible}
-            onToggle={(cat) => {
-              toggleLayer(cat);
-              // A place whose category has just been hidden must not keep
-              // its callout open over an empty map.
-              if (isLayerVisible(cat)) setSelectedPlace(null);
-            }}
-            style={[styles.placesFilterBar, { top: insets.top + spacing.spacingMd }]}
-          />
           {places.loading && (
             <View style={[styles.placesStatusPill, { top: insets.top + PLACES_STATUS_OFFSET }]}>
               <ActivityIndicator size="small" color={colors.racingRed} />
@@ -3173,7 +3168,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   TOP CHROME — greeting pill + featured event banner   */}
       {/* ===================================================== */}
-      {!isRecording && !searchOpen && !placesLayerOpen && (
+      {!isRecording && !searchOpen && (
         <Animated.View
           style={[styles.topChrome, { top: insets.top + spacing.spacingMd, opacity: fadeIn }]}
           pointerEvents="box-none"
@@ -3344,31 +3339,6 @@ export default function MapScreen() {
             <SlidersHorizontal
               size={spacing.spacingLg}
               color={filtersOpen ? colors.racingRed : colors.textPrimary}
-              strokeWidth={CHROME_ICON_STROKE}
-            />
-          </MapChromeButton>
-
-          {/* Places — the OSM + community layer.
-              This button was added in #88 and removed again in #89, which
-              left `setPlacesLayerOpen` with no caller: every other part of
-              the feature shipped, but no driver could reach it. It is back
-              because the marker rebuild extended that layer from four
-              categories to nine and wired it to the Filters panel, and a
-              layer nobody can open is a layer nobody can filter. */}
-          <MapChromeButton
-            label="Places"
-            active={placesLayerOpen}
-            accessibilityLabel="Nearby places layer"
-            onPress={() => {
-              setPlacesLayerOpen((v) => !v);
-              setSelectedPlace(null);
-              if (searchOpen) closeSearch();
-              setFiltersOpen(false);
-            }}
-          >
-            <MAP_GLYPHS.cafe
-              size={spacing.spacingLg}
-              color={placesLayerOpen ? colors.racingRed : colors.textPrimary}
               strokeWidth={CHROME_ICON_STROKE}
             />
           </MapChromeButton>
@@ -3573,7 +3543,7 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {/*   LIVE FEED — bottom-left panel                        */}
       {/* ===================================================== */}
-      {hudIdle && !searchOpen && !placesLayerOpen && (
+      {hudIdle && !searchOpen && (
         <Animated.View
           style={[styles.liveFeedSlot, { bottom: insets.bottom + BOTTOM_STACK_OFFSET, opacity: fadeIn }]}
         >
@@ -3719,7 +3689,7 @@ export default function MapScreen() {
           marker carries distress and a top banner would fight the turn card.
           Idle, it's the loudest thing on screen — which for "someone needs
           help" is the point. Leads with convoy-mates, then the nearest. */}
-      {!isRecording && !searchOpen && !placesLayerOpen && distressUsers.length > 0 && (() => {
+      {!isRecording && !searchOpen && distressUsers.length > 0 && (() => {
         const top = distressUsers[0];
         const meta = problemMeta(top.problem!.type);
         const mate = partyMemberIds.has(top.user_id);
@@ -4594,14 +4564,6 @@ const styles = StyleSheet.create({
   },
 
   /* ---------------- Places layer (OSM + community) ---------------- */
-  placesFilterBar: {
-    position: "absolute",
-    left: SCREEN_MARGIN,
-    // Same gutter as the top chrome, so the chip row never scrolls under
-    // the search / locate / filters column.
-    right: spacing.spacingXxxl + spacing.spacingXl,
-    zIndex: 5,
-  },
   // The submit-a-place action takes the bottom-left slot the live feed
   // vacates while this layer is open.
   placesFabSlot: {

@@ -228,7 +228,7 @@ path), not a UI toggle. The privacy sheet states this plainly rather than
 implying a control that does not exist. **Follow-up task.**
 
 **Two POI sources still overlap.** Landmarks (Mapbox geocoding, always on)
-and Places (Overpass + community, behind the Places button) can both draw a
+and Places (Overpass + community, always on — see §9) can both draw a
 marker for the same real-world place. They now share one vocabulary and one
 filter, so it is coherent, but the deduplication `mergePlaces` does within
 the Places layer does not run across the two.
@@ -249,3 +249,23 @@ Everything in `MAP_SCREEN_REFERENCE.md` §9 still applies, plus:
 16. A hidden category should cost no network.
 17. Category colour is an experiment quarantined in one file. If you find
     yourself importing it outside the map surface, stop.
+
+---
+
+## 9. The "Places" chrome button is gone
+
+The separate "Places" button in the right-hand chrome column (§1, §7) was
+removed. It toggled a second, independent on/off state (`placesLayerOpen`)
+for the same layer the Filters popover already gates per-category, which
+meant two problems in practice: the layer defaulted to closed so its markers
+never appeared until a driver found and tapped that specific button, and the
+button's own icon/chip-bar duplicated controls the Filters popover already
+had. `PlacesFilterBar` (the top chip row) is gone for the same reason —
+`MAP_LAYERS.map(...)` in the Filters popover already lists every one of
+these categories with a checkbox.
+
+The Places layer (`PlacesMarkers`, fetched via `usePlaces`) is now mounted
+unconditionally once `filtersReady`, exactly like the landmark layer always
+was — gated only by `isLayerVisible`/`activeCategories`, never by a second
+open/closed flag. Long-press-to-submit and the submit-place FAB are likewise
+no longer conditioned on a "layer open" state.
