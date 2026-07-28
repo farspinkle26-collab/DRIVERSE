@@ -57,6 +57,33 @@ CREATE TRIGGER on_party_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_party();
 
 -- ============================================================
+-- MEMBERSHIP CHECK — SECURITY DEFINER so RLS policies on parties and
+-- party_members can ask "is this user an accepted member of this party"
+-- without querying party_members from inside its own policy. A policy on
+-- party_members that does that re-enters its own RLS evaluation and
+-- Postgres aborts with "infinite recursion detected in policy for relation
+-- party_members" — this function breaks that cycle by running as its
+-- owner, which bypasses RLS on its own SELECT.
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.is_party_member(p_party_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE SQL
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.party_members pm
+    WHERE pm.party_id = p_party_id
+      AND pm.user_id = p_user_id
+      AND pm.status = 'accepted'
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.is_party_member(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_party_member(UUID, UUID) TO authenticated, service_role;
+
+-- ============================================================
 -- RLS ENABLE
 -- ============================================================
 ALTER TABLE parties ENABLE ROW LEVEL SECURITY;
@@ -68,10 +95,7 @@ ALTER TABLE party_members ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Members can view their party" ON parties
   FOR SELECT USING (
     leader_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM party_members pm
-      WHERE pm.party_id = parties.id AND pm.user_id = auth.uid()
-    )
+    OR public.is_party_member(parties.id, auth.uid())
   );
 
 CREATE POLICY "Users can create a party" ON parties
@@ -86,15 +110,15 @@ CREATE POLICY "Leader can disband party" ON parties
 -- ============================================================
 -- RLS POLICIES: party_members
 -- ============================================================
+-- Membership checks below go through is_party_member() (SECURITY DEFINER,
+-- defined above) rather than a direct subquery on party_members: a policy
+-- on party_members that queries party_members itself re-enters its own RLS
+-- evaluation and Postgres aborts with "infinite recursion detected in
+-- policy for relation party_members".
 CREATE POLICY "Members can view their party roster" ON party_members
   FOR SELECT USING (
     user_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM party_members pm2
-      WHERE pm2.party_id = party_members.party_id
-        AND pm2.user_id = auth.uid()
-        AND pm2.status = 'accepted'
-    )
+    OR public.is_party_member(party_members.party_id, auth.uid())
   );
 
 -- Leader (self-seat trigger) or an accepted member inviting an existing
@@ -103,12 +127,7 @@ CREATE POLICY "Leader or member can invite a friend" ON party_members
   FOR INSERT WITH CHECK (
     (
       EXISTS (SELECT 1 FROM parties p WHERE p.id = party_id AND p.leader_id = auth.uid())
-      OR EXISTS (
-        SELECT 1 FROM party_members pm
-        WHERE pm.party_id = party_members.party_id
-          AND pm.user_id = auth.uid()
-          AND pm.status = 'accepted'
-      )
+      OR public.is_party_member(party_members.party_id, auth.uid())
     )
     AND (
       user_id = auth.uid()

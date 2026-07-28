@@ -71,15 +71,18 @@ CREATE INDEX IF NOT EXISTS idx_parties_visibility ON public.parties(visibility);
 
 -- Anyone authenticated can browse public convoys; existing member/leader
 -- visibility still applies for invite-only ones.
+--
+-- Membership checks go through is_party_member() (SECURITY DEFINER,
+-- database_migration_parties.sql), not a direct subquery on party_members —
+-- a party_members policy that queries party_members from inside itself
+-- re-enters its own RLS evaluation, which Postgres refuses with "infinite
+-- recursion detected in policy for relation party_members".
 DROP POLICY IF EXISTS "Members can view their party" ON public.parties;
 CREATE POLICY "View public convoys or your own" ON public.parties
   FOR SELECT USING (
     visibility = 'public'
     OR leader_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.party_members pm
-      WHERE pm.party_id = parties.id AND pm.user_id = auth.uid()
-    )
+    OR public.is_party_member(parties.id, auth.uid())
   );
 
 -- A user may self-join (accepted, no invite) any public convoy.
@@ -94,12 +97,7 @@ CREATE POLICY "Leader, member-invite, or self-join public convoy" ON public.part
     OR (
       (
         EXISTS (SELECT 1 FROM public.parties p WHERE p.id = party_id AND p.leader_id = auth.uid())
-        OR EXISTS (
-          SELECT 1 FROM public.party_members pm
-          WHERE pm.party_id = party_members.party_id
-            AND pm.user_id = auth.uid()
-            AND pm.status = 'accepted'
-        )
+        OR public.is_party_member(party_members.party_id, auth.uid())
       )
       AND (
         user_id = auth.uid()
