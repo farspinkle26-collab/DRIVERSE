@@ -8,15 +8,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Dimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { Mail, Lock, Eye, EyeOff, LogIn, ArrowLeft } from "lucide-react-native";
+import { Mail, Lock, Eye, EyeOff, ArrowLeft } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+import { CutCornerButton } from "@/components/CutCorner";
+import { ICON_STROKE } from "@/components/TripCard";
+import {
+  borderWidth,
+  colors,
+  fontFamily,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -56,49 +62,40 @@ export default function LoginScreen() {
     }
   };
 
+  const canSubmit = email.trim().length > 0 && password.trim().length > 0;
+
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#0A0A0F", "#060609", "#0A0A0F"]} style={styles.bg} />
-
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1, paddingTop: insets.top + 20 }}
+        style={{ flex: 1, paddingTop: insets.top + spacing.spacingLg }}
       >
-        {/* Back button */}
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <ArrowLeft size={22} color="#FFFFFF" />
+          <ArrowLeft size={22} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
         </TouchableOpacity>
 
         <View style={styles.content}>
           {/* Brand */}
           <View style={styles.brandSection}>
-            <LinearGradient
-              colors={["#FF6B35", "#FF3B6F"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.brandBadge}
-            >
-              <Text style={styles.brandBadgeText}>DRIVEVERSE</Text>
-            </LinearGradient>
-            <Text style={styles.title}>Welcome Back</Text>
+            <Text style={styles.wordmark}>DRIVEVERSE</Text>
+            <Text style={styles.title}>WELCOME BACK</Text>
             <Text style={styles.subtitle}>Sign in to continue your drive</Text>
           </View>
 
-          {/* Error */}
           {error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
+            <Text style={styles.errorText} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
           ) : null}
 
           {/* Form */}
           <View style={styles.form}>
             <View style={styles.inputWrapper}>
-              <Mail size={18} color="#8A8A9A" style={styles.inputIcon} />
+              <Mail size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Email address"
-                placeholderTextColor="#5A5A6E"
+                placeholderTextColor={colors.textSecondary}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -108,98 +105,71 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.inputWrapper}>
-              <Lock size={18} color="#8A8A9A" style={styles.inputIcon} />
+              <Lock size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Password"
-                placeholderTextColor="#5A5A6E"
+                placeholderTextColor={colors.textSecondary}
                 secureTextEntry={!showPassword}
                 value={password}
                 onChangeText={setPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword((v) => !v)} activeOpacity={0.7}>
                 {showPassword ? (
-                  <EyeOff size={18} color="#5A5A6E" />
+                  <EyeOff size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 ) : (
-                  <Eye size={18} color="#5A5A6E" />
+                  <Eye size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 )}
               </TouchableOpacity>
             </View>
 
-            {/* Sign In button */}
-            <TouchableOpacity
-              style={[styles.loginBtn, (!email || !password) && styles.loginBtnDisabled]}
+            <CutCornerButton
+              title={loading ? "Signing in…" : "Sign In"}
               onPress={handleLogin}
-              activeOpacity={0.8}
-              disabled={loading || !email || !password}
-            >
-              <LinearGradient
-                colors={email && password ? ["#FF6B35", "#FF3B6F"] : ["#2A2A3A", "#2A2A3A"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.loginBtnGradient}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <>
-                    <LogIn size={18} color="#FFFFFF" />
-                    <Text style={styles.loginBtnText}>Sign In</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+              disabled={loading || !canSubmit}
+              style={styles.loginBtn}
+              icon={loading ? <ActivityIndicator size="small" color={colors.voidBlack} /> : undefined}
+            />
           </View>
 
           {/* Divider */}
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
+            <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
             <View style={styles.dividerLine} />
           </View>
 
           {/* Social Sign In */}
           <View style={styles.socialGroup}>
-            <TouchableOpacity
-              style={styles.googleBtn}
-              activeOpacity={0.7}
+            <CutCornerButton
+              title="Continue with Google"
+              variant="ghost"
               onPress={handleGoogleLogin}
               disabled={socialLoading !== null || loading}
-            >
-              <View style={styles.googleContent}>
-                {socialLoading === "google" ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+              icon={
+                socialLoading === "google" ? (
+                  <ActivityIndicator size="small" color={colors.textPrimary} />
                 ) : (
-                  <>
-                    <View style={styles.googleIcon}>
-                      <Text style={styles.googleIconText}>G</Text>
-                    </View>
-                    <Text style={styles.googleText}>Continue with Google</Text>
-                  </>
-                )}
-              </View>
-            </TouchableOpacity>
+                  <Text style={styles.socialGlyph}>G</Text>
+                )
+              }
+            />
 
             {Platform.OS === "ios" && (
-              <TouchableOpacity
-                style={styles.googleBtn}
-                activeOpacity={0.7}
+              <CutCornerButton
+                title="Continue with Apple"
+                variant="ghost"
                 onPress={handleAppleLogin}
                 disabled={socialLoading !== null || loading}
-              >
-                <View style={styles.googleContent}>
-                  {socialLoading === "apple" ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                style={styles.appleBtn}
+                icon={
+                  socialLoading === "apple" ? (
+                    <ActivityIndicator size="small" color={colors.textPrimary} />
                   ) : (
-                    <>
-                      <View style={styles.googleIcon}>
-                        <Text style={styles.googleIconText}></Text>
-                      </View>
-                      <Text style={styles.googleText}>Continue with Apple</Text>
-                    </>
-                  )}
-                </View>
-              </TouchableOpacity>
+                    <Text style={styles.socialGlyph}></Text>
+                  )
+                }
+              />
             )}
           </View>
 
@@ -219,173 +189,110 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#060609",
-  },
-  bg: {
-    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.voidBlack,
   },
   backBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+    paddingHorizontal: spacing.spacingXl,
+    paddingVertical: spacing.spacingSm,
     alignSelf: "flex-start",
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.spacingXl,
     justifyContent: "center",
   },
   // Brand
   brandSection: {
     alignItems: "center",
-    marginBottom: 36,
+    marginBottom: spacing.spacingXxl,
   },
-  brandBadge: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  brandBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 2,
+  wordmark: {
+    ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold }),
+    color: colors.racingRed,
+    letterSpacing: 3,
+    marginBottom: spacing.spacingSm,
   },
   title: {
-    fontSize: 32,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginBottom: 4,
+    ...textStyle("displayXl"),
+    color: colors.textPrimary,
+    marginBottom: spacing.spacingXs,
   },
   subtitle: {
-    fontSize: 15,
-    color: "#8A8A9A",
-    fontWeight: "500",
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   // Error
-  errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.2)",
-  },
   errorText: {
-    fontSize: 13,
-    color: "#EF4444",
+    ...textStyle("caption"),
+    color: colors.racingRed,
     textAlign: "center",
-    fontWeight: "600",
+    marginBottom: spacing.spacingLg,
   },
   // Form
   form: {
-    gap: 14,
+    gap: spacing.spacingMd,
   },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingHorizontal: 16,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+    paddingHorizontal: spacing.spacingLg,
     height: 52,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: spacing.spacingMd,
   },
   input: {
     flex: 1,
-    fontSize: 15,
-    color: "#FFFFFF",
-    fontWeight: "500",
+    color: colors.textPrimary,
+    ...textStyle("body"),
   },
   loginBtn: {
-    borderRadius: 14,
-    overflow: "hidden",
-    marginTop: 4,
-  },
-  loginBtnDisabled: {
-    opacity: 0.5,
-  },
-  loginBtnGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    height: 52,
-  },
-  loginBtnText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    marginTop: spacing.spacingXs,
   },
   // Divider
   divider: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 28,
-    gap: 12,
+    marginVertical: spacing.spacingXxl,
+    gap: spacing.spacingMd,
   },
   dividerLine: {
     flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    height: borderWidth.hairline,
+    backgroundColor: colors.hairline,
   },
   dividerText: {
-    fontSize: 12,
-    color: "#5A5A6E",
-    fontWeight: "600",
+    ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold }),
+    color: colors.textSecondary,
+    letterSpacing: 1,
   },
   // Social
   socialGroup: {
-    gap: 12,
+    gap: spacing.spacingMd,
   },
-  googleBtn: {
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderRadius: 14,
-    height: 52,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+  appleBtn: {
+    marginTop: 0,
   },
-  googleContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  googleIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  googleIconText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#000000",
-  },
-  googleText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#FFFFFF",
+  socialGlyph: {
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.textPrimary,
   },
   // Footer
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 32,
+    marginTop: spacing.spacingXxl,
   },
   footerText: {
-    fontSize: 14,
-    color: "#8A8A9A",
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   footerLink: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#FF6B35",
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.racingRed,
   },
 });
