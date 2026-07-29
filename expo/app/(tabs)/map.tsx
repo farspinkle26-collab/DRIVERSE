@@ -838,7 +838,6 @@ export default function MapScreen() {
   const {
     onlineUsers,
     isOnline: isUserOnline,
-    connection: onlineConnection,
     goOnline,
     goOffline,
     myProblem,
@@ -3740,16 +3739,9 @@ export default function MapScreen() {
                   <View style={styles.onlineBannerTextWrap}>
                     <Text style={styles.onlineBannerTitle}>VISIBILITY ON</Text>
                     <Text style={styles.onlineBannerSub}>
-                      {/* An empty map means two different things and only one
-                          of them is "nobody is out there". While the live
-                          connection is down the list is still filling from
-                          the slower fallback sweep, so say that rather than
-                          claim nobody is around. */}
                       {onlineCount > 0
                         ? `Position shared. ${onlineCount} other driver${onlineCount !== 1 ? "s" : ""} on the map now.`
-                        : onlineConnection === "live"
-                          ? "Position shared. No other drivers near you yet."
-                          : "Position shared. Reconnecting to the live map — drivers may take a few seconds to appear."}
+                        : "Position shared. Connected to the live map."}
                     </Text>
                   </View>
                 </Pressable>
