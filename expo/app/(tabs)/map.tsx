@@ -832,7 +832,7 @@ export default function MapScreen() {
   const [showShareRank, setShowShareRank] = useState(false);
 
   // XP system
-  const { level, totalXp, xpCurrentLevel, xpRequired, xpProgress, addXP } = useXP();
+  const { level, totalXp, xpCurrentLevel, xpRequired, xpProgress, addXP, loading: xpLoading } = useXP();
 
   // Online users system
   const {
@@ -2441,6 +2441,12 @@ export default function MapScreen() {
             coordinate={userLocation}
             anchor={{ x: 0.5, y: -0.35 }}
             settleKey={`you-${level}`}
+            // The XP store starts at the placeholder level 1 and loads the real
+            // level from `user_xp` asynchronously. If a GPS fix lands before that
+            // load finishes, this marker would otherwise rasterise "Lv. 1" and
+            // freeze there. `ready` keeps the bitmap live until the real level
+            // has loaded, so it never settles on the placeholder.
+            ready={!xpLoading}
           >
             <View style={styles.youLabelWrap} collapsable={false}>
               <Text style={styles.youLabelName}>You</Text>
