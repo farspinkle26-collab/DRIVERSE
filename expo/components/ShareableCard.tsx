@@ -199,14 +199,23 @@ function BigStat({
   value,
   unit,
   accent = false,
+  half = false,
 }: {
   label: string;
   value: string;
   unit?: string;
   accent?: boolean;
+  /**
+   * Take a fixed half of the row — the trip variant's 2-column wrapping grid.
+   * Off (the default) sizes the stat to its content, which is what the
+   * centered rank/quest rows need: two fixed 50% halves plus the divider and
+   * its gaps overflow the row and, under `justifyContent: "center"`, push the
+   * left stat's label off the card edge.
+   */
+  half?: boolean;
 }) {
   return (
-    <View style={styles.bigStat}>
+    <View style={[styles.bigStat, half && styles.bigStatHalf]}>
       <View style={styles.bigStatValueRow}>
         <Text style={[styles.bigStatValue, accent && { color: colors.racingRed }]}>
           {value}
@@ -273,11 +282,11 @@ function TripVariant({ trip }: TripSharePayload) {
       {/* Readouts — the visual centrepiece, all JetBrains Mono. */}
       <View style={styles.statGrid}>
         {hasRoute ? (
-          <BigStat label="DISTANCE" value={distance.value} unit={distance.unit} />
+          <BigStat label="DISTANCE" value={distance.value} unit={distance.unit} half />
         ) : null}
-        <BigStat label="TIME" value={duration.value} unit={duration.unit} />
-        <BigStat label="AVG SPEED" value={speed.value} unit={speed.unit} />
-        <BigStat label="SCORE" value={String(score)} accent={score >= 90} />
+        <BigStat label="TIME" value={duration.value} unit={duration.unit} half />
+        <BigStat label="AVG SPEED" value={speed.value} unit={speed.unit} half />
+        <BigStat label="SCORE" value={String(score)} accent={score >= 90} half />
       </View>
     </View>
   );
@@ -595,8 +604,10 @@ const styles = StyleSheet.create({
     rowGap: spacing.spacingLg,
   },
   bigStat: {
-    width: "50%",
     gap: spacing.spacingXs,
+  },
+  bigStatHalf: {
+    width: "50%",
   },
   bigStatValueRow: {
     flexDirection: "row",
