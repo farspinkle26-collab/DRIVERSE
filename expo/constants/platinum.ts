@@ -40,16 +40,30 @@ export const PLATINUM_OFFERING_ID = "platinum";
  * Store product identifiers, registered in App Store Connect and Google
  * Play Console and attached to the offering above. Listed here for the
  * setup checklist in REVENUECAT_SETUP.md — runtime code never hardcodes
- * a product, it reads whatever the offering returns.
+ * a product, it reads whatever the offering returns, so both stores' ids
+ * flow onto the same paywall through the offering's packages, not through
+ * anything here.
  *
  * iOS ids match the app's actual bundle id (`app.rork.driverse` — no "e"
  * before the "r", see `app.json`), not the "driveverse" spelling used
  * elsewhere in copy and code. Get this wrong in App Store Connect and the
  * product silently never matches what RevenueCat expects.
+ *
+ * Android ids are Google Play's `subscriptionId:basePlanId` form: one
+ * subscription (`driverse_platinum`) carrying a monthly and an annual base
+ * plan, which is what makes monthly→yearly a plan change rather than a
+ * second concurrent subscription. RevenueCat surfaces each base plan as a
+ * distinct product under that compound id.
  */
 export const PLATINUM_PRODUCTS = {
-  monthly: "driverse_monthly_10",
-  yearly: "driverse_yearly_100",
+  monthly: {
+    ios: "driverse_monthly_10",
+    android: "driverse_platinum:driverse-monthly-10",
+  },
+  yearly: {
+    ios: "driverse_yearly_100",
+    android: "driverse_platinum:driverse-yearly-100",
+  },
 } as const;
 
 /**

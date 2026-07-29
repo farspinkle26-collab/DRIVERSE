@@ -88,19 +88,26 @@ the dashboard rather than a contract with the app.
 
 iOS product ids follow the app's real bundle id, `app.rork.driverse` (no "e"
 before the "r" — see `app.json`), not the "driveverse" spelling used in copy
-and code elsewhere:
+and code elsewhere. Android uses Google Play's `subscriptionId:basePlanId`
+form — one subscription (`driverse_platinum`) with a monthly and an annual
+base plan, so upgrading is a plan change, not a second subscription:
 
-| Period | Product id | iOS type | Android type |
-|---|---|---|---|
-| Monthly | `driverse_monthly_10` | Auto-renewable subscription | Subscription, monthly base plan |
-| Yearly | `driverse_yearly_100` | Auto-renewable subscription | Subscription, annual base plan |
+| Period | iOS product id | Android product id | iOS type | Android type |
+|---|---|---|---|---|
+| Monthly | `driverse_monthly_10` | `driverse_platinum:driverse-monthly-10` | Auto-renewable subscription | Subscription, monthly base plan |
+| Yearly | `driverse_yearly_100` | `driverse_platinum:driverse-yearly-100` | Auto-renewable subscription | Subscription, annual base plan |
 
-As of the current App Store Connect setup, `driverse_yearly_100` and
-`driverse_monthly_10` exist and are both **Waiting for Review**, but neither
-is attached to the `platinum` entitlement yet in the RevenueCat dashboard
-(Product catalog → Products shows an "Attach" action instead of an
-entitlement count for both). Do step 3.2.2 below before testing — a product
-with no entitlement attached will purchase successfully and grant nothing.
+As of the current setup, all four store products exist. The iOS pair
+(`driverse_yearly_100`, `driverse_monthly_10`) is **Waiting for Review** and
+attached to the `platinum` entitlement; the Android pair
+(`driverse_platinum:driverse-yearly-100`,
+`driverse_platinum:driverse-monthly-10`) is **Published** and attached to the
+`platinum` entitlement. Attaching to the entitlement is *not* the same as
+attaching to the paywall — a product reaches the paywall only through the
+offering's packages (step 3.2.3). Both stores' products go into the *same two
+packages*, so add the Android products alongside the iOS ones there — a
+product attached to the entitlement but not to a package purchases and grants
+nothing, and never appears on the paywall.
 
 Put monthly and yearly in the **same subscription group** (iOS) / the same
 subscription (Android, two base plans). That is what makes upgrading from
@@ -111,17 +118,29 @@ and it is what the Customer Center's "change plan" flow operates on.
 
 1. **Project → Apps** — add the iOS and Android apps. iOS also needs an
    In-App Purchase Key uploaded, or StoreKit 2 purchases fail.
-2. **Entitlements** — create `platinum`. Attach both iOS products
-   (`driverse_yearly_100`, `driverse_monthly_10`) — from **Product catalog →
+2. **Entitlements** — create `platinum`. Attach all four store products —
+   the two iOS (`driverse_yearly_100`, `driverse_monthly_10`) and the two
+   Android (`driverse_platinum:driverse-yearly-100`,
+   `driverse_platinum:driverse-monthly-10`) — from **Product catalog →
    Products**, click **Attach** on each row and select the `platinum`
-   entitlement.
+   entitlement. Each store's products sit in that store's section of the
+   Products page.
 3. **Offerings** — create an offering with identifier `platinum` and mark it
-   Current. Add packages using RevenueCat's reserved identifiers:
+   Current. Add two packages using RevenueCat's reserved identifiers, and put
+   **both stores' products for a period into the one package** — that is what
+   lands the Android products on the same paywall as the iOS ones; RevenueCat
+   serves each device the product for its own store:
 
-   | Package | Identifier | Attach |
-   |---|---|---|
-   | Monthly | `$rc_monthly` | `driverse_monthly_10` |
-   | Annual | `$rc_annual` | `driverse_yearly_100` |
+   | Package | Identifier | Attach (iOS) | Attach (Android) |
+   |---|---|---|---|
+   | Monthly | `$rc_monthly` | `driverse_monthly_10` | `driverse_platinum:driverse-monthly-10` |
+   | Annual | `$rc_annual` | `driverse_yearly_100` | `driverse_platinum:driverse-yearly-100` |
+
+   To add the second store's product to an existing package, open the package
+   and use **Attach Product** again — a package holds one product per store,
+   not one product total. If the Android rows aren't already in these two
+   packages, that is the whole of "make the Android products attach to the
+   paywall like the others": add them here.
 
    Use the reserved ids (`PLATINUM_PACKAGE_IDS` in `constants/platinum.ts`).
    They make `packageType` come back as `MONTHLY` / `ANNUAL`, so `periodOf()`
