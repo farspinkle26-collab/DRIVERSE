@@ -356,12 +356,12 @@ function headingDelta(from: number, to: number): number {
 
 // --- Format helpers ---
 function fmtKm(meters: number): string {
-  if (meters < 1000) return `${meters} m`;
+  if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
 function fmtMeters(meters: number): string {
-  if (meters < 1000) return `${meters} m`;
+  if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
