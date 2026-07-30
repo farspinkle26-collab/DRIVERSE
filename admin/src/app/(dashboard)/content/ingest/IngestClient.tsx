@@ -23,6 +23,7 @@ const JSON_EXAMPLE = `{
   "comments_organic_pickup": 17,
   "saves": 1600,
   "shares": 520,
+  "engagements": 5300,
   "avg_watch_time": 8.2,
   "new_follows": 180
 }`;
@@ -40,6 +41,7 @@ Seeded: 4
 Organic: 17
 Saves: 1.6k
 Shares: 520
+Interactions: 5,300
 Follows: 180
 Duration: 12
 Avg watch time: 8.2`;

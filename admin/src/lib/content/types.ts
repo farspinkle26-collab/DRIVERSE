@@ -63,12 +63,20 @@ export interface PostFrontmatter {
   platform: Platform;
   post_id: string;
   permalink: string;
+  /** Planning-sheet "Judul Content" — the working title of the piece. */
+  title: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM
   weekday: string;
   pillar: Pillar | null; // null when unclassified / doesn't fit cleanly
   format: string;
   feature_shown: string; // e.g. "live map", "trip card", "quest notification", "none"
+  /** Planning-sheet "Hashtag" — the raw hashtag line, copy-pasted as posted. */
+  hashtags: string;
+  /** Per-platform post links. A single piece is usually cross-posted, so the
+   *  planning sheet tracks both; `permalink` stays the generic single link. */
+  link_instagram: string;
+  link_tiktok: string;
   duration_seconds: number;
   views: number;
   reach: number;
@@ -78,6 +86,9 @@ export interface PostFrontmatter {
   comments_organic_pickup: number;
   saves: number;
   shares: number;
+  /** Total interactions as the platform itself reports them. Optional: when 0
+   *  the engagement rate falls back to summing likes/comments/saves/shares. */
+  engagements: number;
   avg_watch_time: number;
   new_follows: number;
   // Computed (persisted for readability, recomputed on load):
@@ -153,10 +164,14 @@ export interface PostFormInput {
   time: string; // HH:MM
   pillar: Pillar | null;
   platform: Platform;
+  title: string;
   format: string;
   feature_shown: string;
   caption: string;
+  hashtags: string;
   permalink: string;
+  link_instagram: string;
+  link_tiktok: string;
   views?: number;
   reach?: number;
   likes?: number;
@@ -165,6 +180,7 @@ export interface PostFormInput {
   comments_organic_pickup?: number;
   saves?: number;
   shares?: number;
+  engagements?: number;
   avg_watch_time?: number;
   duration_seconds?: number;
   new_follows?: number;

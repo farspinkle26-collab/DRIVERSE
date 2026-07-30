@@ -84,9 +84,18 @@ over guessing column names.
 ## Content repo (`content/`)
 
 - `content/posts/*.md` — one file per social post (Instagram/TikTok).
-  Frontmatter holds metrics (views, saves, engagement_rate, etc. — the
+  Frontmatter holds the planning fields (title, hashtags, the two per-platform
+  post links) and the metrics (views, saves, engagement_rate, etc. — the
   `*_rate` fields are always recomputed, never stale); body holds the
-  script/caption/takeaway.
+  script/caption/takeaway. `engagement_rate` prefers the platform's own
+  `engagements` (interactions) total when it's been entered and only falls back
+  to summing likes+comments+saves+shares when it hasn't.
+- The dashboard's **Content plan** grid mirrors the Content Planning sheet's
+  columns and is editable cell-by-cell: each cell PATCHes one field through
+  `admin/src/lib/content/patchPost.ts`, so an edit can never clobber a field the
+  editor didn't know about. Computed rates stay read-only, and metrics are
+  refused on a Scheduled post (whose metrics are never persisted) instead of
+  being accepted and dropped. See `content/README.md` → "The content plan table".
 - `content/account.json` — per-platform follower + funnel + demographics
   snapshot.
 - `content/what-works.md` — the learned playbook. Content between

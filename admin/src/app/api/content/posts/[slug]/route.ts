@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parsePostFormInput } from "@/lib/content/parsePostForm";
-import { buildPostFromForm, readPost, setPostChecked, writePost } from "@/lib/content/store";
+import { applyPostPatch } from "@/lib/content/patchPost";
+import { buildPostFromForm, readPost, writePost } from "@/lib/content/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,19 +23,19 @@ export async function PUT(req: NextRequest, { params }: { params: { slug: string
   }
 }
 
-// PATCH /api/content/posts/[slug] — flip only the checklist "checked" tick,
-// used by the posts table checkbox column.
+// PATCH /api/content/posts/[slug] — update just the fields in the body, used by
+// the planning table's inline cell editors (and the "Done" checkbox). Unlike PUT
+// this never rebuilds the post from a full form payload, so a cell edit can't
+// clobber a field the editor didn't know about.
 export async function PATCH(req: NextRequest, { params }: { params: { slug: string } }) {
   try {
-    const body = await req.json();
-    if (typeof body.checked !== "boolean") {
-      return NextResponse.json({ ok: false, error: "checked must be a boolean." }, { status: 400 });
-    }
-    const post = await setPostChecked(params.slug, body.checked);
-    if (!post) {
+    const existing = await readPost(params.slug);
+    if (!existing) {
       return NextResponse.json({ ok: false, error: "Post not found." }, { status: 404 });
     }
-    return NextResponse.json({ ok: true, slug: post.slug });
+    const { post, changed } = applyPostPatch(existing, await req.json());
+    await writePost(post, `content: set ${changed.join(", ")} on ${post.slug}`);
+    return NextResponse.json({ ok: true, slug: post.slug, changed });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 400 });
   }

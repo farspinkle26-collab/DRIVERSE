@@ -27,13 +27,17 @@ from the raw counters on read/write, so you can't get a stale rate.
 status: scheduled | published   # scheduled = queued, no metrics yet
 platform: instagram | tiktok
 post_id: string
-permalink: string
+permalink: string         # generic single link; back-filled from the platform link below
+title: string             # planning-sheet "Judul Content"
 date: YYYY-MM-DD          # scheduled: future post date. published: when it went live.
 time: "HH:MM"
 weekday: string
 pillar: garagey | pov_daily | fake_scripted_pov | ai_supercars | tips_tricks
-format: string            # "car showcase", "narrative", "listicle", "ai render"
+format: string            # "Jenis Konten": "car showcase", "reels", "listicle", "ai render"
 feature_shown: string     # "live map", "trip card", "garage card", "none", …
+hashtags: string          # planning-sheet "Hashtag" — the raw line, as posted
+link_instagram: string    # planning-sheet "Link Post Instagram"
+link_tiktok: string       # planning-sheet "Link Post TikTok"
 duration_seconds: number
 views: number
 reach: number
@@ -43,20 +47,36 @@ comments_seeded: number            # the 3–4 seeded "Driveverse?" comments
 comments_organic_pickup: number    # REAL unprompted "what app is this?" asks
 saves: number
 shares: number
+engagements: number       # the platform's own interactions total; 0 = not reported
 avg_watch_time: number
 new_follows: number
 save_rate: number         # computed: saves / views
-engagement_rate: number   # computed: (likes+comments+saves+shares) / views
+engagement_rate: number   # computed: interactions / views (see below)
 hold_rate: number         # computed: avg_watch_time / duration_seconds
 ---
 ```
 
+**`engagement_rate` has two numerators.** Instagram and TikTok each report one
+"interactions" total that does not always equal likes+comments+saves+shares —
+it counts things we don't track per post. When `engagements` is filled in, it's
+the truer numerator and it wins; when it's 0 the rate falls back to summing the
+components. Either way the rate is computed, never read from the file.
+
+A piece is usually cross-posted, so the two `link_*` fields hold one URL each,
+mirroring the planning sheet's two link columns. `permalink` stays the generic
+single link the post detail page and the ingest source speak: when it's empty on
+write it's back-filled from whichever `link_*` matches the row's `platform`, and
+on read a legacy file that only has `permalink` surfaces it in that same column.
+
 `status: scheduled` posts omit every metrics field entirely (nothing to report
-yet) — only `status`/`platform`/`post_id`/`permalink`/`date`/`time`/`weekday`/
-`pillar`/`format`/`feature_shown` are written. The dashboard never counts a
+yet) — only the planning fields (`status`/`platform`/`post_id`/`permalink`/
+`title`/`date`/`time`/`weekday`/`pillar`/`format`/`feature_shown`/`hashtags`/
+`link_instagram`/`link_tiktok`) are written. The dashboard never counts a
 Scheduled post into views/saves/engagement aggregates; it only shows up in the
 Overview "Upcoming" list until it's edited to `status: published` (via the
-Edit Post form or `/content/ingest`), at which point real metrics can be added.
+Edit Post form, the table's Status cell, or `/content/ingest`), at which point
+real metrics can be added. Entering a metric on a Scheduled post is rejected
+rather than accepted-then-dropped.
 
 Optional extension keys (not required):
 
@@ -80,6 +100,35 @@ Body sections (level-2 headings; unknown sections round-trip untouched):
 ## Takeaway               (auto-generated once metrics settle)
 ## Retention              (manual/vision read of the retention graph, if any)
 ```
+
+## The content plan table
+
+`/content` → Overview → **Content plan** is the editable grid over these files.
+Its columns and their order follow the Content Planning sheet — No, Tanggal
+Publish, Platform, Judul Content, Caption, Hashtag, Jenis Konten, Link Post
+Instagram, Link Post TikTok, Status — with the four per-post numbers (views,
+likes, comments, engagements) inline-editable beside them. Everything else the
+store holds (saves, reach, shares, follows, seeded/organic, duration, watch
+time, the rates) is on the same rows, hidden by default behind **Columns**.
+
+Every cell writes through `PATCH /api/content/posts/[slug]` with just the one
+field it owns (`admin/src/lib/content/patchPost.ts` validates and applies it).
+That matters: a cell edit can't clobber a field the editor never knew about, the
+way rebuilding the whole post from a form payload would. Commits on Enter or
+blur, reverts on Escape.
+
+Two things are deliberately **not** editable in the grid:
+
+- **The `*_rate` columns.** They're computed from the counters on every read and
+  write — a rate you can hand-edit is a rate that can disagree with its own
+  numerator.
+- **Metrics on a Scheduled post.** Those fields are never persisted for a
+  scheduled row, so accepting a number there would silently drop it. The cell
+  shows a dash until Status is flipped to Published; the API rejects it as a
+  backstop.
+
+New rows come from **+ Add post** (the same form, which also takes the planning
+fields), and the grid exports to CSV with whatever columns are visible.
 
 ## The five pillars
 

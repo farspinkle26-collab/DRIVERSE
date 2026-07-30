@@ -37,6 +37,7 @@ export interface IngestedMetrics {
   comments_organic_pickup?: number;
   saves?: number;
   shares?: number;
+  engagements?: number;
   avg_watch_time?: number;
   new_follows?: number;
   source?: "posted" | "trip_card_share";
@@ -66,6 +67,9 @@ const NUMBER_LABELS: { field: keyof IngestedMetrics; aliases: string[] }[] = [
   },
   { field: "saves", aliases: ["saves", "saved", "bookmarks"] },
   { field: "shares", aliases: ["shares", "shared"] },
+  // The platform's own interactions total — Instagram calls it "interactions",
+  // TikTok's insights export calls it engagements.
+  { field: "engagements", aliases: ["engagements", "interactions", "total interactions"] },
   { field: "new_follows", aliases: ["follows", "new follows", "new followers", "follows from post"] },
   { field: "duration_seconds", aliases: ["duration", "length", "duration seconds"] },
   { field: "avg_watch_time", aliases: ["avg watch time", "average watch time", "avg watch"] },
@@ -149,6 +153,7 @@ export class ManualIngestSource implements IngestSource {
       comments_organic_pickup: numeric(o.comments_organic_pickup),
       saves: numeric(o.saves),
       shares: numeric(o.shares),
+      engagements: numeric(o.engagements),
       avg_watch_time: numeric(o.avg_watch_time),
       new_follows: numeric(o.new_follows),
       source:
@@ -274,12 +279,16 @@ export function applyIngest(
       platform: metrics.platform,
       post_id: metrics.post_id,
       permalink: "",
+      title: "",
       date: metrics.date || new Date().toISOString().slice(0, 10),
       time: metrics.time || "12:00",
       weekday: "",
       pillar: metrics.pillar ?? null,
       format: "",
       feature_shown: "none",
+      hashtags: "",
+      link_instagram: "",
+      link_tiktok: "",
       duration_seconds: 0,
       views: 0,
       reach: 0,
@@ -289,6 +298,7 @@ export function applyIngest(
       comments_organic_pickup: 0,
       saves: 0,
       shares: 0,
+      engagements: 0,
       avg_watch_time: 0,
       new_follows: 0,
       save_rate: 0,
@@ -318,6 +328,7 @@ export function applyIngest(
   set("comments_organic_pickup", "comments_organic_pickup");
   set("saves", "saves");
   set("shares", "shares");
+  set("engagements", "engagements");
   set("avg_watch_time", "avg_watch_time");
   set("new_follows", "new_follows");
   if (metrics.source !== undefined) fm.source = metrics.source;

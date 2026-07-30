@@ -32,16 +32,22 @@ export function computeDerived(fm: {
   comments_total: number;
   saves: number;
   shares: number;
+  engagements?: number;
   avg_watch_time: number;
   duration_seconds: number;
 }): { save_rate: number; engagement_rate: number; hold_rate: number } {
   const v = fm.views || 0;
   const round = (n: number) => Math.round(n * 10000) / 10000;
   const save_rate = v > 0 ? round(fm.saves / v) : 0;
-  const engagement_rate =
-    v > 0
-      ? round((fm.likes + fm.comments_total + fm.saves + fm.shares) / v)
-      : 0;
+  // Instagram/TikTok report one "interactions" total that doesn't always equal
+  // likes+comments+saves+shares (it counts things we don't track per-post). If
+  // that number was entered it's the truer numerator, so it wins; otherwise we
+  // sum the components we do have.
+  const interactions =
+    fm.engagements && fm.engagements > 0
+      ? fm.engagements
+      : fm.likes + fm.comments_total + fm.saves + fm.shares;
+  const engagement_rate = v > 0 ? round(interactions / v) : 0;
   const hold_rate =
     fm.duration_seconds > 0 ? round(fm.avg_watch_time / fm.duration_seconds) : 0;
   return { save_rate, engagement_rate, hold_rate };
@@ -75,21 +81,36 @@ function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
     comments_total: num(raw.comments_total),
     saves: num(raw.saves),
     shares: num(raw.shares),
+    engagements: num(raw.engagements),
     avg_watch_time: num(raw.avg_watch_time),
     duration_seconds: num(raw.duration_seconds),
   };
   const derived = computeDerived(counters);
+  const platform = coercePlatform(raw.platform);
+  const permalink = str(raw.permalink);
+  // Files written before the two link columns existed only have `permalink`.
+  // Read it into whichever platform column the row belongs to so old posts
+  // aren't blank in the planning table; nothing is rewritten until an edit.
+  const links = {
+    link_instagram: str(raw.link_instagram),
+    link_tiktok: str(raw.link_tiktok),
+  };
+  const own = platform === "tiktok" ? "link_tiktok" : "link_instagram";
+  if (!links[own] && permalink) links[own] = permalink;
   const fm: PostFrontmatter = {
     status: coerceStatus(raw.status),
-    platform: coercePlatform(raw.platform),
+    platform,
     post_id: str(raw.post_id),
-    permalink: str(raw.permalink),
+    permalink,
+    title: str(raw.title),
     date: str(raw.date),
     time: str(raw.time),
     weekday: str(raw.weekday),
     pillar: coercePillar(raw.pillar),
     format: str(raw.format),
     feature_shown: str(raw.feature_shown) || "none",
+    hashtags: str(raw.hashtags),
+    ...links,
     duration_seconds: counters.duration_seconds,
     views: counters.views,
     reach: num(raw.reach),
@@ -99,6 +120,7 @@ function toFrontmatter(raw: Record<string, Scalar>): PostFrontmatter {
     comments_organic_pickup: num(raw.comments_organic_pickup),
     saves: counters.saves,
     shares: counters.shares,
+    engagements: counters.engagements,
     avg_watch_time: counters.avg_watch_time,
     new_follows: num(raw.new_follows),
     ...derived,
@@ -117,12 +139,16 @@ const FM_ORDER: string[] = [
   "platform",
   "post_id",
   "permalink",
+  "title",
   "date",
   "time",
   "weekday",
   "pillar",
   "format",
   "feature_shown",
+  "hashtags",
+  "link_instagram",
+  "link_tiktok",
   "duration_seconds",
   "views",
   "reach",
@@ -132,6 +158,7 @@ const FM_ORDER: string[] = [
   "comments_organic_pickup",
   "saves",
   "shares",
+  "engagements",
   "avg_watch_time",
   "new_follows",
   "save_rate",
@@ -151,6 +178,7 @@ const METRIC_KEYS = new Set([
   "comments_organic_pickup",
   "saves",
   "shares",
+  "engagements",
   "avg_watch_time",
   "new_follows",
   "save_rate",
@@ -163,6 +191,12 @@ function frontmatterToEntries(
 ): [string, Scalar | undefined][] {
   const derived = computeDerived(fm);
   const merged: PostFrontmatter = { ...fm, ...derived };
+  // `permalink` is what the detail page and the ingest source speak, so keep it
+  // pointing at this row's own platform link when it hasn't been set directly.
+  if (!merged.permalink) {
+    merged.permalink =
+      (merged.platform === "tiktok" ? merged.link_tiktok : merged.link_instagram) || "";
+  }
   const entries: [string, Scalar | undefined][] = [];
   for (const key of FM_ORDER) {
     if (merged.status === "scheduled" && METRIC_KEYS.has(key)) continue;
@@ -193,6 +227,15 @@ const SECTION_TITLES: { key: keyof PostBody; title: string }[] = [
   { key: "retention", title: "Retention" },
 ];
 
+/**
+ * What serializeBody writes for a section with nothing in it. It has to read
+ * back as empty, not as content: otherwise `!post.body.takeaway` is false for
+ * every post the writer has touched (so enrichment thinks a Takeaway already
+ * exists), and the Caption cell in the plan table hands you a placeholder to
+ * delete before you can type.
+ */
+const EMPTY_SECTION = "_—_";
+
 function parseBody(body: string): PostBody {
   const out: PostBody = {
     script: "",
@@ -211,7 +254,8 @@ function parseBody(body: string): PostBody {
   if (preamble) unmatched.push(preamble);
   for (let i = 1; i < parts.length; i += 2) {
     const title = parts[i].trim();
-    const content = (parts[i + 1] ?? "").trim();
+    const raw = (parts[i + 1] ?? "").trim();
+    const content = raw === EMPTY_SECTION ? "" : raw;
     const match = SECTION_TITLES.find(
       (s) => s.title.toLowerCase() === title.toLowerCase(),
     );
@@ -229,7 +273,7 @@ function serializeBody(b: PostBody): string {
   const blocks: string[] = [];
   for (const { key, title } of SECTION_TITLES) {
     const content = (b[key] ?? "").trim();
-    blocks.push(`## ${title}\n\n${content || "_—_"}`);
+    blocks.push(`## ${title}\n\n${content || EMPTY_SECTION}`);
   }
   if (b.extra?.trim()) blocks.push(b.extra.trim());
   return blocks.join("\n\n") + "\n";
@@ -275,19 +319,6 @@ export async function writePost(post: Post, commitMessage?: string): Promise<voi
   await writeTextFile(file, serializePost(post), commitMessage ?? `content: update ${post.slug}`);
 }
 
-/**
- * Flip the "checked" checklist tick for a post without touching any other
- * field — used by the posts table's checkbox column, distinct from the full
- * Edit form flow in buildPostFromForm.
- */
-export async function setPostChecked(slug: string, checked: boolean): Promise<Post | null> {
-  const post = await readPost(slug);
-  if (!post) return null;
-  post.frontmatter.checked = checked;
-  await writePost(post, `content: mark ${slug} ${checked ? "done" : "not done"}`);
-  return post;
-}
-
 function weekdayFromDate(date: string): string {
   const d = new Date(date + "T12:00:00Z");
   if (Number.isNaN(d.getTime())) return "";
@@ -329,6 +360,7 @@ export function buildPostFromForm(
           comments_total: n(input.comments_total),
           saves: n(input.saves),
           shares: n(input.shares),
+          engagements: n(input.engagements),
           avg_watch_time: n(input.avg_watch_time),
           duration_seconds: n(input.duration_seconds),
         }
@@ -338,6 +370,7 @@ export function buildPostFromForm(
           comments_total: 0,
           saves: 0,
           shares: 0,
+          engagements: 0,
           avg_watch_time: 0,
           duration_seconds: 0,
         };
@@ -347,13 +380,19 @@ export function buildPostFromForm(
     status: input.status,
     platform: input.platform,
     post_id: existing?.frontmatter.post_id || slug,
-    permalink: input.permalink || "",
+    // The form edits the two per-platform links; `permalink` is kept as the
+    // generic one and back-filled from them on write (frontmatterToEntries).
+    permalink: input.permalink || existing?.frontmatter.permalink || "",
+    title: input.title || "",
     date: input.date,
     time: input.time,
     weekday: weekdayFromDate(input.date),
     pillar: input.pillar,
     format: input.format,
     feature_shown: input.feature_shown || "none",
+    hashtags: input.hashtags || "",
+    link_instagram: input.link_instagram || "",
+    link_tiktok: input.link_tiktok || "",
     ...counters,
     reach: input.status === "published" ? n(input.reach) : 0,
     comments_seeded: input.status === "published" ? n(input.comments_seeded) : 0,
