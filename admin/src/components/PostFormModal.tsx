@@ -19,6 +19,7 @@ const METRIC_FIELDS: { key: keyof MetricsState; label: string }[] = [
   { key: "comments_organic_pickup", label: "Comments — organic pickup" },
   { key: "saves", label: "Saves" },
   { key: "shares", label: "Shares" },
+  { key: "engagements", label: "Engagements (total)" },
   { key: "avg_watch_time", label: "Avg watch time (s)" },
   { key: "duration_seconds", label: "Duration (s)" },
   { key: "new_follows", label: "New follows" },
@@ -33,6 +34,7 @@ interface MetricsState {
   comments_organic_pickup: string;
   saves: string;
   shares: string;
+  engagements: string;
   avg_watch_time: string;
   duration_seconds: string;
   new_follows: string;
@@ -48,6 +50,7 @@ function emptyMetrics(): MetricsState {
     comments_organic_pickup: "",
     saves: "",
     shares: "",
+    engagements: "",
     avg_watch_time: "",
     duration_seconds: "",
     new_follows: "",
@@ -64,16 +67,20 @@ export function PostFormModal({ post, onClose }: Props) {
   const [time, setTime] = useState(fm?.time ?? "");
   const [pillar, setPillar] = useState<Pillar | "">(fm?.pillar ?? "");
   const [platform, setPlatform] = useState<Platform>(fm?.platform ?? "instagram");
+  const [title, setTitle] = useState(fm?.title ?? "");
   const [format, setFormat] = useState(fm?.format ?? "");
   const [featureShown, setFeatureShown] = useState(fm?.feature_shown ?? "");
   const [caption, setCaption] = useState(post?.body.caption ?? "");
-  const [permalink, setPermalink] = useState(fm?.permalink ?? "");
+  const [hashtags, setHashtags] = useState(fm?.hashtags ?? "");
+  const [linkInstagram, setLinkInstagram] = useState(fm?.link_instagram ?? "");
+  const [linkTiktok, setLinkTiktok] = useState(fm?.link_tiktok ?? "");
   const [metrics, setMetrics] = useState<MetricsState>(() => {
     if (!fm || fm.status !== "published") return emptyMetrics();
     return {
       views: String(fm.views || ""),
       reach: String(fm.reach || ""),
       likes: String(fm.likes || ""),
+      engagements: String(fm.engagements || ""),
       comments_total: String(fm.comments_total || ""),
       comments_seeded: String(fm.comments_seeded || ""),
       comments_organic_pickup: String(fm.comments_organic_pickup || ""),
@@ -98,10 +105,13 @@ export function PostFormModal({ post, onClose }: Props) {
         time,
         pillar,
         platform,
+        title,
         format,
         feature_shown: featureShown,
         caption,
-        permalink,
+        hashtags,
+        link_instagram: linkInstagram,
+        link_tiktok: linkTiktok,
       };
       if (status === "published") {
         for (const { key } of METRIC_FIELDS) {
@@ -171,6 +181,15 @@ export function PostFormModal({ post, onClose }: Props) {
             </Field>
           </div>
 
+          <Field label="Judul Content / title">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Pokédex showcase — Civic FD2"
+              className={inputClass}
+            />
+          </Field>
+
           <Field label="Pillar">
             <select value={pillar} onChange={(e) => setPillar(e.target.value as Pillar)} required className={inputClass}>
               <option value="" disabled>
@@ -185,11 +204,11 @@ export function PostFormModal({ post, onClose }: Props) {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Format">
+            <Field label="Jenis Konten / format">
               <input
                 value={format}
                 onChange={(e) => setFormat(e.target.value)}
-                placeholder="e.g. car showcase"
+                placeholder="e.g. car showcase, reels"
                 required
                 className={inputClass}
               />
@@ -208,20 +227,44 @@ export function PostFormModal({ post, onClose }: Props) {
             <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} className={inputClass} />
           </Field>
 
-          <Field label="Permalink (optional)">
-            <input
-              value={permalink}
-              onChange={(e) => setPermalink(e.target.value)}
-              placeholder="https://…"
+          <Field label="Hashtag (optional)">
+            <textarea
+              value={hashtags}
+              onChange={(e) => setHashtags(e.target.value)}
+              rows={2}
+              placeholder="#driverse #mobil #otomotif"
               className={inputClass}
             />
           </Field>
 
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Link Post Instagram">
+              <input
+                value={linkInstagram}
+                onChange={(e) => setLinkInstagram(e.target.value)}
+                placeholder="https://instagram.com/reel/…"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Link Post TikTok">
+              <input
+                value={linkTiktok}
+                onChange={(e) => setLinkTiktok(e.target.value)}
+                placeholder="https://tiktok.com/@…"
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
           {status === "published" && (
             <div className="rounded-lg border border-hairline bg-surface-2 p-3">
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-muted">
-                Metrics (optional — can be filled in later via Ingest metrics)
+                Metrics (optional — also editable per cell in the content plan table)
               </div>
+              <p className="mb-2 text-[11px] leading-snug text-ink-muted">
+                Engagements is the platform&apos;s own interactions total. Leave it blank to
+                have the engagement rate sum likes + comments + saves + shares instead.
+              </p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {METRIC_FIELDS.map(({ key, label }) => (
                   <Field key={key} label={label}>

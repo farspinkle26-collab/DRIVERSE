@@ -16,11 +16,13 @@ import {
 export interface Column<T> {
   key: string;
   header: string;
-  render: (row: T) => React.ReactNode;
+  /** `index` is the row's 0-based position in the current sorted view (so a
+   *  row-number column keeps counting from the top after a re-sort). */
+  render: (row: T, index: number) => React.ReactNode;
   /** Enables sorting on this column; also used as the CSV export value when csvValue is omitted. */
   sortValue?: (row: T) => number | string;
   /** Value written to the CSV export for this column. Falls back to sortValue, then "". */
-  csvValue?: (row: T) => string | number;
+  csvValue?: (row: T, index: number) => string | number;
   align?: "left" | "right";
   className?: string;
   /** Hidden by default in the column-visibility toggle (still exportable/searchable). */
@@ -88,7 +90,9 @@ export function DataTable<T>({
         header: c.header,
         accessorFn: c.sortValue ?? (() => ""),
         enableSorting: !!c.sortValue,
-        cell: (info) => c.render(info.row.original),
+        // Cells are rendered from `columns` directly in the tbody below (not via
+        // flexRender) so each one receives its display position for row-number
+        // columns; TanStack's own row.index follows the unsorted data order.
       })),
     [columns],
   );
@@ -115,14 +119,14 @@ export function DataTable<T>({
     const visible = table.getVisibleLeafColumns();
     const header = visible.map((c) => colByKey.get(c.id)?.header ?? c.id);
     const lines = [header.map(csvEscape).join(",")];
-    for (const row of sortedRows) {
+    sortedRows.forEach((row, i) => {
       const cells = visible.map((c) => {
         const col = colByKey.get(c.id);
-        const raw = col?.csvValue ? col.csvValue(row.original) : (col?.sortValue?.(row.original) ?? "");
+        const raw = col?.csvValue ? col.csvValue(row.original, i) : (col?.sortValue?.(row.original) ?? "");
         return csvEscape(raw);
       });
       lines.push(cells.join(","));
-    }
+    });
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -226,9 +230,10 @@ export function DataTable<T>({
                       ))}
                     </tr>
                   ))
-                : pageRows.map((row) => {
+                : pageRows.map((row, i) => {
                     const href = getRowHref?.(row.original);
                     const clickable = !!href || !!onRowClick;
+                    const displayIndex = pageIndex * pagination.pageSize + i;
                     return (
                       <tr
                         key={row.id}
@@ -250,7 +255,7 @@ export function DataTable<T>({
                                 col?.align === "right" ? "text-right font-mono" : "text-left"
                               } ${col?.className ?? ""}`}
                             >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              {col?.render(row.original, displayIndex)}
                             </td>
                           );
                         })}

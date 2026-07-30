@@ -17,19 +17,24 @@ import {
 } from "recharts";
 import { SectionHeader, StatCard, ChartCard, Card, EmptyState, Banner, Badge } from "@/components/ui";
 import { DataTable, type Column } from "@/components/DataTable";
-import { DateCell } from "@/components/DateCell";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
 import { AddPostButton } from "@/components/AddPostButton";
 import { EditPostButton } from "@/components/EditPostButton";
-import { PostCheckedCheckbox } from "@/components/PostCheckedCheckbox";
-import { SERIES, AXIS, STATUS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
+import {
+  EditableCell,
+  EditableCheckboxCell,
+  EditableSelectCell,
+  EditableTextCell,
+} from "@/components/EditableCell";
+import { SERIES, AXIS, GRID, tooltipStyle, tooltipItemStyle, tooltipLabelStyle } from "@/components/chartTheme";
 import { fmtInt, fmtDate } from "@/lib/format";
 import { fmtAbsoluteWIB } from "@/lib/dates";
 import { resolveDateRange, type DateRangeValue } from "@/lib/dates";
 import {
   PILLARS,
   PILLAR_LABELS,
+  POST_STATUSES,
   POST_STATUS_LABELS,
   type AccountData,
   type Pillar,
@@ -197,7 +202,7 @@ function OverviewTab({ posts }: Props) {
       });
   }, [posts, pillarFilter, platformFilter, gridRange, now]);
 
-  const columns = usePostColumns();
+  const columns = usePlanColumns();
 
   return (
     <div className="space-y-5">
@@ -255,8 +260,9 @@ function OverviewTab({ posts }: Props) {
       </ChartCard>
 
       <ChartCard
-        title="All posts"
-        subtitle="Every metric as a sortable column. Filter by pillar / platform / date, search by feature or format."
+        title="Content plan"
+        subtitle="The planning sheet: schedule, copy and links on the left, the numbers on the right. Click any cell to edit — Enter or clicking away saves it to the content store; Esc cancels."
+        note="Views, likes, comments and engagements are typed in per post. Eng % (and Save % / Hold % under Columns) are computed from those counters, so they're read-only. Metric cells unlock once Status is Published."
         right={
           <div className="flex items-center gap-2">
             <Select value={pillarFilter} onChange={setPillarFilter} options={[["all", "All pillars"], ...PILLARS.map((p) => [p, PILLAR_LABELS[p]] as [string, string])]} />
@@ -273,11 +279,12 @@ function OverviewTab({ posts }: Props) {
           rows={gridRows}
           pageSize={25}
           initialSort={{ key: "date", dir: "desc" }}
-          emptyMessage="No posts match these filters — try widening the date range."
-          searchValue={(p) => `${p.frontmatter.feature_shown} ${p.frontmatter.format} ${p.frontmatter.post_id}`}
-          searchPlaceholder="Search feature / format / post ID…"
-          getRowHref={(p) => `/content/posts/${p.slug}`}
-          csvFilename="content-posts"
+          emptyMessage="No posts match these filters — try widening the date range, or add a row with + Add post."
+          searchValue={(p) =>
+            `${p.frontmatter.title} ${p.frontmatter.hashtags} ${p.body.caption} ${p.frontmatter.feature_shown} ${p.frontmatter.format} ${p.frontmatter.post_id}`
+          }
+          searchPlaceholder="Search title / caption / hashtag / format…"
+          csvFilename="content-plan"
         />
       </ChartCard>
     </div>
@@ -474,15 +481,23 @@ function UpcomingCard({ posts }: { posts: Post[] }) {
               key={p.slug}
               className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-surface-2 px-3 py-2 text-sm transition hover:bg-surface-2/70"
             >
-              <div className="flex items-center gap-2.5">
-                <PostCheckedCheckbox post={p} />
-                <Link href={`/content/posts/${p.slug}`} className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <EditableCheckboxCell
+                  slug={p.slug}
+                  field="checked"
+                  value={!!p.frontmatter.checked}
+                  label={p.frontmatter.checked ? "Mark as not done" : "Mark as done"}
+                />
+                <Link href={`/content/posts/${p.slug}`} className="flex min-w-0 items-center gap-2">
                   {p.frontmatter.pillar ? (
                     <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
                   ) : (
                     <span className="text-ink-muted">—</span>
                   )}
                   <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />
+                  {p.frontmatter.title && (
+                    <span className="truncate text-ink-secondary">{p.frontmatter.title}</span>
+                  )}
                 </Link>
               </div>
               <Link
@@ -502,74 +517,287 @@ function UpcomingCard({ posts }: { posts: Post[] }) {
   );
 }
 
-// ── Shared building blocks ──────────────────────────────────────────────────
-function usePostColumns(): Column<Post>[] {
-  return useMemo(
-    () => [
+// ── The planning table ──────────────────────────────────────────────────────
+// Column set and order follow the Content Planning sheet (No, Tanggal Publish,
+// Platform, Judul Content, Caption, Hashtag, Jenis Konten, Link Post Instagram,
+// Link Post TikTok, Status), with the four metrics we track per post — views,
+// likes, comments, engagements — inline-editable alongside them. Everything the
+// old read-only grid showed is still here, just under the Columns toggle.
+//
+// Counters are typed straight into the cell; the three *_rate columns are
+// computed from them server-side and stay read-only, because a rate you can
+// hand-edit is a rate that can disagree with its own numerator.
+const COUNTER_HINT = "Set Status to Published to enter metrics.";
+
+function usePlanColumns(): Column<Post>[] {
+  return useMemo(() => {
+    /** An editable counter cell — dashed out until the post is published.
+     *  Width lives on the <td> (the input fills it) so a formatted number like
+     *  "40,000" is never clipped. */
+    const counter = (
+      field: keyof Post["frontmatter"],
+      header: string,
+      opts: { defaultHidden?: boolean; width?: string } = {},
+    ): Column<Post> => ({
+      key: field as string,
+      header,
+      align: "right",
+      className: opts.width ?? "min-w-[6.5rem]",
+      defaultHidden: opts.defaultHidden,
+      sortValue: (p) => Number(p.frontmatter[field] ?? 0),
+      csvValue: (p) => (p.frontmatter.status === "published" ? Number(p.frontmatter[field] ?? 0) : ""),
+      render: (p) => (
+        <EditableCell
+          slug={p.slug}
+          field={field as string}
+          value={Number(p.frontmatter[field] ?? 0)}
+          kind="number"
+          disabled={p.frontmatter.status !== "published"}
+          disabledHint={COUNTER_HINT}
+        />
+      ),
+    });
+
+    /** A computed rate column — read-only by design. */
+    const rate = (
+      field: "save_rate" | "engagement_rate" | "hold_rate",
+      header: string,
+      digits: number,
+      note: string,
+      defaultHidden = false,
+    ): Column<Post> => ({
+      key: field,
+      header,
+      align: "right",
+      className: "min-w-[5.5rem]",
+      defaultHidden,
+      sortValue: (p) => p.frontmatter[field],
+      csvValue: (p) => (p.frontmatter.status === "published" ? p.frontmatter[field] : ""),
+      render: (p) => (
+        <span className="text-ink-secondary" title={`Computed: ${note}`}>
+          {metricOrDash(p, pct(p.frontmatter[field], digits))}
+        </span>
+      ),
+    });
+
+    /** A post link cell: editable URL plus an open-in-new-tab affordance. */
+    const link = (
+      field: "link_instagram" | "link_tiktok",
+      header: string,
+    ): Column<Post> => ({
+      key: field,
+      header,
+      className: "min-w-[11rem]",
+      sortValue: (p) => p.frontmatter[field],
+      render: (p) => (
+        <div className="flex items-center gap-1">
+          <EditableCell
+            slug={p.slug}
+            field={field}
+            value={p.frontmatter[field]}
+            kind="url"
+            placeholder="https://…"
+          />
+          {p.frontmatter[field] ? (
+            <a
+              href={p.frontmatter[field]}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0 px-1 text-xs text-series-1 hover:underline"
+              title="Open post"
+            >
+              ↗
+            </a>
+          ) : null}
+        </div>
+      ),
+    });
+
+    return [
+      {
+        key: "no",
+        header: "No",
+        className: "w-10 text-ink-muted",
+        csvValue: (_p, i) => i + 1,
+        render: (_p, i) => <span className="tabular text-xs text-ink-muted">{i + 1}</span>,
+      },
       {
         key: "checked",
-        header: "Done",
+        header: "✓",
+        className: "w-8",
         sortValue: (p) => (p.frontmatter.checked ? 1 : 0),
         csvValue: (p) => (p.frontmatter.checked ? "yes" : "no"),
-        render: (p) => <PostCheckedCheckbox post={p} />,
+        render: (p) => (
+          <EditableCheckboxCell
+            slug={p.slug}
+            field="checked"
+            value={!!p.frontmatter.checked}
+            label={p.frontmatter.checked ? "Mark as not done" : "Mark as done"}
+          />
+        ),
       },
       {
         key: "date",
-        header: "Date",
+        header: "Tanggal Publish",
+        className: "min-w-[9rem]",
         sortValue: (p) => `${p.frontmatter.date}T${p.frontmatter.time || "00:00"}`,
         csvValue: (p) => p.frontmatter.date,
-        render: (p) => <DateCell value={`${p.frontmatter.date}T${p.frontmatter.time || "00:00"}:00Z`} showWeekday />,
+        render: (p) => <EditableCell slug={p.slug} field="date" value={p.frontmatter.date} kind="date" />,
       },
       {
-        key: "status",
-        header: "Status",
-        sortValue: (p) => p.frontmatter.status,
-        csvValue: (p) => POST_STATUS_LABELS[p.frontmatter.status],
+        key: "time",
+        header: "Jam",
+        className: "min-w-[7.5rem]",
+        sortValue: (p) => p.frontmatter.time,
+        render: (p) => <EditableCell slug={p.slug} field="time" value={p.frontmatter.time} kind="time" />,
+      },
+      {
+        key: "platform",
+        header: "Platform",
+        className: "min-w-[9.5rem]",
+        sortValue: (p) => p.frontmatter.platform,
+        csvValue: (p) => platformLabel(p.frontmatter.platform),
         render: (p) => (
-          <Badge
-            label={POST_STATUS_LABELS[p.frontmatter.status]}
-            color={p.frontmatter.status === "published" ? STATUS.good : AXIS}
+          <EditableSelectCell
+            slug={p.slug}
+            field="platform"
+            value={p.frontmatter.platform}
+            options={[
+              ["instagram", "Instagram"],
+              ["tiktok", "TikTok"],
+            ]}
+          />
+        ),
+      },
+      {
+        key: "title",
+        header: "Judul Content",
+        className: "min-w-[13rem]",
+        sortValue: (p) => p.frontmatter.title,
+        render: (p) => (
+          <EditableCell
+            slug={p.slug}
+            field="title"
+            value={p.frontmatter.title}
+            placeholder="Judul…"
+          />
+        ),
+      },
+      {
+        key: "caption",
+        header: "Caption",
+        className: "min-w-[16rem] align-top",
+        sortValue: (p) => p.body.caption,
+        render: (p) => (
+          <EditableTextCell slug={p.slug} field="caption" value={p.body.caption} placeholder="Caption…" />
+        ),
+      },
+      {
+        key: "hashtags",
+        header: "Hashtag",
+        className: "min-w-[13rem] align-top",
+        sortValue: (p) => p.frontmatter.hashtags,
+        render: (p) => (
+          <EditableTextCell
+            slug={p.slug}
+            field="hashtags"
+            value={p.frontmatter.hashtags}
+            placeholder="#driverse #…"
+            focusRows={4}
+          />
+        ),
+      },
+      {
+        key: "format",
+        header: "Jenis Konten",
+        className: "min-w-[10rem]",
+        sortValue: (p) => p.frontmatter.format,
+        render: (p) => (
+          <EditableCell
+            slug={p.slug}
+            field="format"
+            value={p.frontmatter.format}
+            placeholder="e.g. reels, carousel"
           />
         ),
       },
       {
         key: "pillar",
         header: "Pillar",
+        className: "min-w-[12rem]",
         sortValue: (p) => p.frontmatter.pillar ?? "",
         csvValue: (p) => (p.frontmatter.pillar ? PILLAR_LABELS[p.frontmatter.pillar] : ""),
-        render: (p) =>
-          p.frontmatter.pillar ? (
-            <Badge label={PILLAR_LABELS[p.frontmatter.pillar]} color={PILLAR_COLOR[p.frontmatter.pillar]} />
-          ) : (
-            <span className="text-ink-muted">—</span>
-          ),
+        render: (p) => (
+          <EditableSelectCell
+            slug={p.slug}
+            field="pillar"
+            value={p.frontmatter.pillar ?? ""}
+            options={[["", "— unclassified"], ...PILLARS.map((k) => [k, PILLAR_LABELS[k]] as [string, string])]}
+          />
+        ),
+      },
+      link("link_instagram", "Link Post Instagram"),
+      link("link_tiktok", "Link Post TikTok"),
+      {
+        key: "status",
+        header: "Status",
+        className: "min-w-[9.5rem]",
+        sortValue: (p) => p.frontmatter.status,
+        csvValue: (p) => POST_STATUS_LABELS[p.frontmatter.status],
+        render: (p) => (
+          <EditableSelectCell
+            slug={p.slug}
+            field="status"
+            value={p.frontmatter.status}
+            options={POST_STATUSES.map((s) => [s, POST_STATUS_LABELS[s]] as [string, string])}
+          />
+        ),
+      },
+      counter("views", "Views", { width: "min-w-[7.5rem]" }),
+      counter("likes", "Likes"),
+      counter("comments_total", "Comments"),
+      counter("engagements", "Engagements", { width: "min-w-[8.5rem]" }),
+      rate("engagement_rate", "Eng %", 1, "interactions ÷ views"),
+      counter("saves", "Saves", { defaultHidden: true }),
+      rate("save_rate", "Save %", 2, "saves ÷ views", true),
+      counter("reach", "Reach", { defaultHidden: true, width: "min-w-[7.5rem]" }),
+      counter("shares", "Shares", { defaultHidden: true }),
+      counter("new_follows", "Follows", { defaultHidden: true }),
+      counter("comments_seeded", "Seeded", { defaultHidden: true }),
+      counter("comments_organic_pickup", "Organic", { defaultHidden: true }),
+      counter("duration_seconds", "Dur (s)", { defaultHidden: true }),
+      counter("avg_watch_time", "Watch (s)", { defaultHidden: true }),
+      rate("hold_rate", "Hold %", 0, "avg watch time ÷ duration", true),
+      {
+        key: "feature_shown",
+        header: "Feature",
+        className: "min-w-[9rem]",
+        defaultHidden: true,
+        sortValue: (p) => p.frontmatter.feature_shown,
+        render: (p) => (
+          <EditableCell slug={p.slug} field="feature_shown" value={p.frontmatter.feature_shown} />
+        ),
       },
       {
-        key: "platform",
-        header: "Platform",
-        sortValue: (p) => p.frontmatter.platform,
-        csvValue: (p) => platformLabel(p.frontmatter.platform),
-        render: (p) => <Badge label={platformLabel(p.frontmatter.platform)} color={PLATFORM_COLOR[p.frontmatter.platform] ?? SERIES[0]} />,
-      },
-      { key: "format", header: "Format", sortValue: (p) => p.frontmatter.format, render: (p) => p.frontmatter.format || "—" },
-      { key: "feature", header: "Feature", sortValue: (p) => p.frontmatter.feature_shown, render: (p) => p.frontmatter.feature_shown },
-      { key: "views", header: "Views", align: "right", sortValue: (p) => p.frontmatter.views, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.views)) },
-      { key: "reach", header: "Reach", align: "right", sortValue: (p) => p.frontmatter.reach, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.reach)) },
-      { key: "saves", header: "Saves", align: "right", sortValue: (p) => p.frontmatter.saves, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.saves)) },
-      { key: "save_rate", header: "Save %", align: "right", sortValue: (p) => p.frontmatter.save_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.save_rate, 2)) },
-      { key: "eng", header: "Eng %", align: "right", sortValue: (p) => p.frontmatter.engagement_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.engagement_rate, 1)) },
-      { key: "hold", header: "Hold %", align: "right", sortValue: (p) => p.frontmatter.hold_rate, render: (p) => metricOrDash(p, pct(p.frontmatter.hold_rate, 0)) },
-      { key: "organic", header: "Org/Seed", align: "right", sortValue: (p) => p.frontmatter.comments_organic_pickup, render: (p) => metricOrDash(p, `${p.frontmatter.comments_organic_pickup}/${p.frontmatter.comments_seeded}`) },
-      { key: "shares", header: "Shares", align: "right", sortValue: (p) => p.frontmatter.shares, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.shares)) },
-      { key: "follows", header: "Follows", align: "right", sortValue: (p) => p.frontmatter.new_follows, render: (p) => metricOrDash(p, fmtInt(p.frontmatter.new_follows)) },
-      {
-        key: "edit",
+        key: "open",
         header: "",
-        render: (p) => <EditPostButton post={p} />,
+        className: "w-24",
+        render: (p) => (
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/content/posts/${p.slug}`}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-md border border-hairline bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink-secondary transition hover:text-ink-primary"
+            >
+              Open
+            </Link>
+            <EditPostButton post={p} />
+          </div>
+        ),
       },
-    ],
-    [],
-  );
+    ];
+  }, []);
 }
 
 function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {

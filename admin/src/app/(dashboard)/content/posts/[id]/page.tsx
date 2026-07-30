@@ -22,9 +22,10 @@ export default async function PostDetailPage({ params }: { params: { id: string 
     ["Status", POST_STATUS_LABELS[fm.status]],
     ["Platform", fm.platform],
     ["Post ID", fm.post_id],
+    ["Judul Content", fm.title || "—"],
     ["Date / time", `${fmtDate(fm.date)} ${fm.time} (${fm.weekday})`],
     ["Pillar", fm.pillar ? PILLAR_LABELS[fm.pillar] : "— unclassified"],
-    ["Format", fm.format || "—"],
+    ["Jenis Konten / format", fm.format || "—"],
     ["Feature shown", fm.feature_shown],
     ["Duration", `${fm.duration_seconds}s`],
     ["Views", fmtInt(fm.views)],
@@ -35,12 +36,14 @@ export default async function PostDetailPage({ params }: { params: { id: string 
     ["Comments — organic pickup", fmtInt(fm.comments_organic_pickup)],
     ["Saves", fmtInt(fm.saves)],
     ["Shares", fmtInt(fm.shares)],
+    ["Engagements (reported)", fm.engagements ? fmtInt(fm.engagements) : "— (summed)"],
     ["Avg watch time", `${fm.avg_watch_time}s`],
     ["New follows", fmtInt(fm.new_follows)],
     ["Save rate", pct(fm.save_rate, 2)],
     ["Engagement rate", pct(fm.engagement_rate, 2)],
     ["Hold rate", pct(fm.hold_rate, 1)],
   ];
+  if (fm.hashtags) rows.push(["Hashtag", fm.hashtags]);
   if (fm.source) rows.push(["Source", fm.source]);
   if (fm.is_repost) rows.push(["Repost", "yes (excluded from aggregates)"]);
   if (fm.pillar_fit_flag) rows.push(["Pillar-fit flag", fm.pillar_fit_flag]);
@@ -79,11 +82,26 @@ export default async function PostDetailPage({ params }: { params: { id: string 
         </span>
       </div>
 
-      {fm.permalink && (
-        <a href={fm.permalink} target="_blank" rel="noopener noreferrer" className="text-sm text-series-1 hover:underline">
-          Open original ↗
-        </a>
-      )}
+      <div className="flex flex-wrap items-center gap-4">
+        {(
+          [
+            ["Instagram", fm.link_instagram],
+            ["TikTok", fm.link_tiktok],
+          ] as [string, string][]
+        )
+          .filter(([, url]) => url)
+          .map(([label, url]) => (
+            <a
+              key={label}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-series-1 hover:underline"
+            >
+              Open on {label} ↗
+            </a>
+          ))}
+      </div>
 
       <Card className="p-4">
         <div className="mb-3 text-sm font-semibold">Frontmatter</div>
