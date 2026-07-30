@@ -96,6 +96,23 @@ over guessing column names.
   editor didn't know about. Computed rates stay read-only, and metrics are
   refused on a Scheduled post (whose metrics are never persisted) instead of
   being accepted and dropped. See `content/README.md` → "The content plan table".
+- `content/scripts/*.md` — one file per **POV script**, the flagship pillar's own
+  pipeline at `/content/scripts` (distinct from the general Scriptor at
+  `/content/scriptor`, which persists nothing). Frontmatter holds `pov_type`
+  (solo/social), `status` (idea → drafted → ready_to_film → filmed → posted),
+  `feature_shown` (a **closed** vocabulary — the post store's free-text
+  spellings are coerced onto it — because the rotation rule needs a fixed set,
+  not `live map` vs `live_map`), the chosen `hook`, and
+  `linked_post`; the body holds Hook Options (discarded variants kept),
+  Script, On-Screen Text, Visual Direction, Filming Checklist and Notes.
+  Every prose edit snapshots the previous file into
+  `content/scripts/_history/{id}/`. Like the rest of the dashboard it needs **no
+  API key**: the checks (feature rotation, hook repetition, the Social density
+  gate, the checklist, the performance loop back from `linked_post`) are pure
+  computation in `admin/src/lib/content/scriptRules.ts` /
+  `scriptPerformance.ts`, and anything generative is a copy-prompt built by
+  `scriptPrompts.ts` with a paste-back that parses the reply into sections.
+  Full spec in `content/README.md` → "POV script files".
 - `content/account.json` — per-platform follower + funnel + demographics
   snapshot.
 - `content/what-works.md` — the learned playbook. Content between

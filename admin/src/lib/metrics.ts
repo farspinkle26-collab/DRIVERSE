@@ -14,6 +14,7 @@ import type {
   PartyMemberRow,
   PlaceRow,
   CarRow,
+  UserLocationRow,
 } from "./types";
 
 // ── Generic counting ─────────────────────────────────────────────────
@@ -409,4 +410,27 @@ export function topModels(cars: CarRow[], excludeStarter: boolean, limit = 12) {
     .map(([model, count]) => ({ model, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);
+}
+
+// ── Live map presence ────────────────────────────────────────────────
+/**
+ * How stale a `user_locations` row may be and still count as "on the map".
+ * Mirrors STALE_AFTER_MS in expo/hooks/onlineUsersMerge.ts — the app and the
+ * dashboard must agree on who is online or the POV Social density gate would
+ * disagree with what the driver actually sees on their own map.
+ */
+export const PRESENCE_STALE_AFTER_MS = 90_000;
+
+/** Drivers currently on the map: flagged online and freshly updated. */
+export function onlineUserCount(
+  rows: UserLocationRow[],
+  now = new Date(),
+  staleAfterMs = PRESENCE_STALE_AFTER_MS,
+): number {
+  return rows.reduce((n, r) => {
+    if (r.is_online === false) return n;
+    const t = parseDate(r.updated_at);
+    if (!t) return n;
+    return now.getTime() - t.getTime() < staleAfterMs ? n + 1 : n;
+  }, 0);
 }

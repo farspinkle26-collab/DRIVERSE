@@ -101,6 +101,14 @@ schedule runs.
   rendered `what-works.md`, a regenerated "Next 2 Weeks" strategy card).
 - **Also:** per-post detail pages, a **Scriptor** (`/content/scriptor`), and a
   manual **ingest** form (`/content/ingest`).
+- **POV Scripts** (`/content/scripts`): the flagship pillar's own pipeline —
+  a Kanban board (Idea → Drafted → Ready to Film → Filmed → Posted) over
+  `content/scripts/*.md`, a per-script editor, and a full-screen teleprompter
+  (`/content/scripts/[id]/teleprompter`) for filming off a dash mount. Feature
+  rotation, hook repetition, the Solo-vs-Social density gate, the filming
+  checklist and the performance loop back from `linked_post` are all computed —
+  no API key — and anything generative is a copy-prompt with a paste-back. Full
+  spec in `content/README.md` → "POV script files".
 - **Pipeline:** `POST /api/content/run` (enrich settled posts + regenerate the
   fenced section of `what-works.md`). Trigger it with `npm run content:run`
   (needs `BASE_URL` + `ADMIN_PASSWORD`).
