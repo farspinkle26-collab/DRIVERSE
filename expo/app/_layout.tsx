@@ -22,9 +22,22 @@ import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
 import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
+import AppErrorBoundary, { ErrorScreen } from "@/components/AppErrorBoundary";
 import { useAppFonts } from "@/hooks/useAppFonts";
+import type { ErrorBoundaryProps } from "expo-router";
 
 const queryClient = new QueryClient();
+
+/**
+ * Expo Router picks up an `ErrorBoundary` exported from a route file and uses
+ * it for that segment. Exporting it from the root layout means a throw while
+ * rendering a screen lands on our own fallback instead of an empty window.
+ * The provider tree below is wrapped separately — Router's boundary sits
+ * around the routes, not around the stores that wrap them.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return <ErrorScreen error={error} onRetry={retry} />;
+}
 
 const darkScreenOptions = {
   headerStyle: { backgroundColor: "#0A0A0F" },
@@ -76,12 +89,18 @@ export default function RootLayout() {
   const { ready: fontsReady } = useAppFonts();
 
   useEffect(() => {
-    SplashScreen.hideAsync();
+    // `hideAsync` rejects if the splash is already gone. An unhandled
+    // rejection this early is a crash in a release build, so swallow it —
+    // there is nothing to recover, the splash being hidden is the goal.
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
-  const handleLoadingFinish = () => {
+  // Stable identity: `LoadingScreen` keys its 2.5 s timer off this callback,
+  // so a fresh function on every render restarts the timer each time the
+  // fonts hook re-renders us and holds the splash longer than intended.
+  const handleLoadingFinish = useCallback(() => {
     setIsLoading(false);
-  };
+  }, []);
 
   // Hold on the loading screen until the brand faces are registered, so no
   // screen paints in system type and then reflows once Rajdhani/Inter/
@@ -91,51 +110,53 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <StatusBar 
-            style="light" 
-            translucent={true}
-            backgroundColor="transparent"
-          />
-          <ThemeContext>
-            <AuthContext>
-              {/* Platinum wraps every store that enforces a tier cap
-                  (events, party, routes, garage, saved places), so it has
-                  to sit above all of them. */}
-              <PlatinumProvider>
-                <NotificationContext>
-                  <ChatContext>
-                    <XPProvider>
-                      <QuestsProvider>
-                        <OnlineUsersProvider>
-                          <PartyProvider>
-                            <EventsProvider>
-                              <GroupChatProvider>
-                                <RoutesProvider>
-                                  <ActiveCarProvider>
-                                    <SavedPlacesProvider>
-                                      <CosmeticsProvider>
-                                        <RootLayoutNav />
-                                        <NotificationBanner />
-                                      </CosmeticsProvider>
-                                    </SavedPlacesProvider>
-                                  </ActiveCarProvider>
-                                </RoutesProvider>
-                              </GroupChatProvider>
-                            </EventsProvider>
-                          </PartyProvider>
-                        </OnlineUsersProvider>
-                      </QuestsProvider>
-                    </XPProvider>
-                  </ChatContext>
-                </NotificationContext>
-              </PlatinumProvider>
-            </AuthContext>
-          </ThemeContext>
-        </GestureHandlerRootView>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <StatusBar 
+              style="light" 
+              translucent={true}
+              backgroundColor="transparent"
+            />
+            <ThemeContext>
+              <AuthContext>
+                {/* Platinum wraps every store that enforces a tier cap
+                    (events, party, routes, garage, saved places), so it has
+                    to sit above all of them. */}
+                <PlatinumProvider>
+                  <NotificationContext>
+                    <ChatContext>
+                      <XPProvider>
+                        <QuestsProvider>
+                          <OnlineUsersProvider>
+                            <PartyProvider>
+                              <EventsProvider>
+                                <GroupChatProvider>
+                                  <RoutesProvider>
+                                    <ActiveCarProvider>
+                                      <SavedPlacesProvider>
+                                        <CosmeticsProvider>
+                                          <RootLayoutNav />
+                                          <NotificationBanner />
+                                        </CosmeticsProvider>
+                                      </SavedPlacesProvider>
+                                    </ActiveCarProvider>
+                                  </RoutesProvider>
+                                </GroupChatProvider>
+                              </EventsProvider>
+                            </PartyProvider>
+                          </OnlineUsersProvider>
+                        </QuestsProvider>
+                      </XPProvider>
+                    </ChatContext>
+                  </NotificationContext>
+                </PlatinumProvider>
+              </AuthContext>
+            </ThemeContext>
+          </GestureHandlerRootView>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }

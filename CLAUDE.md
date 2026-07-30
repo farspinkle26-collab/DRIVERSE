@@ -50,6 +50,21 @@ v2, saved routes, trip names, trip privacy. `expo/database_setup_complete.sql`
 is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
 Functions.
 
+**Launch safety** — the app has crashed on open twice, both times from the
+same cause: a native module call at *module scope*, which Hermes runs while
+evaluating the bundle, before any React tree exists and outside every error
+boundary. A throw there ends the process ~200 ms after the icon is tapped,
+with a black screen and no diagnosable error, and neither case reproduced in
+development. The rule is in `expo/LAUNCH_SAFETY_REFERENCE.md`: **no native
+call and no `throw` at module scope on anything reachable from
+`app/_layout.tsx` — defer it to a mount effect or to first use.** APIs that
+read the `expo-constants` manifest are the sharp edge, `Linking.createURL`
+above all: it throws in a release build when the manifest or its `scheme` is
+missing and only warns in development, so `lib/deepLink.ts` wraps it in a
+`createAppLink()` that cannot throw (pure rule and tests in
+`lib/deepLinkFormat.ts`). `components/AppErrorBoundary.tsx` is the second
+line only — it catches render-time throws, never module-scope ones.
+
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive
 Hub); a `saved_routes` row is written only if they open the save sheet and

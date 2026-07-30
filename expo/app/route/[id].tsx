@@ -17,7 +17,7 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
-import * as Linking from "expo-linking";
+import { createAppLink } from "@/lib/deepLink";
 import * as Clipboard from "expo-clipboard";
 import {
   ArrowLeft,
@@ -125,7 +125,7 @@ export default function RouteDetailScreen() {
 
   const handleShare = useCallback(async () => {
     if (!route) return;
-    const url = Linking.createURL(`route/${route.id}`);
+    const url = createAppLink(`route/${route.id}`);
     const message =
       `🚗 ${route.title}\n` +
       `${route.distance_km.toFixed(1)} km · ${fmtDuration(route.duration_seconds)} · ${route.avg_speed_kmh.toFixed(0)} km/h avg\n` +
@@ -144,7 +144,7 @@ export default function RouteDetailScreen() {
 
   const handleCopyLink = useCallback(async () => {
     if (!route) return;
-    const url = Linking.createURL(`route/${route.id}`);
+    const url = createAppLink(`route/${route.id}`);
     await Clipboard.setStringAsync(url);
     Alert.alert("Link copied", "Route link copied to clipboard");
   }, [route]);
