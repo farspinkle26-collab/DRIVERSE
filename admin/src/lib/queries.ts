@@ -22,6 +22,7 @@ import type {
   OsmCacheRow,
   CarRow,
   PaymentRow,
+  UserLocationRow,
 } from "./types";
 
 export interface TableResult<T> {
@@ -129,6 +130,12 @@ export const getOsmCache = () =>
 
 export const getCars = () =>
   fetchAll<CarRow>("car_collections", "id,user_id,make,model,category,created_at");
+
+// Live map presence. Feeds the POV Social density gate (a Social POV script
+// needs real drivers on the map to be honest), so it reads only the freshness
+// columns — never coordinates.
+export const getUserLocations = () =>
+  fetchAll<UserLocationRow>("user_locations", "user_id,is_online,updated_at");
 
 export const getPayments = () =>
   fetchAll<PaymentRow>(

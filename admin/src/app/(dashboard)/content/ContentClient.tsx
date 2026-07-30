@@ -125,6 +125,12 @@ export function ContentClient(props: Props) {
               + Ingest metrics
             </Link>
             <Link
+              href="/content/scripts"
+              className="rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:text-ink-primary"
+            >
+              POV Scripts
+            </Link>
+            <Link
               href="/content/scriptor"
               className="rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:text-ink-primary"
             >

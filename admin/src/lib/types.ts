@@ -137,3 +137,9 @@ export interface PaymentRow {
   status: string | null;
   created_at: string | null;
 }
+
+export interface UserLocationRow {
+  user_id: string;
+  is_online: boolean | null;
+  updated_at: string | null;
+}

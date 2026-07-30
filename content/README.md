@@ -9,6 +9,8 @@ version control alongside the code, so history is auditable and diffs are human
 ```
 content/
   posts/*.md              one Markdown file per post (frontmatter + body sections)
+  scripts/*.md            one Markdown file per POV script — see /content/scripts
+  scripts/_history/{id}/  previous versions of that script's body, newest last
   account.json            per-platform followers + 30-day funnel + demographics
   what-works.md           learned playbook (machine section fenced; prose is yours)
   marketing/schedule.json product build order, weekly content calendar, 4-week
@@ -129,6 +131,111 @@ Two things are deliberately **not** editable in the grid:
 
 New rows come from **+ Add post** (the same form, which also takes the planning
 fields), and the grid exports to CSV with whatever columns are visible.
+
+## POV script files (`scripts/*.md`)
+
+POV is the flagship pillar, so it has its own pipeline at `/content/scripts` in
+the admin app — separate from the general Scriptor (`/content/scriptor`), which
+generates one-off scripts for any pillar and persists nothing. A POV script is a
+document with a life: it starts as an idea, gets drafted and refined, gets filmed
+from, and ends up linked to the post it became.
+
+```yaml
+---
+id: string                       # = the filename without .md (the filename wins)
+title: string                    # working title, NOT the video's on-screen text
+pov_type: solo | social          # solo = one driver; social = meeting another driver
+status: idea | drafted | ready_to_film | filmed | posted
+feature_shown: live_map | trip_card | quest_notification | garage | none
+hook: string                     # the chosen hook line, short
+hook_variants_considered: number # how many alternates were generated
+created_date: YYYY-MM-DD
+filmed_date: YYYY-MM-DD | null   # back-filled when status reaches filmed/posted
+linked_post: string | null       # post slug or permalink, once posted
+platform_target: instagram | tiktok | both
+---
+```
+
+`feature_shown` is a **closed vocabulary** here (unlike the post store's free-text
+field): the rotation rule below can only be computed over a fixed set, and free
+text would quietly split `live_map` from `live map`. A hand-written file using the
+post store's spelling (`"garage card"`, `"quest/xp notification"`) is coerced onto
+the nearest id on read.
+
+Body sections (level-2 headings; unknown sections round-trip untouched):
+
+```
+## Hook Options        (every variant generated — the discarded ones stay here)
+## Script              (the full spoken/visual script)
+## On-Screen Text
+## Visual Direction    (camera angle, mount position, when the app moment lands)
+## Filming Checklist   (markdown task list: - [ ] / - [x])
+## Notes
+```
+
+### What the dashboard computes (no model, no API key)
+
+Everything "smart" in this section is either pure computation over the files you
+already have, or a **Copy Prompt** button you paste into a Claude chat with a
+paste-back field for the reply. Each prompt is built by its own function in
+`admin/src/lib/content/scriptPrompts.ts`, never inlined into a component, so
+wiring a real API key later is a one-line swap per feature and no UI changes.
+
+- **Feature rotation** (`scriptRules.ts` → `featureRotation`). Which screens the
+  last 5 scripts used, across both POV types; recommends an unused feature (else
+  the least recently used) and warns — never blocks — when your pick repeats the
+  immediately preceding script. This is "never the same screen twice running",
+  enforced by being impossible to miss at the moment you choose.
+- **Hook repetition** (`recentPovHooks`, `similarHooks`). The last 5 POV hooks
+  regardless of status, pinned above the editor the whole time you're drafting,
+  with a crude shared-word check flagging a draft that's circling one of them.
+- **Solo vs Social gating** (`densityGate`). Every Social script carries a banner:
+  Social POV needs real density or it's staged. The live driver count comes from
+  the `user_locations` presence table using the same 90-second staleness rule the
+  app uses (`expo/hooks/onlineUsersMerge.ts`); when the table can't be read the
+  banner says so rather than implying a number. It never blocks creation.
+- **Filming checklist** (`checklistFor`). Generated from POV type + feature at
+  creation. Changing either offers a **Sync** that merges: existing ticks
+  survive and hand-added items are kept.
+- **Performance loop** (`scriptPerformance.ts`). Once `linked_post` resolves to a
+  real post, that post's save rate vs. its **own pillar's** median plus organic
+  pickup come back onto the script — and onto its Posted card on the board. A
+  linked post that's still Scheduled reports "no metrics yet"; nothing is
+  estimated.
+
+### The board, the editor, and filming mode
+
+- `/content/scripts` — the Kanban board (Idea → Drafted → Ready to Film → Filmed
+  → Posted). Drag a card to set `status`; the ‹ › buttons on each card do the
+  same thing without a mouse. A **List** view over the same filtered set gives
+  the standard table (sortable, column toggles, CSV) and the filters —
+  POV type, status, feature, platform, date range, text search over
+  title/hook/script — apply to both views.
+- `/content/scripts/[id]` — the editor. No Save button: every control PATCHes the
+  one field it owns (`PATCH /api/content/scripts/[id]`), the same rule the content
+  plan grid follows, so two people editing different parts of one script can't
+  clobber each other.
+- `/content/scripts/[id]/teleprompter` — filming mode. Full-screen, large text,
+  auto-scrolling at an adjustable px/second; tap anywhere to start/stop (space,
+  ↑/↓ and `R` from a keyboard). It shows **only the spoken lines**: when the
+  script quotes its dialogue, only the quoted spans are read, so a bracketed beat
+  line stays direction rather than ending up on the prompter. Visual direction,
+  on-screen text and outstanding checklist items live in a collapsible reference
+  panel outside the scroll — that's read before rolling, not on camera.
+
+### Version history
+
+Every write that moves a **prose** section (Hook Options, Script, On-Screen Text,
+Visual Direction, Notes) snapshots the whole previous file into
+`scripts/_history/{id}/{YYYYMMDDThhmmssSSSZ}.md` first. Full snapshots, not an
+in-file log: the working file stays a document you can film from, a refine stays a
+one-file diff, and Restore is a copy rather than a parse of history nested inside
+the thing being restored. Restore snapshots the current version too, so reverting
+a bad refine is itself revertible.
+
+Ticking a checklist box does **not** snapshot — that's execution state, and one
+version per checkbox click would bury the versions that matter. Frontmatter-only
+changes (a Kanban drag, linking a post) don't snapshot either.
 
 ## The five pillars
 
