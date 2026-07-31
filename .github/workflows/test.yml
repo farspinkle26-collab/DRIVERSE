@@ -1,0 +1,52 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  expo:
+    name: Expo app (Jest + RNTL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: expo
+        run: bun install --frozen-lockfile
+
+      - name: Run unit & integration tests
+        working-directory: expo
+        run: bunx jest --ci --coverage
+
+      - name: Run Supabase edge-function tests
+        working-directory: expo
+        run: bun test supabase/functions
+
+  admin:
+    name: Admin dashboard (Jest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: admin
+        run: bun install --frozen-lockfile
+
+      - name: Run content-pipeline tests
+        working-directory: admin
+        run: bunx jest --ci --coverage

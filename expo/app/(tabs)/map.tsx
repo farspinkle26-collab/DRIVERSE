@@ -142,6 +142,7 @@ import ShareCardModal from "@/components/ShareCardModal";
 import { encodePolyline, simplifyPath } from "@/lib/polyline";
 import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeDraft";
 import { calculateDriveXP } from "@/lib/tripStats";
+import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
@@ -314,45 +315,6 @@ interface TripRecord {
   durationMs: number;
   startedAt: number;
   endedAt?: number;
-}
-
-// --- Haversine distance (meters) ---
-function haversineMeters(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
-): number {
-  const R = 6371000;
-  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
-  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
-  const lat1 = (a.latitude * Math.PI) / 180;
-  const lat2 = (b.latitude * Math.PI) / 180;
-  const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLng / 2);
-  const h =
-    sinDLat * sinDLat +
-    Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
-  return 2 * R * Math.asin(Math.sqrt(Math.min(1, h)));
-}
-
-// --- Compass bearing (degrees, 0-360) from point a to point b ---
-function bearingBetween(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
-): number {
-  const lat1 = (a.latitude * Math.PI) / 180;
-  const lat2 = (b.latitude * Math.PI) / 180;
-  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  const brng = (Math.atan2(y, x) * 180) / Math.PI;
-  return (brng + 360) % 360;
-}
-
-// --- Shortest signed delta between two headings (-180..180) ---
-function headingDelta(from: number, to: number): number {
-  return ((to - from + 540) % 360) - 180;
 }
 
 // --- Format helpers ---

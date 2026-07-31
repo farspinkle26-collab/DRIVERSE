@@ -1,28 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { applyXpGain, xpForLevel, type XPState } from "@/lib/xpMath";
 
 const STORAGE_KEY = "driveverse_xp";
-
-// XP required per level: L1=100, L2=250, L3=500, L4=1000, L5=1800, L6=3000...
-function xpForLevel(level: number): number {
-  return Math.round(100 * Math.pow(1.6, level - 1));
-}
-
-function totalXpForLevel(level: number): number {
-  let total = 0;
-  for (let i = 1; i < level; i++) {
-    total += xpForLevel(i);
-  }
-  return total;
-}
-
-interface XPState {
-  level: number;
-  xp: number;
-  totalXp: number;
-}
 
 const INITIAL_STATE: XPState = { level: 1, xp: 0, totalXp: 0 };
 
@@ -30,6 +12,15 @@ export const [XPProvider, useXP] = createContextHook(() => {
   const [state, setState] = useState<XPState>(INITIAL_STATE);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+
+  // Always-current mirror of `state`. `addXP` reads and advances this rather
+  // than the value captured in its closure, so two awards fired in the same
+  // tick (drive XP + a quest completing, say) compound instead of the second
+  // clobbering the first from a stale base. See lib/xpMath.ts.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Check for session to sync with Supabase
   useEffect(() => {
@@ -168,21 +159,13 @@ export const [XPProvider, useXP] = createContextHook(() => {
 
   const addXP = useCallback(
     (amount: number): number => {
-      let { level: newLevel, xp: newXp, totalXp: newTotalXp } = state;
-      newTotalXp += amount;
-      newXp += amount;
-
-      while (newXp >= xpForLevel(newLevel)) {
-        newXp -= xpForLevel(newLevel);
-        newLevel++;
-      }
-
-      const next: XPState = { level: newLevel, xp: newXp, totalXp: newTotalXp };
+      const next = applyXpGain(stateRef.current, amount);
+      stateRef.current = next;
       persist(next);
       setState(next);
-      return newLevel;
+      return next.level;
     },
-    [state, persist]
+    [persist]
   );
 
   const xpCurrentLevel = state.xp;
