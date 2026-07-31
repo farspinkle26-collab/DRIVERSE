@@ -1,0 +1,48 @@
+# FLOW 2 (failure variant) — Record a trip with location permission DENIED
+# With location denied the Map must degrade gracefully: a "LOCATION
+# UNAVAILABLE" banner explaining why the map can't follow, plus a Retry —
+# never a crash, a black screen, or a silent hang.
+#
+# Expected (map.tsx): banner title "LOCATION UNAVAILABLE" + copy "Location is
+# off for Driveverse, so the map can't follow you. ... tap Retry." + Retry.
+appId: app.rork.driverse
+tags:
+  - failure
+  - trips
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: deny
+    arguments: {}
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+
+# Enter the app from the garage gate (don't reuse enter-app.yaml here — its
+# success assertion assumes a healthy map).
+- assertVisible: "YOUR GARAGE"
+- tapOn:
+    text: "DRIVE THE .*"
+
+# Graceful failure state on the map.
+- extendedWaitUntil:
+    visible: "LOCATION UNAVAILABLE"
+    timeout: 20000
+- assertVisible:
+    text: "Location is off for Driveverse.*"
+- assertVisible:
+    text: "RETRY"
+
+# The app is alive, not hung: the banner's Retry is interactive and the
+# floating tab bar still responds.
+- tapOn:
+    text: "RETRY"
+- assertVisible:
+    accessibilityLabel: "Drive"

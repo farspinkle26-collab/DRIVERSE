@@ -1,0 +1,53 @@
+# FLOW 4 (happy path) — Create a convoy, Map → confirmation
+# From the Map action stack: Convoy → Community (Convoy tab) → "+" create →
+# name it → Create Convoy → confirm the convoy exists.
+#
+# NOTE ON EVENTS: the map's "Create an event" button only navigates to the
+# events list — there is no in-app event *composer* (events are created
+# server-side / seeded), so "create through confirmation" is exercised via
+# convoys. Joining an event and joining a convoy are covered by the assertions
+# below and the join-failure variant. Flagged in README § "Known gaps".
+appId: app.rork.driverse
+tags:
+  - critical
+  - community
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Map → convoys.
+- tapOn:
+    accessibilityLabel: "Open convoys"
+- assertVisible: "COMMUNITY"
+
+# Create a uniquely-named convoy so re-runs don't collide.
+- evalScript: ${output.convoy = 'Maestro Convoy ' + Date.now()}
+- tapOn:
+    accessibilityLabel: "Create convoy"
+- assertVisible: "Convoy name"
+- tapOn: "Midnight Runners"     # the name field (matched by placeholder)
+- inputText: "${output.convoy}"
+- hideKeyboard
+- tapOn:
+    text: "CREATE CONVOY"
+
+# Confirmation: the modal closes and the new convoy is present.
+- extendedWaitUntil:
+    visible: "${output.convoy}"
+    timeout: 20000

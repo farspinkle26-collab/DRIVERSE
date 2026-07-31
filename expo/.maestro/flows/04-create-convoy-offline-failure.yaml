@@ -1,0 +1,53 @@
+# FLOW 4 (failure variant) — Create a convoy while offline
+# The composer must surface a clear, recoverable error rather than closing on a
+# silent failure or hanging on the spinner.
+#
+# Expected (CreateConvoyModal): "Couldn't create convoy. Please try again."
+#
+# PLATFORM NOTE: Android emulator only (setAirplaneMode). See README.
+appId: app.rork.driverse
+tags:
+  - failure
+  - community
+  - android-offline
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+- tapOn:
+    accessibilityLabel: "Open convoys"
+- assertVisible: "COMMUNITY"
+- tapOn:
+    accessibilityLabel: "Create convoy"
+- assertVisible: "Convoy name"
+- tapOn: "Midnight Runners"
+- inputText: "Maestro Offline Convoy"
+- hideKeyboard
+
+# Go offline, then attempt to create.
+- setAirplaneMode: enabled
+- tapOn:
+    text: "CREATE CONVOY"
+
+# Graceful, bounded failure — the modal stays open with a clear message.
+- extendedWaitUntil:
+    visible: "Couldn't create convoy. Please try again."
+    timeout: 20000
+
+- setAirplaneMode: disabled

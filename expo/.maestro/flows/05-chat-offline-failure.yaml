@@ -1,0 +1,58 @@
+# FLOW 5 (failure variant) — Send a chat message while offline
+# The message insert fails; the app must NOT lose the driver's text or crash.
+# Current behaviour (messages/[id].tsx): on error the typed text is restored to
+# the input and no bubble is added — so we assert the text survives.
+#
+# REPORTABLE UX GAP: there is no explicit "failed to send / will retry"
+# indicator — the message just reappears in the box. Flagged in README.
+#
+# PLATFORM NOTE: Android emulator only (setAirplaneMode). See README.
+appId: app.rork.driverse
+tags:
+  - failure
+  - chat
+  - android-offline
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+  DIRECT_PARTNER: "Maestro Partner"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+- tapOn:
+    accessibilityLabel: "Open messages"
+- assertVisible: "${DIRECT_PARTNER}"
+- tapOn: "${DIRECT_PARTNER}"
+
+# Compose, go offline, then attempt to send.
+- evalScript: ${output.msg = 'maestro offline ' + Date.now()}
+- tapOn:
+    id: "chat-input"
+- inputText: "${output.msg}"
+- setAirplaneMode: enabled
+- tapOn:
+    id: "chat-send"
+
+# Graceful: no data loss — the text is preserved (restored to the input), and
+# the screen is still responsive.
+- extendedWaitUntil:
+    visible: "${output.msg}"
+    timeout: 15000
+- assertVisible:
+    id: "chat-input"
+
+- setAirplaneMode: disabled

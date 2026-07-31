@@ -199,6 +199,7 @@ export default function GroupChatScreen() {
 
       <View style={[styles.inputRow, { paddingBottom: insets.bottom + spacing.spacingSm }]}>
         <TextInput
+          testID="chat-input"
           style={styles.input}
           placeholder="Message the group..."
           placeholderTextColor={colors.textSecondary}
@@ -208,6 +209,9 @@ export default function GroupChatScreen() {
           maxLength={1000}
         />
         <Pressable
+          testID="chat-send"
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
           style={[styles.sendBtn, !input.trim() && styles.disabled]}
           onPress={handleSend}
           disabled={!input.trim() || sending}

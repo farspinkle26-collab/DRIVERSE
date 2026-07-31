@@ -1,0 +1,62 @@
+# Reusable: drive the 4-step Sign Up wizard from the login screen through to
+# a signed-in account landing on the garage gate (/select-car).
+#
+# Preconditions: the login screen ("WELCOME BACK") is showing.
+# Env (all overridable by the caller via `runFlow: env:`):
+#   NAME, EMAIL, PASSWORD  — new account credentials
+#   COUNTRY                — a nation name present in constants/countries.ts
+#   CAR_MAKE               — a make chip on the "Your Drive" step
+#
+# NOTE: signup() hits Supabase. This subflow needs a reachable (staging)
+# backend and a fresh EMAIL — callers pass a timestamped address so re-runs
+# never collide on an already-registered email.
+appId: app.rork.driverse
+env:
+  NAME: "Maestro Driver"
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+  COUNTRY: "Indonesia"
+  CAR_MAKE: "Toyota"
+---
+- assertVisible: "WELCOME BACK"
+- tapOn: "Sign Up"
+- assertVisible: "Create Account"
+
+# ── Step 1: account ──────────────────────────────────────────────
+- tapOn: "Full Name"
+- inputText: "${NAME}"
+- tapOn: "Email address"
+- inputText: "${EMAIL}"
+- tapOn: "Password (min. 6 chars)"
+- inputText: "${PASSWORD}"
+- tapOn: "Confirm password"
+- inputText: "${PASSWORD}"
+- hideKeyboard
+- tapOn:
+    text: "NEXT"
+
+# ── Step 2: nation (pick from the list; GPS detect is exercised
+#    separately in the onboarding failure variant) ────────────────
+- assertVisible: "Your Nation"
+- tapOn: "Search nations"
+- inputText: "${COUNTRY}"
+- hideKeyboard
+- tapOn: "${COUNTRY}"
+- tapOn:
+    text: "NEXT"
+
+# ── Step 3: car make + colour (a colour is pre-selected) ─────────
+- assertVisible: "Your Drive"
+- tapOn: "${CAR_MAKE}"
+- tapOn:
+    text: "NEXT"
+
+# ── Step 4: name the ride, then create the account ───────────────
+- assertVisible: "Name Your Ride"
+- tapOn:
+    text: "CREATE ACCOUNT"
+
+# signup() → success replaces to the garage gate. Give the network call room.
+- extendedWaitUntil:
+    visible: "YOUR GARAGE"
+    timeout: 20000

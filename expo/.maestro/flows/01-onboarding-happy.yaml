@@ -1,0 +1,57 @@
+# FLOW 1 (happy path) — Onboarding
+# Guest launch → the sign-in gate → Sign Up → 4-step profile setup →
+# garage gate → main Map screen.
+#
+# "Guest mode": a fresh install starts as GUEST_USER (useAuthStore), which is
+# unauthenticated, so app/index.tsx redirects to /login. There is no
+# "browse as guest" surface — the gate is the guest's entry point, and the
+# only way forward is Sign In or Sign Up.
+#
+# Each run creates a brand-new account. EMAIL is timestamped so re-runs never
+# collide with an already-registered address. Requires a reachable (staging)
+# Supabase backend.
+appId: app.rork.driverse
+tags:
+  - critical
+  - onboarding
+env:
+  NAME: "Maestro Onboard"
+  PASSWORD: "maestro-pw-123"
+  COUNTRY: "Indonesia"
+  CAR_MAKE: "Toyota"
+---
+# Clean slate = the guest gate. Location allowed so nothing blocks later.
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+
+# The guest lands on the login gate.
+- assertVisible: "WELCOME BACK"
+- assertVisible: "DRIVEVERSE"
+
+# Timestamped email keeps every run's signup unique.
+- evalScript: ${output.email = 'maestro+' + Date.now() + '@driverse.test'}
+
+- runFlow:
+    file: ../subflows/sign-up.yaml
+    env:
+      NAME: "${NAME}"
+      EMAIL: "${output.email}"
+      PASSWORD: "${PASSWORD}"
+      COUNTRY: "${COUNTRY}"
+      CAR_MAKE: "${CAR_MAKE}"
+
+# Profile setup done → garage gate → into the app.
+- runFlow: ../subflows/enter-app.yaml
+
+# Landed on the Map screen: idle primary action + the floating tab bar.
+- assertVisible:
+    accessibilityLabel: "Start a drive"
+- assertVisible:
+    accessibilityLabel: "Map"
+- assertVisible:
+    accessibilityLabel: "Drive"
+- assertVisible:
+    accessibilityLabel: "Profile"

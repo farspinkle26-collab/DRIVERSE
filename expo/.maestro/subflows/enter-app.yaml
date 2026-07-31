@@ -1,0 +1,16 @@
+# Reusable: from the garage gate (/select-car), pick the focused car and
+# enter the main app, landing on the Map screen.
+#
+# Preconditions: the garage carousel ("YOUR GARAGE") is showing with at least
+# one car (a fresh signup auto-creates a starter car via a DB trigger).
+appId: app.rork.driverse
+---
+- assertVisible: "YOUR GARAGE"
+# Footer CTA is "Drive the <car name>" (rendered uppercase). Match by prefix.
+- tapOn:
+    text: "DRIVE THE .*"
+# The map's idle primary action confirms we reached the main screen.
+- extendedWaitUntil:
+    visible:
+      accessibilityLabel: "Start a drive"
+    timeout: 20000

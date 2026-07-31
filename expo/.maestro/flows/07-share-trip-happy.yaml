@@ -1,0 +1,66 @@
+# FLOW 7 (happy path) — Share a trip
+# Open a trip → Share → confirm the ShareCardModal preview renders → open the
+# share sheet.
+#
+# Requires a signed-in seed account with at least one recorded trip. (Flow 2
+# also produces one; this flow stays independent by using seeded history.)
+#
+# PLATFORM NOTE: "More options" hands off to the OS share sheet — a system UI
+# that differs on iOS vs Android and is only partially inspectable by Maestro.
+# We assert the in-app preview + actions deterministically, then confirm the
+# hand-off doesn't crash. See README § "Share sheet".
+appId: app.rork.driverse
+tags:
+  - critical
+  - share
+  - platform
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Drive Hub → Trips → open the newest trip.
+- tapOn:
+    accessibilityLabel: "Drive"
+- assertVisible: "DRIVE HUB"
+- extendedWaitUntil:
+    visible:
+      id: "trip-card"
+    timeout: 15000
+- tapOn:
+    id: "trip-card"
+    index: 0
+
+# ── Share → preview renders ──────────────────────────────────────
+- tapOn:
+    accessibilityLabel: "Share this trip"
+- extendedWaitUntil:
+    visible:
+      accessibilityLabel: "Close share preview"
+    timeout: 15000
+# The card preview + at least one share action are present.
+- assertVisible:
+    text: "More options"
+
+# ── Open the share sheet ─────────────────────────────────────────
+- tapOn:
+    text: "More options"
+# Hand-off to the OS share sheet didn't crash: the app is still alive. The
+# preview modal stays mounted behind the sheet, so its close control persists.
+- assertVisible:
+    accessibilityLabel: "Close share preview"

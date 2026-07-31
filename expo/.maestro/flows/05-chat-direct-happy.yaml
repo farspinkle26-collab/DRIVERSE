@@ -1,0 +1,55 @@
+# FLOW 5a (happy path) — Direct chat: send + delivery + list update
+# Open a seeded 1:1 conversation, send a unique message, confirm it lands in
+# the thread, then confirm the conversation list reflects it (the closest
+# single-device proxy for delivery + unread/preview behaviour).
+#
+# Requires a signed-in seed account with an existing direct conversation with
+# DIRECT_PARTNER. True cross-user unread-count behaviour needs a second device;
+# see README § "Chat: unread counts".
+appId: app.rork.driverse
+tags:
+  - critical
+  - chat
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+  DIRECT_PARTNER: "Maestro Partner"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Map → messages.
+- tapOn:
+    accessibilityLabel: "Open messages"
+- assertVisible: "${DIRECT_PARTNER}"
+- tapOn: "${DIRECT_PARTNER}"
+
+# Send a unique message.
+- evalScript: ${output.msg = 'maestro direct ' + Date.now()}
+- tapOn:
+    id: "chat-input"
+- inputText: "${output.msg}"
+- tapOn:
+    id: "chat-send"
+
+# Delivered into the thread.
+- extendedWaitUntil:
+    visible: "${output.msg}"
+    timeout: 15000
+
+# Back on the list, the conversation reflects the latest message.
+- back
+- assertVisible: "${output.msg}"

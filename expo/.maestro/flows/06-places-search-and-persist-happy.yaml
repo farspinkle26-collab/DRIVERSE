@@ -1,0 +1,97 @@
+# FLOW 6 (happy path) — Places: search, and saved-place persistence
+# Exercises the two Places behaviours that are actually wired today:
+#   1. Map "Search places" opens the place search.
+#   2. Saved Places are server-backed and persist across a fresh install.
+#
+# KNOWN GAPS (reported, and why this flow is shaped this way):
+#   • The map has NO "save a place" affordance — savePlace()/togglePlace() from
+#     useSavedPlacesStore are never called from the map; the Saved Places empty
+#     state even instructs "tap a place on the map and hit Save", but that Save
+#     button does not exist yet.
+#   • The category filter toggles are unbuilt in the UI — mapLayers.ts /
+#     useMapFilters / isLayerVisible / toggleLayer exist and are unit-tested,
+#     but no screen consumes them, so "filter by category" cannot be tapped.
+#   Enable the commented "save a place" steps below once that UI ships.
+#
+# Persistence is proven with a seeded saved place (SAVED_PLACE) written to the
+# saved_places table for the seed account. Because the flow clears state and
+# re-signs-in, a place that reappears could only have come from the server.
+appId: app.rork.driverse
+tags:
+  - places
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+  SAVED_PLACE: "Maestro Cafe"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# ── Search places (the wired half of "search/filter by category") ──
+- tapOn:
+    accessibilityLabel: "Search places"
+- inputText: "cafe"
+- hideKeyboard
+# The search surface is live and responding (results depend on Mapbox; assert
+# the query field rather than a specific POI so the flow stays deterministic).
+- assertVisible:
+    text: "cafe"
+- tapOn:
+    accessibilityLabel: "Close search"
+
+# --- SAVE A PLACE (unbuilt; enable when the map Save affordance ships) ------
+# - tapOn: "${SAVED_PLACE}"            # a place marker / search result
+# - tapOn:
+#     accessibilityLabel: "Save this place"
+# ---------------------------------------------------------------------------
+
+# ── Persistence: seeded saved place survives a fresh install ──────
+- tapOn:
+    accessibilityLabel: "Profile"
+- scrollUntilVisible:
+    element:
+      text: "Saved Places"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Saved Places"
+- assertVisible: "SAVED PLACES"
+- extendedWaitUntil:
+    visible: "${SAVED_PLACE}"
+    timeout: 15000
+
+# Relaunch clean and confirm it reloads from the server, not local cache.
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+- tapOn:
+    accessibilityLabel: "Profile"
+- scrollUntilVisible:
+    element:
+      text: "Saved Places"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Saved Places"
+- extendedWaitUntil:
+    visible: "${SAVED_PLACE}"
+    timeout: 15000

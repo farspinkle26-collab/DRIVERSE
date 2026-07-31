@@ -1,0 +1,60 @@
+# FLOW 3 (happy path) — Hit the Platinum paywall past a Regular cap
+# A Regular garage holds 2 cars. Reaching for a 3rd opens the paywall pinned to
+# the garage benefit with the contextual headline "Your garage is full at 2
+# cars" (constants/platinum.ts), and — App Store guideline 3.1.1 — a reachable
+# "Restore Purchases". We confirm the paywall, the contextual copy, and that
+# Restore is present AND wired (it produces a real result, not a dead tap).
+#
+# Requires a signed-in **Regular** seed account that already has exactly 2 cars
+# (so atGarageLimit is true). Set REGULAR_2CAR_EMAIL to that account.
+appId: app.rork.driverse
+tags:
+  - critical
+  - platinum
+  - platform   # RevenueCat store availability differs iOS vs Android
+env:
+  EMAIL: "maestro+regular2car@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Go to the garage (Profile tab) and reach for a 3rd slot.
+- tapOn:
+    accessibilityLabel: "Profile"
+- scrollUntilVisible:
+    element:
+      accessibilityLabel: "Garage full. Upgrade to Platinum for unlimited slots."
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    accessibilityLabel: "Garage full. Upgrade to Platinum for unlimited slots."
+
+# ── Paywall, with the garage-specific contextual headline ────────
+- extendedWaitUntil:
+    visible: "PLATINUM"
+    timeout: 15000
+- assertVisible: "Your garage is full at 2 cars"
+- assertVisible: "Unlimited Garage Slots"
+
+# ── Restore Purchases: present and functional ────────────────────
+- assertVisible:
+    accessibilityLabel: "Restore purchases"
+- tapOn:
+    accessibilityLabel: "Restore purchases"
+# A real result proves it's wired: either nothing to restore, or the store is
+# unavailable on this build. Both are legitimate, non-crashing outcomes.
+- extendedWaitUntil:
+    visible:
+      text: "Nothing to restore|Not available|Platinum restored|Restore failed"
+    timeout: 15000

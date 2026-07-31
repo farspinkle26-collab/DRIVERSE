@@ -1,0 +1,24 @@
+# Maestro workspace config for the Driveverse E2E suite.
+# Docs: https://maestro.mobile.dev/reference/configuration
+#
+# `maestro test .maestro/` (or `maestro test --config .maestro/config.yaml .maestro/flows`)
+# picks this up. On Maestro Cloud the same config governs the uploaded run.
+
+# Which flows make up the suite, in the order they should run. Onboarding
+# first because everything downstream assumes a signed-in account exists.
+flows:
+  - "flows/*.yaml"
+
+# One flaky/failing flow must not mask the rest — E2E signal is per-flow.
+# The runner reports each flow's status independently and keeps going.
+executionOrder:
+  continueOnFailure: true
+
+# Tag-based selection. CI runs everything nightly; locally you can narrow with
+# `maestro test --include-tags smoke .maestro/` etc.
+#   smoke     — the fastest happy paths, safe to run per-commit
+#   critical  — revenue / auth paths we never want to regress silently
+#   failure   — the graceful-degradation variants
+#   platform  — flows with known iOS/Android divergence worth watching
+includeTags: []
+excludeTags: []

@@ -1,0 +1,45 @@
+# FLOW 5b (happy path) — Group chat: send + delivery
+# Open a seeded group (convoy) conversation, send a unique message, confirm it
+# lands in the thread.
+#
+# Requires a signed-in seed account that is a member of group GROUP_NAME.
+appId: app.rork.driverse
+tags:
+  - critical
+  - chat
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+  GROUP_NAME: "Maestro Crew"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+- tapOn:
+    accessibilityLabel: "Open messages"
+- assertVisible: "${GROUP_NAME}"
+- tapOn: "${GROUP_NAME}"
+
+- evalScript: ${output.msg = 'maestro group ' + Date.now()}
+- tapOn:
+    id: "chat-input"
+- inputText: "${output.msg}"
+- tapOn:
+    id: "chat-send"
+
+- extendedWaitUntil:
+    visible: "${output.msg}"
+    timeout: 15000
