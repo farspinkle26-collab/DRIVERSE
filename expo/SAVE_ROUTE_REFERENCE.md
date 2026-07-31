@@ -167,3 +167,92 @@ will if it grows.
    paywall rather than failing.
 6. Record a second drive and reopen the sheet: the name field must show the
    *new* destination, not the previous one.
+
+---
+
+## 6. Naming the two ends of a drive
+
+The share card used to read **"Current Location → Dropped Pin"**, with
+"Dropped Pin" repeated at 30pt as the headline. Those are not places — they
+are the names of the fields, hardcoded as string literals at four separate
+call sites in `app/(tabs)/map.tsx` (the trip insert, the route sheet, the
+save sheet, the share payload), which is also why they drifted: three of
+them said `"Dropped Pin"` and one said `"Dropped pin"`.
+
+Two halves to the fix.
+
+**Resolve the names.** `reverseGeocodePlace` (`lib/mapboxApi.ts`) is a
+label-first reverse geocode: it returns the feature's own `text` ("Kopi
+Nako") separately from the postal `place_name`, POI-first, and never throws
+— a missing token, an offline device or a Mapbox error all resolve to
+`null`. The map calls it twice, both fire-and-forget:
+
+- `resolveDroppedPinName` when a pin is dropped. The pin is already selected
+  and routable before this returns, so there is no loading state and no
+  error path. The reply is discarded unless *that same pin* is still
+  selected, so a double tap cannot land the first name on the second pin.
+- `resolveOriginName` when recording starts, guarded by `originRequestRef`
+  so a late reply from a previous drive cannot stamp its name on this one.
+
+A destination that came from an event or a place marker already has a name
+and is never geocoded.
+
+`destinationLabel` (and `destinationStoredName`, its storage twin) is now the
+single memo all four call sites read.
+
+**Render whatever came back.** `lib/tripEndpoints.ts` is pure and tested:
+`shortPlaceLabel` cuts a full postal string down to the segment a driver
+would say out loud, `endpointLabels` supplies the display fallback, and
+`shareTripTitle` keeps a placeholder off the headline (a drive with no
+destination is a **Free Drive**).
+
+The display fallback is **"Point A → Point B"**. "Starting location →
+Destination" was the alternative and loses for the same reason the strings
+it replaces do: it describes the form field rather than the drive. A→B reads
+as a deliberate label for an unnamed leg, and is short enough never to wrap.
+
+Storage and display differ on purpose. `trips.origin_name` /
+`destination_name` fall back to a **coordinate pair**, not to "Point A" — a
+row that knows where it was can be named later, a row that says "Unknown"
+never can. `endpointLabels` then treats a stored coordinate pair as unnamed
+and renders Point A / Point B, so the card never shows raw numbers.
+
+Nothing migrates. Every row written before this change still says "Current
+Location" / "Dropped Pin", and `isPlaceholderName` recognises those strings
+precisely so the old rows render as Point A → Point B too.
+
+### Verifying
+
+7. Drop a pin on a named place (a café, a mall) and drive to it. The route
+   sheet reads "Heading to <that place>", the save sheet pre-fills "Drive to
+   <that place>", and the share card's headline and leg line both name it.
+8. Drop a pin in the middle of nowhere, or turn the network off before
+   dropping it. The card must read **Point A → Point B** — never "Dropped
+   Pin", never blank, never raw coordinates.
+9. Check `trips` for that drive: `destination_name` holds the coordinate
+   pair, so the row is still resolvable later.
+
+---
+
+## 7. The brand mark on the card
+
+`components/DriverseLogo.tsx` draws the lockup as vector — mark in
+`react-native-svg`, wordmark in Rajdhani — and `ShareableCard`'s
+`BrandCorner` is its first caller.
+
+It replaced an `<Image>` of `assets/images/driverse-logo.png`, which is a
+1024×1536 **splash** asset: the logo sits on a blurred photograph inside a
+glow. Scaled into the card's 16pt slot that renders as a grey smudge, and
+the card compensated by typing the wordmark next to it by hand — misspelled,
+as "DRIVEVERSE". The wordmark now reads **DRIVERSE**, matching the logo.
+
+Two reasons it is vector rather than a cleaner PNG. `react-native-view-shot`
+captures the card at 3× (360pt → 1080px), and a raster mark is the one
+element that would visibly soften there. And the mark's two speed cuts are
+punched out with `fillRule="evenodd"` rather than painted in the background
+colour, so the logo carries no assumption that it sits on voidBlack.
+
+The geometry is a redraw, not a traced export. If a real vector of the logo
+lands in the repo, replace `MARK_PATH` and nothing else changes — every
+caller imports the component, not the asset. `LoadingScreen` still uses the
+PNG, which is the one place that asset is right.
