@@ -63,7 +63,26 @@ above all: it throws in a release build when the manifest or its `scheme` is
 missing and only warns in development, so `lib/deepLink.ts` wraps it in a
 `createAppLink()` that cannot throw (pure rule and tests in
 `lib/deepLinkFormat.ts`). `components/AppErrorBoundary.tsx` is the second
-line only — it catches render-time throws, never module-scope ones.
+line only — it catches render-time throws, never module-scope ones; it wraps
+the whole root component rather than part of its output, so the loading screen
+and the font hook are inside it too.
+
+A third crash report arrived after both fixes had shipped, which exposed the
+real problem: **both were diagnosed by reading the launch path, because a
+store build that dies on open leaves no artefact.** The app now carries its own
+black box. `expo/lib/crashReporter.ts` installs a global error and rejection
+handler on the first mount effect and writes what it catches to AsyncStorage;
+a failure that happens before the app finishes starting is shown as copyable
+text on the *next* launch (`expo/components/CrashReportScreen.tsx`). A launch
+marker distinguishes "crashed during startup" from "was killed" from "never
+reached mount" — that last being the signature of a bundle-evaluation death
+and the only case where reading the import graph is still the method. Shaping
+and parsing are pure and tested in `expo/lib/crashReport.ts`. **Not every
+"doesn't open" is a crash**: an open-ended gate holding the loading screen
+(fonts, `getSession()`) looks identical from outside, and an update carries
+persisted AsyncStorage state a fresh install does not — so both gates now have
+a timeout and a `catch`. `expo/LAUNCH_SAFETY_REFERENCE.md` §7 is the diagnosis
+procedure; start there rather than at the rule.
 
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive

@@ -1,7 +1,12 @@
 # Launch safety
 
-Why the app has crashed on open twice, what the shared cause was, and the rule
-that prevents a third time.
+Why the app has crashed on open twice, what the shared cause was, the rule
+that prevents a third time — and, after a third report came in anyway, how to
+find out what is actually happening instead of guessing again.
+
+**If you are here because a build is crashing on open, start at §7.** It is the
+diagnosis procedure. §2–§3 are the rules and the history; they are what to
+check once you know where the failure is, not a substitute for finding out.
 
 ## 1. The window
 
@@ -99,24 +104,63 @@ The fix has three parts:
   `createAppLink` too. Not launch-critical, but the same throw would have
   turned a Share tap into a rejected promise.
 
+### 3c. A launch that never finishes (fixed alongside §7)
+
+Not every "it doesn't open" is a crash, and this is the failure the first two
+rounds of fixes were not looking for. `app/_layout.tsx` holds the loading
+screen until fonts are ready, and `app/index.tsx` holds it until auth
+finishes. Both gates were open-ended:
+
+- `useAppFonts` returned `ready` only once `useFonts` reported loaded **or**
+  errored. Eight TTF files have to land; anything that leaves the hook in
+  neither state — a face that fails to decode natively, an asset missing from
+  the bundle, a promise nothing settles — holds the gate forever.
+- `useAuthStore` called `supabase.auth.getSession()` with a `.then()` and no
+  `.catch()`. A rejection left `loading` true permanently, and `app/index.tsx`
+  renders `LoadingScreen` for as long as it is.
+
+Either way the driver taps the icon, sees the logo, and the app never
+advances. From the outside — and from a store reviewer's side — that is
+indistinguishable from a crash, and it is the *only* failure mode in this file
+that would explain "the update crashes but a fresh install is fine":
+`getSession()` reads a token a previous version wrote into AsyncStorage. A
+fresh install has nothing to read and cannot fail there.
+
+Both gates now have a floor. `FONT_TIMEOUT_MS` (3 s) starts the app in system
+type rather than not at all, and `getSession()` degrades to a signed-out app.
+
 ## 4. The second line of defence
 
-`components/AppErrorBoundary.tsx` wraps the provider tree in `app/_layout.tsx`,
-and `ErrorScreen` is exported from the same file as Expo Router's
-`ErrorBoundary` for the route segment. A throw while rendering now produces a
-screen with the message and a Try again, instead of an empty window.
+`components/AppErrorBoundary.tsx` wraps `RootLayout` in `app/_layout.tsx`, and
+`ErrorScreen` is exported from the same file as Expo Router's `ErrorBoundary`
+for the route segment. A throw while rendering now produces a screen with the
+message and a Try again, instead of an empty window.
+
+**It wraps the root component, not part of its output.** It used to sit inside
+`RootLayout`, below the `if (isLoading || !fontsReady) return <LoadingScreen/>`
+early return — so the loading screen, the font hook and the root component's
+own render were all outside it. That is every line of code that runs during
+the window the app has died in twice: the boundary only started guarding once
+the app had already successfully started. `RootLayout` is now a three-line
+wrapper around `RootLayoutContent`, and everything is below the boundary.
 
 Be clear about what this does and does not buy. A React error boundary catches
 errors thrown **while rendering the tree below it**. It does not catch module-
 scope errors (§1 — no tree exists yet), errors in event handlers, timers or
 promises, or native crashes. It is not a substitute for §2; it is what turns the
-*other* failures into something a driver can report.
+*other* failures into something a driver can report — and, since §7, into
+something written down.
 
 ## 5. Checklist before shipping a build
 
 - No native module call at the top level of anything reachable from
-  `app/_layout.tsx`. `grep` for bare call statements at column 0.
+  `app/_layout.tsx`. Walk the import graph rather than grepping one file —
+  `app/_layout.tsx` reaches 48 modules, and both bugs so far were three and
+  four hops in. A bare call statement at column 0 is the obvious shape; a
+  `const x = Native.thing()` initialiser is the one that hides.
 - No `throw` at module scope on a release path.
+- Every gate that holds the loading screen has a timeout or a `catch` (§3c).
+  Grep for `.then(` with no `.catch(` on the launch path.
 - Any API that reads the `expo-constants` manifest (`expo-linking` above all)
   is called lazily and guarded.
 - `npx expo export --platform android` succeeds — it catches a missing module
@@ -128,10 +172,98 @@ promises, or native crashes. It is not a substitute for §2; it is what turns th
 ## 6. Still unverified
 
 Neither §3b nor the boundary has been confirmed on a physical Android device
-against the published build — there is no crash log from the Play Store release
-in hand, and the diagnosis is from reading the launch path rather than from a
-stack trace. What is certain is that the `createURL` call was an unguarded
-throwing call in the bundle-evaluation window on every launch. If a build with
-this fix still dies on open, the next step is a logcat capture
-(`adb logcat -s ReactNativeJS AndroidRuntime`) from the device, and Play
-Console → Quality → Crashes and ANRs for the aggregated native stack.
+against the published build — there is no crash log from the Play Store
+release in hand, and the diagnosis was from reading the launch path rather
+than from a stack trace. §3b did remove a real unguarded throwing call from
+the bundle-evaluation window on every launch; that much is certain. What is
+equally certain, now that a third report has come in, is that it was not the
+whole story, and that **two consecutive fixes were shipped without ever seeing
+the failure.** That is the thing §7 exists to stop.
+
+## 7. How to diagnose a launch crash
+
+The trap this file fell into twice: a launch crash produces no artefact, so
+the temptation is to read the launch path, find something that *could* throw,
+fix it, and ship. That is a hypothesis, not a diagnosis, and it has now been
+wrong at least once. Work in this order and stop as soon as something answers.
+
+### 7a. Ask the app first
+
+The app carries its own black box (`lib/crashReporter.ts`, pure half in
+`lib/crashReport.ts`). A JavaScript error from the first mount effect onward
+is captured, written to AsyncStorage, and — if it happened before the app
+finished starting — shown on the **next** launch as a copyable report:
+`components/CrashReportScreen.tsx`, with kind, message, stack, component
+stack, platform and app version.
+
+So the first move is no longer "get the device". It is: reopen the app, and
+read the screen. A driver who can paste that text has just done the work that
+two release cycles of code-reading did not.
+
+What it sees, and what it does not:
+
+| Failure | Captured? |
+| --- | --- |
+| Render throw (`AppErrorBoundary`) | Yes, reliably |
+| Unhandled promise rejection | Yes, reliably |
+| Uncaught throw in an effect/timer | Usually — the write races process teardown |
+| Throw during bundle evaluation (§1) | **No** |
+| Native crash | **No** |
+
+The bundle-evaluation gap is deliberate, and it is not an oversight to be
+fixed later: recording it would mean an AsyncStorage write at module scope,
+which is the exact rule (§2) that caused both crashes. Curing the disease with
+the disease is not a trade worth making.
+
+### 7b. Read the launch marker
+
+`beginLaunch()` writes a marker on the first mount effect; `LaunchComplete`
+clears it once the whole provider stack has mounted and survived
+`LAUNCH_SETTLE_MS`. On the next start the marker distinguishes three cases,
+and this is the single most useful bit in the system:
+
+- **Marker set, report present** → a JavaScript error during startup. §7a has
+  the stack. Go fix it.
+- **Marker set, no report** → the app reached mount and then went away without
+  a JavaScript error. That is a kill, not a crash: the driver swiped it away
+  during the splash, or Android reclaimed memory. Logged, not shown.
+- **No marker at all, yet the driver reports it dying on open** → it never
+  reached the first mount effect. That is the bundle-evaluation window, and
+  §2/§3 are exactly the right place to look. This is the one case where
+  reading the import graph *is* the method.
+
+### 7c. Then the device, then the console
+
+Only once the above has been exhausted:
+
+- `adb logcat -s ReactNativeJS:V AndroidRuntime:E ExpoModulesCore:V` with the
+  phone attached. `ReactNativeJS` carries the JS error text; `AndroidRuntime`
+  carries the native stack. A bundle-evaluation death shows as an abort in
+  `ObjCTurboModule`/`JavaTurboModule` frames 100–300 ms after process start
+  (§3a), with nothing from `ReactNativeJS` before it.
+- Play Console → Quality → Crashes and ANRs. Aggregated *native* stacks, which
+  for a JavaScript throw say only that Hermes aborted — the same line for
+  every possible cause. Useful for the blast radius (device models, Android
+  versions, how many drivers, whether it is only on update) and close to
+  useless for the cause.
+- **Reproduce the release build, not a dev build.** Every failure in §3 is
+  invisible in development by construction — Expo Go supplies a manifest a
+  standalone build may not have, and several Expo modules downgrade a
+  production `throw` to a `console.warn` behind `__DEV__`. A launch bug that
+  reproduces in `expo start` was never one of these.
+
+### 7d. If it only happens on update
+
+An update differs from a fresh install in exactly one way: the app's data
+directory survives. Everything the previous version wrote into AsyncStorage is
+still there and is read on the next launch — the Supabase session token
+(`lib/supabase.ts` → `useAuthStore`), the Platinum entitlement cache, the
+cosmetics cache, the active car, the theme.
+
+So if a clean install works and an update does not, suspect **persisted state
+whose shape changed**, not the launch path. The fastest confirmation is to
+clear the app's storage on a device that is failing (Settings → Apps →
+Driveverse → Storage → Clear data) and relaunch. If it starts, it is a
+migration problem, and the fix belongs in whichever hook reads that key —
+tolerate the old shape, don't throw on it. §3c covers the one instance of this
+that has been found and fixed.
