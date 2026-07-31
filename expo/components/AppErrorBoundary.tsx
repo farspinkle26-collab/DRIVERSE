@@ -22,15 +22,20 @@
  *   It is the second line of defence, not the first.
  *
  * DEPENDENCIES ARE DELIBERATELY MINIMAL
- *   Only `react` and `react-native` primitives, and literal colours rather
- *   than `@/constants/theme`. The fallback has to be able to render in a tree
- *   where something has already gone wrong, so it must not depend on fonts
- *   having loaded, on a context provider having mounted, or on any other
- *   module that could itself be the thing that threw.
+ *   `react` and `react-native` primitives, literal colours rather than
+ *   `@/constants/theme`, and `lib/crashReporter` — which touches no native
+ *   module until an error is actually being recorded. The fallback has to be
+ *   able to render in a tree where something has already gone wrong, so it
+ *   must not depend on fonts having loaded, on a context provider having
+ *   mounted, or on any other module that could itself be the thing that
+ *   threw. This is also the root boundary in `app/_layout.tsx`, so anything
+ *   added to this import list runs before the app has a screen — keep it
+ *   boring.
  */
 
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { recordRenderError } from "@/lib/crashReporter";
 
 /**
  * The fallback itself. Exported on its own so Expo Router's `ErrorBoundary`
@@ -96,9 +101,14 @@ export class AppErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Goes to logcat / Console, which is the only place to read it from a
-    // store build on a real phone.
+    // Goes to logcat / Console, which needs the phone in hand and the crash
+    // reproduced on cue.
     console.error("[AppErrorBoundary] caught:", error, info?.componentStack);
+    // …and to storage, which does not. If this fires before the app finishes
+    // launching, the report is shown on the next start — the difference
+    // between a driver saying "it says X" and a black screen nobody can
+    // describe. See `lib/crashReporter.ts`.
+    recordRenderError(error, info?.componentStack ?? undefined);
   }
 
   handleRetry = () => {

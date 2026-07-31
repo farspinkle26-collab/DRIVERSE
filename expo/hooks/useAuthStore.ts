@@ -49,16 +49,38 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   // AUTH STATE LISTENER — runs once on mount, handles session restore
   // ================================================================
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      if (s?.user) {
-        setLoading(true);
-        loadUserProfile(s.user.id).finally(() => setLoading(false));
-      } else {
+    // Restore the persisted session.
+    //
+    // LAUNCH SAFETY — `loading` starts true and `app/index.tsx` shows the
+    // loading screen for as long as it stays true, so every path out of this
+    // promise has to clear it. It previously had no `.catch()`: a rejection
+    // left `loading` true forever and the app sat on the logo, which reads as
+    // "it doesn't open" and is what a store reviewer reports as a launch
+    // crash.
+    //
+    // This is also the one launch path that behaves differently on an *update*
+    // than on a fresh install. `getSession()` reads a token that a previous
+    // version of the app wrote into AsyncStorage; a fresh install has nothing
+    // to read and cannot fail here. If an update is dying on open and a clean
+    // install is not, this is the first place to look — and now it degrades to
+    // a signed-out app rather than a dead one.
+    supabase.auth
+      .getSession()
+      .then(({ data: { session: s } }) => {
+        setSession(s);
+        if (s?.user) {
+          setLoading(true);
+          loadUserProfile(s.user.id).finally(() => setLoading(false));
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("[Auth] getSession failed; starting signed out:", err);
+        setSession(null);
+        setUser(GUEST_USER);
         setLoading(false);
-      }
-    });
+      });
 
     // Listen for auth changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -66,8 +88,15 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         setSession(s);
         if (event === "SIGNED_IN" && s?.user) {
           setLoading(true);
-          await loadUserProfile(s.user.id);
-          setLoading(false);
+          // A throw here would escape into Supabase's listener, which nothing
+          // catches — and would strand `loading` true on the way past.
+          try {
+            await loadUserProfile(s.user.id);
+          } catch (err) {
+            console.error("[Auth] loadUserProfile failed:", err);
+          } finally {
+            setLoading(false);
+          }
         } else if (event === "SIGNED_OUT") {
           setUser(GUEST_USER);
           setNeedsRoleSelection(false);

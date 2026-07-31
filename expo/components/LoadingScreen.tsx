@@ -1,11 +1,18 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Dimensions, Image } from 'react-native';
+import { View, StyleSheet, Animated, Image } from 'react-native';
 
 interface LoadingScreenProps {
   onFinish?: () => void;
 }
 
-const { width, height } = Dimensions.get('window');
+// LAUNCH SAFETY — this used to read `Dimensions.get('window')` at module
+// scope. `Dimensions` is backed by native constants, so that is a native read
+// during bundle evaluation, in the first component the app renders: exactly
+// the class of call `LAUNCH_SAFETY_REFERENCE.md` §2 forbids on anything
+// reachable from `app/_layout.tsx`. It also baked the launch-time screen size
+// into a stylesheet that never updates on rotation or split-screen. The
+// container is `flex: 1` inside a full-screen parent, so the explicit width
+// and height bought nothing to begin with.
 
 export default function LoadingScreen({ onFinish }: LoadingScreenProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -65,8 +72,6 @@ export default function LoadingScreen({ onFinish }: LoadingScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    width,
-    height,
     backgroundColor: '#0A0A0F',
     justifyContent: 'center',
     alignItems: 'center',
