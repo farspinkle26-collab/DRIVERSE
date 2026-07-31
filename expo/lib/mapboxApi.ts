@@ -69,6 +69,59 @@ export async function reverseGeocode(
   }
 }
 
+export interface ReverseGeocodedPlace {
+  /** The feature's own short name — "Kopi Nako", "Jalan Bintaro Utama". */
+  name: string | null;
+  /** The full comma-separated address Mapbox returns as `place_name`. */
+  address: string | null;
+}
+
+/**
+ * Reverse geocode for a *label*, not an address.
+ *
+ * {@link reverseGeocode} returns `place_name`, the whole postal string, which
+ * is the right answer for an address field and the wrong one for the line
+ * under a share-card title. Mapbox also gives each feature a `text` — the
+ * name by itself — and that is what a driver would call the place, so it is
+ * returned separately here with the address kept as a fallback.
+ *
+ * `types` is ordered POI-first: a pin dropped on a café should come back as
+ * the café, and only fall through to the street and the neighbourhood when
+ * it was dropped on neither.
+ *
+ * Never throws and never rejects: a missing token, an offline device or a
+ * Mapbox error all resolve to `null`, because the only consequence of no
+ * name is that the card says "Point B".
+ */
+export async function reverseGeocodePlace(
+  latitude: number,
+  longitude: number,
+  language: string = "id"
+): Promise<ReverseGeocodedPlace | null> {
+  if (!MAPBOX_ACCESS_TOKEN) return null;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const url =
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json` +
+    `?types=poi,address,neighborhood,locality,place&limit=1&language=${language}` +
+    `&access_token=${MAPBOX_ACCESS_TOKEN}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const feature = data.features?.[0];
+    if (!feature) return null;
+    return {
+      name: typeof feature.text === "string" ? feature.text : null,
+      address: typeof feature.place_name === "string" ? feature.place_name : null,
+    };
+  } catch (error) {
+    console.error("Mapbox reverse geocode (place) error:", error);
+    return null;
+  }
+}
+
 export interface DirectionsStep {
   instruction: string;
   street: string;

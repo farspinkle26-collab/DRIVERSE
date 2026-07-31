@@ -30,10 +30,11 @@ import React from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import Svg, { Line } from "react-native-svg";
 import { CutCornerBadge, CutCornerSurface } from "@/components/CutCorner";
+import DriverseLogo from "@/components/DriverseLogo";
 import RoutePreview from "@/components/RoutePreview";
 import RankBadge from "@/components/RankBadge";
 import type { Trip } from "@/components/TripCard";
-import { tripTitle } from "@/components/TripCard";
+import { endpointLabels, shareTripTitle } from "@/lib/tripEndpoints";
 import type { Rank } from "@/constants/ranks";
 import { rankLevelLabel } from "@/constants/ranks";
 import type { QuestDifficulty } from "@/lib/questEngine";
@@ -168,20 +169,24 @@ function GridBackdrop() {
 }
 
 /**
- * The branding mark. Bottom of the card, subtle — logo glyph + wordmark in
- * Rajdhani, textSecondary. Present, not a banner: this is the one place the
- * card admits where it came from.
+ * The branding mark. Bottom of the card, subtle. Present, not a banner:
+ * this is the one place the card admits where it came from.
+ *
+ * It draws {@link DriverseLogo}, the vector lockup, rather than the splash
+ * PNG it used to scale into a 16pt box — that asset is a photograph with the
+ * logo glowing on top of it, so at this size it rendered as a grey smudge
+ * beside a hand-typed (and misspelled) wordmark. The mark is the only red on
+ * the card besides the route trace, and the wordmark stays textSecondary so
+ * the branding never outweighs the drive.
  */
 function BrandCorner() {
   return (
-    <View style={styles.brand}>
-      <Image
-        source={require("@/assets/images/driverse-logo.png")}
-        style={styles.brandLogo}
-        resizeMode="contain"
-      />
-      <Text style={styles.brandWordmark}>DRIVEVERSE</Text>
-    </View>
+    <DriverseLogo
+      size={spacing.spacingLg}
+      markColor={colors.racingRed}
+      wordmarkColor={colors.textSecondary}
+      style={styles.brand}
+    />
   );
 }
 
@@ -242,20 +247,26 @@ function TripVariant({ trip }: TripSharePayload) {
   const hasRoute =
     !!trip.route_polyline && decodePolyline(trip.route_polyline).length > 1;
 
+  // Where the drive actually started and ended, resolved by the map when it
+  // recorded the trip. `lib/tripEndpoints` is what stops the field names
+  // ("Current Location", "Dropped Pin", "Unknown") reaching the card — an
+  // unnamed leg reads Point A → Point B instead.
+  const legs = endpointLabels(trip);
+
   return (
     <View style={styles.variant}>
       <View style={styles.tripHeader}>
         <Overline label="TRIP LOGGED" />
         <Text style={styles.tripTitle} numberOfLines={1}>
-          {tripTitle(trip)}
+          {shareTripTitle(trip)}
         </Text>
         <View style={styles.legs}>
           <Text style={styles.legLabel} numberOfLines={1}>
-            {trip.origin_name || "Start"}
+            {legs.origin}
           </Text>
           <Text style={styles.legArrow}>→</Text>
           <Text style={styles.legLabel} numberOfLines={1}>
-            {trip.destination_name || "Finish"}
+            {legs.destination}
           </Text>
         </View>
       </View>
@@ -674,24 +685,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.spacingLg,
   },
 
-  // Brand
+  // Brand — position only. The lockup owns its own layout, so setting
+  // flexDirection/gap here would fight DriverseLogo's proportional spacing.
   brand: {
     position: "absolute",
     left: FRAME_PADDING,
     bottom: spacing.spacingXl,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.spacingSm,
     opacity: 0.9,
-  },
-  brandLogo: {
-    width: spacing.spacingLg,
-    height: spacing.spacingLg,
-  },
-  brandWordmark: {
-    fontFamily: fontFamily.displayBold,
-    fontSize: 13,
-    letterSpacing: 3,
-    color: colors.textSecondary,
   },
 });

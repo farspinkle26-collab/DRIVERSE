@@ -155,7 +155,8 @@ import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
 import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
-import { searchPlaces, getDirectionsWithSteps } from "@/lib/mapboxApi";
+import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
+import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -753,6 +754,13 @@ export default function MapScreen() {
 
   // Selected destination (cafe or custom tapped location)
   const [selectedDestination, setSelectedDestination] = useState<SelectedDestination | null>(null);
+  // Where the current recording started, reverse-geocoded when the driver
+  // hits Start. `null` until it resolves — and it may never resolve, so
+  // nothing may block on it. See `resolveOriginName`.
+  const [originLabel, setOriginLabel] = useState<string | null>(null);
+  // Bumped per recording so a late geocoder reply from a previous drive
+  // cannot stamp its name on this one.
+  const originRequestRef = useRef(0);
   // Whether the selected pin has been confirmed (kept for marker emphasis styling)
   const [locationChosen, setLocationChosen] = useState(false);
   // Drive/drop-pin mode: independent of online status. While true, the map is
@@ -1490,6 +1498,34 @@ export default function MapScreen() {
   // Sync destCoordsRef for use inside the GPS watcher (stale closure)
   useEffect(() => { destCoordsRef.current = destCoords(); }, [destCoords]);
 
+  /**
+   * The one place the destination gets a human name. Every surface that used
+   * to build this string for itself — the route sheet, the trip row, the
+   * save sheet, the share card — reads it from here, which is what stopped
+   * four call sites disagreeing about what a pin with no name is called.
+   *
+   * `null` means "not named yet, or not nameable": callers decide what to
+   * show or store for that, and the share card is the one that turns it into
+   * "Point B".
+   */
+  const destinationLabel = useMemo((): string | null => {
+    if (!selectedDestination) return null;
+    if (selectedDestination.type === "cafe") {
+      return shortPlaceLabel(selectedDestination.data.name);
+    }
+    return shortPlaceLabel(selectedDestination.name);
+  }, [selectedDestination]);
+
+  /**
+   * The same, for what gets written to `trips` / `saved_routes`. Storage
+   * prefers a coordinate pair over nothing, because a row that knows where
+   * it was can be named later; a row that says "Unknown" never can.
+   */
+  const destinationStoredName = useMemo((): string => {
+    const coords = destCoords();
+    return destinationLabel ?? coordinateLabel(coords?.latitude, coords?.longitude) ?? "Unknown";
+  }, [destinationLabel, destCoords]);
+
   const handleNavigate = useCallback(() => {
     const coords = destCoords();
     if (!coords) return;
@@ -1549,6 +1585,32 @@ export default function MapScreen() {
     setShowDropPinHint((v) => !v);
   }, [user]);
 
+  /**
+   * Ask Mapbox what the driver just tapped on, and hang the answer off the
+   * selected destination.
+   *
+   * A dropped pin is a pair of coordinates and nothing else, which is how
+   * the trip log, the save sheet and the share card all ended up saying
+   * "Dropped Pin". Naming it is best-effort by design: the pin is already
+   * selected and the route already fetchable before this resolves, and a
+   * geocoder that is slow, off or tokenless costs the drive nothing but a
+   * generic label. Hence no loading state and no error path.
+   *
+   * The result is only applied if that same pin is still selected — a driver
+   * who taps twice must not have the first tap's name land on the second
+   * tap's pin.
+   */
+  const resolveDroppedPinName = useCallback(async (lat: number, lng: number) => {
+    const place = await reverseGeocodePlace(lat, lng);
+    const label = shortPlaceLabel(place?.name) ?? shortPlaceLabel(place?.address);
+    if (!label) return;
+    setSelectedDestination((prev) =>
+      prev && prev.type === "location" && prev.lat === lat && prev.lng === lng && !prev.name
+        ? { ...prev, name: label }
+        : prev
+    );
+  }, []);
+
   // --- Drop a destination pin wherever the driver taps the map, while drive mode is active ---
   const handleMapPress = useCallback((event: any) => {
     if (!showDropPinHint) return;
@@ -1557,7 +1619,8 @@ export default function MapScreen() {
     setLocationChosen(true);
     setRouteInfo(null);
     setShowDropPinHint(false);
-  }, [showDropPinHint]);
+    void resolveDroppedPinName(latitude, longitude);
+  }, [showDropPinHint, resolveDroppedPinName]);
 
   const handlePlacesRegionChange = useCallback(
     (nextRegion: {
@@ -1632,11 +1695,35 @@ export default function MapScreen() {
       return;
     }
     setSelectedEventId(null);
-    setSelectedDestination({ type: "location", lat: ev.latitude, lng: ev.longitude });
+    // An event already has a name, so this destination never needs geocoding.
+    setSelectedDestination({
+      type: "location",
+      lat: ev.latitude,
+      lng: ev.longitude,
+      name: ev.title,
+    });
     setLocationChosen(true);
     setNavigating(true);
     fetchDirections(userLocation, { latitude: ev.latitude, longitude: ev.longitude });
   }, [userLocation, fetchDirections]);
+
+  /**
+   * Name the point the drive started from, so the share card can say
+   * "Blok M → Puncak Pass" instead of naming the field it read.
+   *
+   * Fire-and-forget, exactly like {@link resolveDroppedPinName}: the
+   * recording is already running by the time this is called, and the label
+   * is not needed until the driver stops.
+   */
+  const resolveOriginName = useCallback(
+    async (point: { latitude: number; longitude: number }) => {
+      const token = ++originRequestRef.current;
+      const place = await reverseGeocodePlace(point.latitude, point.longitude);
+      const label = shortPlaceLabel(place?.name) ?? shortPlaceLabel(place?.address);
+      if (label && originRequestRef.current === token) setOriginLabel(label);
+    },
+    []
+  );
 
   // --- Recording handlers ---
   const startRecording = useCallback(() => {
@@ -1667,9 +1754,12 @@ export default function MapScreen() {
     lastCoordRef.current = userLocation;
     lastCoordTimeRef.current = now;
     navHeadingRef.current = heading;
+    setOriginLabel(null);
+    originRequestRef.current++;
     if (userLocation) {
       setRecordedPath([userLocation]);
       lastCoordRef.current = userLocation;
+      void resolveOriginName(userLocation);
     }
     // Drop into the third-person navigation view: tight zoom, tilted horizon,
     // and rotated so the direction of travel points up the screen.
@@ -1679,7 +1769,7 @@ export default function MapScreen() {
         { duration: 600 }
       );
     }
-  }, [userLocation, heading]);
+  }, [userLocation, heading, resolveOriginName]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -1717,22 +1807,21 @@ export default function MapScreen() {
 
     // Save trip to Supabase
     if (user?.id) {
-      const destName = selectedDestination?.type === "cafe"
-        ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-        : selectedDestination?.name
-        ? selectedDestination.name
-        : selectedDestination
-        ? `${(selectedDestination as { type: "location"; lat: number; lng: number }).lat.toFixed(4)}, ${(selectedDestination as { type: "location"; lat: number; lng: number }).lng.toFixed(4)}`
-        : "Unknown";
       const dest = destCoords();
       const estSec = estimatedDurationRef.current ?? 0;
+      // Both ends are named here rather than at the four places that read the
+      // row back. A drive that could not be geocoded stores its coordinates,
+      // which is a fact; "Current Location" was not one.
+      const start = recordedPath[0];
+      const originName =
+        originLabel ?? coordinateLabel(start?.latitude, start?.longitude) ?? "Unknown";
       setTripSaveError(null);
       supabase.from("trips").insert({
         user_id: user.id,
-        origin_name: "Current Location",
-        origin_lat: recordedPath[0]?.latitude ?? 0,
-        origin_lng: recordedPath[0]?.longitude ?? 0,
-        destination_name: destName,
+        origin_name: originName,
+        origin_lat: start?.latitude ?? 0,
+        origin_lng: start?.longitude ?? 0,
+        destination_name: destinationStoredName,
         destination_lat: dest?.latitude ?? 0,
         destination_lng: dest?.longitude ?? 0,
         // The recorded trace, so the Drive Hub and the trip detail screen can
@@ -1762,7 +1851,7 @@ export default function MapScreen() {
     }
 
     // Keep path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, selectedDestination, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar]);
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, destinationStoredName, originLabel, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar]);
 
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
@@ -3916,7 +4005,10 @@ export default function MapScreen() {
         const pin = !isCafe
           ? (selectedDestination as { type: "location"; lat: number; lng: number; name?: string })
           : null;
-        const destName = cafeData ? cafeData.name : pin?.name ?? "Dropped pin";
+        // This callout prints the coordinates directly underneath, so it is
+        // the one place "Dropped pin" is still an honest label while the
+        // geocoder is in flight.
+        const destName = destinationLabel ?? "Dropped pin";
         const destVicinity = cafeData?.vicinity;
         const destRating = cafeData?.rating;
         const lat = cafeData ? cafeData.lat : pin!.lat;
@@ -4047,9 +4139,14 @@ export default function MapScreen() {
                 </View>
 
                 {(() => {
-                  const destName = selectedDestination?.type === "cafe"
-                    ? (selectedDestination as { type: "cafe"; data: CafePOI }).data.name
-                    : (selectedDestination as { type: "location"; name?: string } | undefined)?.name ?? "Dropped pin";
+                  // Until the geocoder answers (or when it cannot), the sheet
+                  // says where, not what — a coordinate pair beats the word
+                  // "pin" for a driver deciding whether this is the right spot.
+                  const coords = destCoords();
+                  const destName =
+                    destinationLabel ??
+                    coordinateLabel(coords?.latitude, coords?.longitude) ??
+                    "your pin";
                   return selectedDestination ? (
                     <View style={styles.routeDest}>
                       <Clock size={spacing.spacingMd} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
@@ -4217,14 +4314,8 @@ export default function MapScreen() {
         xpEarned={xpEarned ?? 0}
         carId={activeCar?.id ?? null}
         tripId={lastTripId}
-        originName="Current Location"
-        destinationName={
-          selectedDestination?.type === "cafe"
-            ? selectedDestination.data.name
-            : selectedDestination?.type === "location"
-            ? selectedDestination.name ?? "Dropped Pin"
-            : ""
-        }
+        originName={originLabel ?? ""}
+        destinationName={destinationLabel ?? ""}
         onSaved={(routeId) => setSavedRouteId(routeId)}
       />
 
@@ -4236,13 +4327,11 @@ export default function MapScreen() {
         payload={{
           trip: {
             id: savedRouteId ?? "recorded",
-            destination_name:
-              selectedDestination?.type === "cafe"
-                ? selectedDestination.data.name
-                : selectedDestination?.type === "location"
-                ? selectedDestination.name ?? "Dropped Pin"
-                : null,
-            origin_name: "Current Location",
+            // The card renders from the in-memory trip, so it gets the
+            // resolved names directly — `null` where there is none, which is
+            // what ShareableCard turns into Point A / Point B.
+            destination_name: destinationLabel,
+            origin_name: originLabel,
             route_polyline:
               recordedPath.length > 1
                 ? encodePolyline(simplifyPath(recordedPath, 400))
