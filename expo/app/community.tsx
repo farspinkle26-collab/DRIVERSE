@@ -159,7 +159,13 @@ export default function CommunityScreen() {
         </Pressable>
         <Text style={styles.topTitle}>COMMUNITY</Text>
         {tab === "convoy" ? (
-          <Pressable style={styles.iconBtn} onPress={handleCreate} hitSlop={spacing.spacingSm}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create convoy"
+            style={styles.iconBtn}
+            onPress={handleCreate}
+            hitSlop={spacing.spacingSm}
+          >
             <Plus size={20} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
           </Pressable>
         ) : (

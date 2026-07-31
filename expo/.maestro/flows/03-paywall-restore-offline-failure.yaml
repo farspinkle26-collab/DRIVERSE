@@ -1,0 +1,59 @@
+# FLOW 3 (failure variant) — Restore Purchases while offline
+# Restore must fail gracefully: a clear alert ("Restore failed" / "Not
+# available"), never a crash or an indefinite "Restoring…" spinner.
+#
+# Reaches the paywall via the tier-agnostic Settings row (no seed cars needed).
+#
+# PLATFORM NOTE: setAirplaneMode is reliable on Android emulators only. On iOS
+# simulators there is no Maestro offline toggle — run this variant on Android
+# in CI, or on an iOS device behind Network Link Conditioner. See README §
+# "Offline variants".
+appId: app.rork.driverse
+tags:
+  - failure
+  - platinum
+  - android-offline
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Open the paywall from Settings.
+- tapOn:
+    accessibilityLabel: "Profile"
+- scrollUntilVisible:
+    element:
+      accessibilityLabel: "Upgrade to Driveverse Platinum"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    accessibilityLabel: "Upgrade to Driveverse Platinum"
+- extendedWaitUntil:
+    visible: "PLATINUM"
+    timeout: 15000
+
+# Go offline, then attempt Restore.
+- setAirplaneMode: enabled
+- tapOn:
+    accessibilityLabel: "Restore purchases"
+
+# Graceful, bounded failure — not a hang.
+- extendedWaitUntil:
+    visible:
+      text: "Restore failed|Not available|Nothing to restore"
+    timeout: 20000
+
+# Restore connectivity so the device is left clean for the next flow.
+- setAirplaneMode: disabled

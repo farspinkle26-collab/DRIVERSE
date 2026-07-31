@@ -1,0 +1,54 @@
+# FLOW 6 (failure variant) — Places while offline
+# By design (MAP_MARKER_REFERENCE §10b) a places-provider failure serves the
+# stale cache instead of erroring, and Saved Places should render its list (or
+# a clean empty state) without crashing when the network is down.
+#
+# We open Saved Places offline and confirm the screen renders and the tab bar
+# still responds — graceful degradation, not a crash or an infinite spinner.
+#
+# PLATFORM NOTE: Android emulator only (setAirplaneMode). See README.
+appId: app.rork.driverse
+tags:
+  - failure
+  - places
+  - android-offline
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# Go offline, then open Saved Places.
+- setAirplaneMode: enabled
+- tapOn:
+    accessibilityLabel: "Profile"
+- scrollUntilVisible:
+    element:
+      text: "Saved Places"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Saved Places"
+
+# The screen renders gracefully offline (header present, no crash).
+- assertVisible: "SAVED PLACES"
+# App is alive: back out to a responsive Profile.
+- tapOn:
+    accessibilityLabel: "Back"
+- assertVisible:
+    accessibilityLabel: "Map"
+
+- setAirplaneMode: disabled

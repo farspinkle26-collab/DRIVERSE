@@ -1,0 +1,200 @@
+name: Maestro E2E (nightly)
+
+# E2E suites are slower and heavier than the Jest suite (test.yml), so they run
+# on a nightly SCHEDULE rather than per-commit. Trigger manually with
+# workflow_dispatch when validating changes to the flows or a release build.
+#
+# Two platforms run in parallel — the whole point of the suite is to catch the
+# places where RevenueCat, background location and the share sheet diverge
+# between iOS and Android. Each job builds an app with the JS bundle EMBEDDED
+# (no Metro dev server in CI), boots a simulator/emulator, then runs Maestro.
+#
+# ── Required repository secrets ──────────────────────────────────────────────
+#   EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY
+#       A dedicated STAGING Supabase project — never production. E2E creates
+#       accounts, convoys, trips and messages.
+#   MAESTRO_TEST_PASSWORD           shared password for the seed accounts
+#   (seed accounts + their data are provisioned by scripts/seed-e2e.* — see
+#    expo/.maestro/README.md § "Seeding".)
+# Android release signing falls back to the debug keystore below; swap in a
+# real keystore secret if the build needs one.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC nightly (~1am US-East / off-peak)
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Maestro --include-tags (blank = all flows)"
+        required: false
+        default: ""
+
+concurrency:
+  group: maestro-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+  MAESTRO_TEST_PASSWORD: ${{ secrets.MAESTRO_TEST_PASSWORD }}
+
+jobs:
+  # ───────────────────────────── Android ─────────────────────────────
+  android:
+    name: Android (Pixel 7 API 34)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install JS dependencies
+        working-directory: expo
+        run: bun install --frozen-lockfile
+
+      # Generate native android/ from app.json, then build a release APK with
+      # the JS bundle embedded so no Metro server is needed at runtime. Signed
+      # with the debug keystore (fine for an emulator; CI never ships it).
+      - name: Prebuild + assemble APK
+        working-directory: expo
+        run: |
+          bunx expo prebuild --platform android --no-install
+          cd android
+          ./gradlew :app:assembleRelease \
+            -PreactNativeArchitectures=x86_64 \
+            -Pandroid.injected.signing.store.file=$ANDROID_HOME/../.android/debug.keystore \
+            || ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Boot the emulator, install the APK, run the whole suite (Android can do
+      # the setAirplaneMode offline variants, so nothing is excluded here).
+      - name: Run Maestro flows
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 4096M
+          disable-animations: true
+          script: |
+            adb install -r expo/android/app/build/outputs/apk/release/app-release.apk
+            maestro test expo/.maestro/ \
+              ${{ github.event.inputs.tags && format('--include-tags {0}', github.event.inputs.tags) || '' }} \
+              --format junit --output maestro-android.xml
+        env:
+          MAESTRO_TEST_EMAIL_SEED: "maestro+seed@driverse.test"
+
+      - name: Upload Maestro artifacts (Android)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-android
+          path: |
+            maestro-android.xml
+            ~/.maestro/tests/**
+          if-no-files-found: warn
+
+  # ─────────────────────────────── iOS ───────────────────────────────
+  ios:
+    name: iOS (iPhone 15, iOS 17)
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install JS dependencies
+        working-directory: expo
+        run: bun install --frozen-lockfile
+
+      - name: Install Maestro + iOS driver deps
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          brew tap facebook/fb
+          brew install facebook/fb/idb-companion
+
+      # Prebuild native ios/, then build for the simulator (embeds the JS
+      # bundle in Release). No code signing needed for a simulator build.
+      - name: Prebuild + build for simulator
+        working-directory: expo
+        run: |
+          bunx expo prebuild --platform ios --no-install
+          cd ios
+          pod install
+          xcodebuild \
+            -workspace *.xcworkspace \
+            -scheme Driveverse \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO | xcpretty || true
+
+      - name: Boot simulator + install app
+        run: |
+          xcrun simctl boot "iPhone 15" || true
+          APP=$(find expo/ios/build -name "*.app" -type d | head -n 1)
+          echo "Installing $APP"
+          xcrun simctl install booted "$APP"
+
+      # iOS simulators have no Maestro offline toggle, so the android-offline
+      # variants are excluded here (they run on Android). See README.
+      - name: Run Maestro flows
+        run: |
+          maestro test expo/.maestro/ \
+            --exclude-tags android-offline \
+            ${{ github.event.inputs.tags && format('--include-tags {0}', github.event.inputs.tags) || '' }} \
+            --format junit --output maestro-ios.xml
+
+      - name: Upload Maestro artifacts (iOS)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-ios
+          path: |
+            maestro-ios.xml
+            ~/.maestro/tests/**
+          if-no-files-found: warn
+
+  # ──────────────────────── Consolidated report ──────────────────────
+  report:
+    name: Publish E2E results
+    needs: [android, ios]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Summarise per-platform pass/fail
+        run: |
+          echo "## Maestro E2E — nightly" >> "$GITHUB_STEP_SUMMARY"
+          for f in results/*/maestro-*.xml; do
+            [ -f "$f" ] || continue
+            echo "### $(basename "$f")" >> "$GITHUB_STEP_SUMMARY"
+            # JUnit counts straight off the <testsuite> element.
+            grep -o 'tests="[0-9]*"\|failures="[0-9]*"\|errors="[0-9]*"\|skipped="[0-9]*"' "$f" | head -4 >> "$GITHUB_STEP_SUMMARY" || true
+          done

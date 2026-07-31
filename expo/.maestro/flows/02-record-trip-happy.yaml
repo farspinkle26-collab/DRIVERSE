@@ -1,0 +1,95 @@
+# FLOW 2 (happy path) — Record a trip
+# Start recording → drop a destination → simulate a short drive with mocked
+# GPS → End Drive → confirm the Trip Summary, then confirm the trip appears in
+# the Drive Hub Trips list.
+#
+# CLAUDE.md: ending a drive always writes a `trips` row (the log/XP/Drive Hub),
+# independent of whether the driver saves a publishable route. So the Trips
+# list is the correct place to assert persistence.
+#
+# Requires a signed-in seed account. GPS is mocked via setLocation/travel so
+# distance and time accrue and the drive qualifies for the summary.
+appId: app.rork.driverse
+tags:
+  - critical
+  - trips
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+
+# Seed a starting position before anything reads GPS.
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+# ── Start a drive ────────────────────────────────────────────────
+- tapOn:
+    accessibilityLabel: "Start a drive"
+- assertVisible: "Tap anywhere to drop your destination"
+# Drop the destination pin on the map.
+- tapOn:
+    point: "50%,45%"
+
+# Route computes, then the Start Navigation CTA appears.
+- extendedWaitUntil:
+    visible:
+      text: "START NAVIGATION"
+    timeout: 20000
+- tapOn:
+    text: "START NAVIGATION"
+
+# ── Recording HUD is live ────────────────────────────────────────
+- assertVisible:
+    text: "END DRIVE"
+- assertVisible: "DIST"
+- assertVisible: "TIME"
+
+# Simulate the drive: move through a short path so distance/time accrue.
+- travel:
+    points:
+      - "-6.2088,106.8456"
+      - "-6.2075,106.8470"
+      - "-6.2060,106.8488"
+      - "-6.2043,106.8505"
+    speed: 900
+
+# ── End the drive ────────────────────────────────────────────────
+- tapOn:
+    text: "END DRIVE"
+
+# Trip Summary: header is "DRIVE RECORDED" (or "AHEAD OF ESTIMATE"), with the
+# independent Save + Share actions present.
+- extendedWaitUntil:
+    visible:
+      text: "DRIVE RECORDED|AHEAD OF ESTIMATE"
+    timeout: 15000
+- assertVisible:
+    accessibilityLabel: "Save this route to your profile"
+- assertVisible:
+    accessibilityLabel: "Share this drive"
+
+# Dismiss the summary and confirm the trip landed in the Trips list.
+- tapOn:
+    accessibilityLabel: "Dismiss trip summary"
+- tapOn:
+    accessibilityLabel: "Drive"
+- assertVisible: "DRIVE HUB"
+- assertVisible: "TRIPS"
+# The recorded drive is now a card in the list.
+- extendedWaitUntil:
+    visible:
+      id: "trip-card"
+    timeout: 15000

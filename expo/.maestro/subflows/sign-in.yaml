@@ -1,0 +1,23 @@
+# Reusable: sign in with email + password from the login screen.
+#
+# Preconditions: the login screen ("WELCOME BACK") is showing.
+# Env: EMAIL, PASSWORD — an existing account. Callers that need seeded state
+# (2 cars for the paywall flow, existing conversations for chat, etc.) pass
+# the credentials of the matching seed account.
+appId: app.rork.driverse
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- assertVisible: "WELCOME BACK"
+- tapOn: "Email address"
+- inputText: "${EMAIL}"
+- tapOn: "Password"
+- inputText: "${PASSWORD}"
+- hideKeyboard
+- tapOn:
+    text: "SIGN IN"
+# login() success replaces to the garage gate.
+- extendedWaitUntil:
+    visible: "YOUR GARAGE"
+    timeout: 20000

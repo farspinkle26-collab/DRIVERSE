@@ -118,6 +118,7 @@ export function TripCard({
 
   return (
     <Pressable
+      testID="trip-card"
       accessibilityRole="button"
       accessibilityLabel={`Trip ${code}, ${tripTitle(trip)}, ${distance.value} kilometres, score ${score}`}
       onPress={onPress}

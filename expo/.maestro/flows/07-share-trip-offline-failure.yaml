@@ -1,0 +1,56 @@
+# FLOW 7 (failure variant) — Share a trip while offline
+# By explicit design (map.tsx trip-summary comment + CLAUDE.md): the share card
+# renders from the in-memory trip and Share is NEVER gated on a network write.
+# So going offline must NOT break the preview — this variant guards that
+# resilience (a regression that re-coupled Share to the DB would fail here).
+#
+# PLATFORM NOTE: Android emulator only (setAirplaneMode). See README.
+appId: app.rork.driverse
+tags:
+  - failure
+  - share
+  - android-offline
+env:
+  EMAIL: "maestro+seed@driverse.test"
+  PASSWORD: "maestro-pw-123"
+---
+- launchApp:
+    clearState: true
+    permissions:
+      location: allow
+    arguments: {}
+- setLocation:
+    latitude: -6.2088
+    longitude: 106.8456
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      EMAIL: "${EMAIL}"
+      PASSWORD: "${PASSWORD}"
+- runFlow: ../subflows/enter-app.yaml
+
+- tapOn:
+    accessibilityLabel: "Drive"
+- extendedWaitUntil:
+    visible:
+      id: "trip-card"
+    timeout: 15000
+- tapOn:
+    id: "trip-card"
+    index: 0
+
+# Go offline BEFORE opening Share.
+- setAirplaneMode: enabled
+- tapOn:
+    accessibilityLabel: "Share this trip"
+
+# Resilience: the preview still renders offline, with its actions.
+- extendedWaitUntil:
+    visible:
+      accessibilityLabel: "Close share preview"
+    timeout: 15000
+- assertVisible:
+    text: "More options"
+
+- setAirplaneMode: disabled
