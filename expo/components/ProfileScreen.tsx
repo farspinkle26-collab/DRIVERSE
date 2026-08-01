@@ -874,12 +874,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         quality: 0.9,
         base64: true,
       });
-      if (result.canceled || !result.assets?.[0]?.base64) return;
-      const asset = result.assets[0];
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      // Narrowed here rather than in the guard above: the picker types
+      // `base64` as optional, and reading it off `result.assets[0]` a second
+      // time does not carry the guard's narrowing with it.
+      const base64 = asset?.base64;
+      if (!asset || !base64) return;
       const mimeType = asset.mimeType ?? (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
 
       setGenerating(true);
-      await generateCarImage(car.id, asset.base64, mimeType);
+      await generateCarImage(car.id, base64, mimeType);
       setGenerating(false);
       setPremiumOpen(false);
       setPremiumTargetCar(null);

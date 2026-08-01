@@ -87,19 +87,38 @@ let appVersion: string | null | undefined;
  * when `createURL` throws — so this is guarded twice: lazily required, and
  * wrapped. A missing version costs one line of a report; a throw here would
  * cost the launch.
+ *
+ * Reports the NATIVE build number alongside the name, not `expoConfig`
+ * alone. `expoConfig.version` is the manifest's, and the manifest can be
+ * updated independently of the binary — `app.json` currently says `1.0.0`
+ * for the binaries App Store Connect calls `1.0.2 (9)`, so a report carrying
+ * only that names the wrong build. `platform.ios.buildNumber` is read out of
+ * the embedded `Info.plist` and never changes for a given binary, which is
+ * exactly the identity a crash report has to carry.
  */
 function version(): string | null {
   if (appVersion !== undefined) return appVersion;
-  appVersion = null;
+
+  let resolved: string | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Constants = require("expo-constants");
-    const config = (Constants?.default ?? Constants)?.expoConfig;
-    if (typeof config?.version === "string") appVersion = config.version;
+    const required = require("expo-constants");
+    const constants = required?.default ?? required;
+    const name = constants?.expoConfig?.version;
+    const build =
+      constants?.platform?.ios?.buildNumber ??
+      constants?.platform?.android?.versionCode;
+    const parts = [
+      typeof name === "string" && name.length > 0 ? name : null,
+      build === null || build === undefined ? null : `(${String(build)})`,
+    ].filter((part): part is string => part !== null);
+    if (parts.length > 0) resolved = parts.join(" ");
   } catch {
     // Leave it null.
   }
-  return appVersion;
+
+  appVersion = resolved;
+  return resolved;
 }
 
 /* ------------------------------------------------------------------ *
