@@ -165,6 +165,9 @@ something written down.
   is called lazily and guarded.
 - `npx expo export --platform android` succeeds — it catches a missing module
   or a bad asset, though not a runtime throw.
+- `bun run bundle:verify` succeeds. Bundling alone is not enough: the store
+  build then compiles that bundle to Hermes bytecode, and that compile has its
+  own way of failing (§9).
 - Environment variables actually baked into the build: `EXPO_PUBLIC_SUPABASE_URL`,
   `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and the RevenueCat platform key. See
   `.env.example`.
@@ -408,3 +411,100 @@ build carries both. So:
    log.
 3. Bisect by bundle, not by source. `bun run bundle:ios` and grep the output
    for what is actually in it.
+
+## 9. The build that produced no app at all (1 Aug 2026)
+
+The archive after §8 shipped never reached a device. It failed in Xcode, in the
+step *after* Metro:
+
+```
+hermesc -emit-binary -max-diagnostic-width=80 -O -out .../main.jsbundle ...
+main.jsbundle:3747:5: error: private properties are not supported
+    #x;
+    ^~~
+    (and #y, #width, #height, and every `this.#…` that reads them)
+```
+
+This is not a launch crash — it is the absence of a build. Worth recording
+here anyway, because it is the same failure mode as §5b in a different costume:
+**something outside the source tree decided what the launch path contains, and
+nothing in CI looked at the artefact.**
+
+### 9a. What the syntax was
+
+`#x #y #width #height` with getters is React Native's own
+`react-native/src/private/webapis/geometry/DOMRectReadOnly.js` — the `DOMRect`
+polyfill RN installs at startup. No file in this repository uses private class
+fields. Nothing anyone wrote caused this.
+
+### 9b. Why it was in the bundle
+
+`babel-preset-expo` decides which modern syntax is lowered to ES5 and which is
+left for Hermes to parse, and it decides that from **its own version**, not
+from the installed React Native:
+
+| preset line | profile | `#private` fields |
+| --- | --- | --- |
+| `54.0.x` (SDK 54) | delegates to `@react-native/babel-preset@0.81.5` | transformed away |
+| `57.0.x` (SDK 56+) | vendored "Hermes v1" config | **left in the bundle** |
+
+`package.json` carried `"babel-preset-expo": "^57.0.5"` while `expo@54.0.35`
+asks for `~54.0.11`. The 57 copy hoisted to the top of `node_modules`, so
+`babel.config.js` resolved it, and it bundled the app for a Hermes that this
+app does not ship. React Native 0.81's `hermesc` (LLVM 8.0.0svn) has no
+private-property support, so it rejected what Babel handed it.
+
+### 9c. Why the same commit built for some people and not others
+
+The two lockfiles disagreed. `bun.lock` resolved the caret to
+`babel-preset-expo@57.0.5`; `package-lock.json` was stale — its root
+`devDependencies` still listed only three packages — and carried `54.0.12` as
+one of `expo`'s transitives. Whether the archive compiled therefore depended on
+which installer ran, with nothing in the diff to review. Same shape as the
+`latest` pin in §5b: **a dependency range is code on the launch path.**
+
+`bun.lock` is the authoritative one — CI installs with
+`bun install --frozen-lockfile`. `package-lock.json` cannot currently be
+regenerated (`npm install --package-lock-only` fails on an unrelated peer
+conflict: `@ai-sdk/react@2.0.221` wants `react ~19.1.2`, the app pins
+`19.1.0`), so treat it as historical, not as a second source of truth.
+
+### 9d. Why CI passed
+
+The `bundle:ios` step added in §8 proves Metro can *bundle* the app. It does
+not prove the bundle can be *compiled*. Hermes parses the output a second time,
+with an older parser than Metro's, and that second parse is where the archive
+died. CI now runs the same compile, with the `hermesc` React Native ships for
+the host platform — so the checker upgrades with React Native:
+
+```
+bun run bundle:verify     # = bundle:ios && bundle:hermes
+```
+
+`scripts/hermes-compile.js` is a thin wrapper: same flags as the Xcode build
+phase, non-zero exit and hermesc's own diagnostics on failure.
+
+**One trap when testing this locally:** Metro's transform cache survives a
+dependency change, so a rebundle after swapping the Babel preset can reproduce
+the *old* output exactly. Clear it before believing a result —
+`rm -rf "${TMPDIR:-/tmp}"/metro-cache "${TMPDIR:-/tmp}"/metro-file-map-*`.
+
+### 9e. The fix
+
+- `babel-preset-expo` pinned to `~54.0.12` (the SDK 54 line, i.e. what
+  `expo@54` asks for). `babel.config.js` carries the reason at the top.
+- `jest-expo` moved from `^57.0.3` to `~54.0.17` — the same SDK-major drift.
+  Its 57 line peer-depends on `@react-native/jest-preset@^0.86.2` → `react
+  ^19.2.3` against this app's `19.1.0`, which is what had been blocking
+  `package-lock.json` from regenerating. All 278 tests still pass.
+- `bundle:hermes` / `bundle:verify` scripts, and a `hermesc` step in CI after
+  the bundle step.
+
+Result: 5.19 MB of JS compiles to 7.43 MB of bytecode, 0 errors. The bundle is
+~250 KB larger than before, which is the private fields being lowered — that
+growth *is* the fix.
+
+**The rule this adds:** an Expo/React Native/Babel version bump is a Hermes
+compatibility change. Anything that touches `babel.config.js`,
+`metro.config.js`, `babel-preset-expo`, or the React Native version gets
+`bun run bundle:verify` before it is merged.

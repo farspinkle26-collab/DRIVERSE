@@ -102,6 +102,20 @@ against the bundle, not the source**: `bun run bundle:ios` and grep the
 output. CI now typechecks and bundles on every push, because a root layout
 that did not parse had reached `main` and four merges passed over it.
 
+The next archive then failed before producing an app at all — `hermesc`
+rejected the bundle with *"private properties are not supported"*
+(§9). Bundling is not compiling: Xcode parses Metro's output a second time,
+with an older parser, and `babel-preset-expo` chooses what to leave for that
+parser **from its own version, not from the installed React Native**. A
+`^57.0.5` caret in `devDependencies` (SDK 56+, "Hermes v1") hoisted over the
+`~54.0.11` this SDK 54 app needs and shipped `#private` class fields into a
+bundle whose Hermes has no support for them. It is pinned to the SDK 54 line
+now, with the reason at the top of `babel.config.js`; `jest-expo` was drifting
+the same way and is aligned too. **`bun run bundle:verify` — bundle *and*
+`hermesc` — is the check**, in CI and before any Expo/RN/Babel version bump,
+and `bun.lock` is the authoritative lockfile (the two lockfiles disagreeing is
+what made the same commit build for some installs and not others).
+
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive
 Hub); a `saved_routes` row is written only if they open the save sheet and
