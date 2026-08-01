@@ -33,6 +33,16 @@ jobs:
         working-directory: expo
         run: bun run typecheck
 
+      # `expo-web-browser` sat at `^56.0.5` in this SDK 54 app and killed the
+      # app on open, on both platforms, for three release cycles: the JS half
+      # looked up a native module autolinking never built, and the lookup
+      # throws. It is the same shape as the `babel-preset-expo@^57` archive
+      # failure (§9) — one wrong caret, invisible to types, lint and the
+      # bundler alike. This step is that check.
+      - name: Check package versions against the Expo SDK
+        working-directory: expo
+        run: bun run check:versions
+
       - name: Bundle for iOS (release)
         working-directory: expo
         run: bun run bundle:ios
@@ -45,6 +55,16 @@ jobs:
       - name: Compile the bundle with Hermes (hermesc)
         working-directory: expo
         run: bun run bundle:hermes
+
+      # The launch-safety rule (§1/§2) is "no native call at module scope on
+      # anything reachable from app/_layout.tsx". It was written down and
+      # broken anyway, twice, because it cannot be checked by reading the
+      # source — once the offending code was injected by a Babel transformer
+      # (§8), once it was a single line inside node_modules (§10). This walks
+      # the built bundle's own module graph instead.
+      - name: Check the launch path for module-scope native calls
+        working-directory: expo
+        run: bun run check:launch-path
 
       - name: Run unit & integration tests
         working-directory: expo

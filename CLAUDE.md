@@ -116,6 +116,30 @@ the same way and is aligned too. **`bun run bundle:verify` — bundle *and*
 and `bun.lock` is the authoritative lockfile (the two lockfiles disagreeing is
 what made the same commit build for some installs and not others).
 
+The fifth failure was the first to hit **both stores at once** — a TestFlight
+crash and a Play Console rejection for the same build — and two platforms
+failing identically points at the one thing they share: the JS bundle
+(§10). `expo-web-browser` was pinned at `^56.0.5` in this SDK 54 app, 41
+majors past the `~15.0.11` the SDK ships, and that package's whole entry is
+`export default requireNativeModule('ExpoWebBrowser')` — which **throws** when
+the native half autolinking built does not match (the `requireOptional…`
+variant returns null instead; that one word is why `expo-apple-authentication`,
+off-SDK on the same import line, was survivable). Nothing in this repo was
+wrong: `lib/socialAuth.ts` had already deferred every call it makes, but
+`import * as WebBrowser from "expo-web-browser"` runs the throw regardless.
+**A static import of a package that reaches a native module at module scope
+hands that decision to the package** — so the import is lazy now, and pinning
+the version is only defence in depth. Worth knowing when reading §7: this did
+*not* die during bundle evaluation. `expo-router` loads routes through
+`require.context` lazy getters, so `app/_layout.tsx` is required during the
+first render — but `AppErrorBoundary` is exported *by* that file, so a throw
+loading it still lands with nothing to catch it and no crash report. Two new
+checks, both in CI and in `bundle:verify`: `bun run check:versions` (every
+SDK-versioned package agrees with `expo@54` — this would have caught §9 too)
+and `bun run check:launch-path` (parses the built bundle, walks eager edges
+only, from both the entry points *and* the root layout behind the route
+context, and fails on any unreviewed `requireNativeModule`).
+
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive
 Hub); a `saved_routes` row is written only if they open the save sheet and

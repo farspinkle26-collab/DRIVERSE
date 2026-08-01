@@ -26,6 +26,7 @@ import AppErrorBoundary, { ErrorScreen } from "@/components/AppErrorBoundary";
 import CrashReportScreen from "@/components/CrashReportScreen";
 import { useAppFonts } from "@/hooks/useAppFonts";
 import { shouldSurfaceOnLaunch, type CrashReport } from "@/lib/crashReport";
+import { logEnv } from "@/lib/envCheck";
 import {
   beginLaunch,
   clearCrashReport,
@@ -132,6 +133,9 @@ function RootLayoutContent() {
   // see `lib/crashReporter.ts` for what this can and cannot see.
   useEffect(() => {
     installCrashReporter();
+    // Immediately after the reporter, so a build missing its keys says so in
+    // the same console the crash report screen hands over. Cannot throw.
+    logEnv();
     let cancelled = false;
     beginLaunch()
       .then(({ previousLaunchFailed, report }) => {

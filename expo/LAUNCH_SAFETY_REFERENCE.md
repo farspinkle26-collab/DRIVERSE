@@ -508,3 +508,156 @@ growth *is* the fix.
 compatibility change. Anything that touches `babel.config.js`,
 `metro.config.js`, `babel-preset-expo`, or the React Native version gets
 `bun run bundle:verify` before it is merged.
+
+## 10. The crash that was in `node_modules` (1 Aug 2026, iOS + Android)
+
+The fourth fix shipped and the app still died on open — this time on **both**
+stores at once. TestFlight took a crash report; Google Play rejected the build
+outright under *Fungsi Rusak* ("Aplikasi Anda error setelah dibuka").
+
+Two platforms failing identically is the diagnosis, not a coincidence. iOS and
+Android share exactly one thing: the JavaScript bundle. §8's answer (an
+Objective-C exception in a TurboModule) is platform-specific and could not
+produce this; a config difference could not either, because §3's fixes had
+already made every missing key non-fatal. What is left is shared JS that runs
+before anything can catch it.
+
+### 10a. What it was
+
+`expo/package.json` declared:
+
+```json
+"expo-web-browser": "^56.0.5",
+```
+
+in an **Expo SDK 54** app. SDK 54 ships `~15.0.11`
+(`node_modules/expo/bundledNativeModules.json` is the SDK's own statement of
+this). The installed package was 41 majors ahead — its own `devDependencies`
+pin `"expo": "56.0.3"`. It entered in `38ebc0a "Add the Platinum subscription
+tier"` and never matched the SDK at any point.
+
+The entire package's JS entry is two lines:
+
+```js
+// node_modules/expo-web-browser/build/ExpoWebBrowser.js
+import { requireNativeModule } from 'expo-modules-core';
+export default requireNativeModule('ExpoWebBrowser');
+```
+
+`requireNativeModule` **throws** when the native module is not registered. Its
+sibling `requireOptionalNativeModule` returns `null` instead — that one word is
+the whole difference, and it is why `expo-apple-authentication`, off-SDK on the
+same import line in the same file, was survivable and this was not.
+
+The JS half was 41 majors ahead of the native half autolinking actually built,
+so the lookup found nothing and threw.
+
+### 10b. Why three passes over the launch path missed it
+
+`lib/socialAuth.ts` opens with *"LAUNCH SAFETY — nothing in this module may run
+at import time"*, and a previous pass had correctly deferred both offenders it
+named: `WebBrowser.maybeCompleteAuthSession()` and `Linking.createURL()`. The
+file was, on its own terms, clean.
+
+The hazard was the import statement itself:
+
+```ts
+import * as WebBrowser from "expo-web-browser";
+```
+
+Deferring every call in our own source achieves nothing when importing the
+package runs the throw. **A static `import` of a package that reaches a native
+module at module scope hands that decision to the package.** This is the same
+lesson as §8 in a different disguise: the offending line was never in this
+repository, so no amount of reading this repository could find it.
+
+The chain, read off the built bundle rather than the source:
+
+```
+app/_layout.tsx → hooks/useAuthStore.ts → lib/socialAuth.ts
+  → expo-web-browser/build/WebBrowser.js
+  → expo-web-browser/build/ExpoWebBrowser.js   ← throws
+```
+
+### 10c. When it actually ran — a correction worth keeping
+
+The obvious story is "it died during bundle evaluation". That is **wrong**, and
+the bundle says so. Only ~550 of this bundle's 3,231 modules evaluate while
+Hermes loads it, and none of the app's own code is among them: `expo-router`
+reaches the routes through Metro's `require.context`, which compiles to lazy
+getters —
+
+```js
+{"./_layout.tsx":{enumerable:!0,get:()=>r(d[6])}, ...}
+```
+
+— so `app/_layout.tsx` and its whole import closure are pulled in later, when
+`ExpoRoot` reads that key during the **first render**.
+
+It is fatal anyway, and for a reason worth writing down: `AppErrorBoundary` is
+exported *by* the root layout, and so is the router's own `ErrorBoundary`. A
+throw while that module is being required happens before either exists, in the
+one file that was supposed to provide them. Nothing catches it, and
+`installCrashReporter()` — a mount effect inside the same module — never runs,
+so the black box stays empty. That is §7's "never reached mount" signature
+produced *without* a bundle-evaluation death, which is why §7's flowchart
+pointed at the import graph and the import graph looked fine.
+
+### 10d. The fix
+
+- `expo-web-browser` pinned to `~15.0.11`; `expo-apple-authentication` to
+  `~8.0.8`, `@expo/vector-icons` to `^15.0.3`, `eslint-config-expo` to
+  `~10.0.0` — the same SDK-major drift, found by the new check.
+- The import in `lib/socialAuth.ts` is now **lazy**: `import type` above,
+  `require("expo-web-browser")` inside `webBrowser()`, resolved on the first
+  sign-in attempt. Note this is defence in depth, not belt-and-braces — v15
+  looks the module up at module scope exactly as v56 does, so the correct
+  version only makes the lookup *succeed today*. The rule is that nothing on
+  the launch path reaches a native module at module scope at all.
+- `package-lock.json` deleted. It resolved `expo-web-browser@56.0.6` while
+  `bun.lock` resolved `56.0.5`; CI installs with `bun install --frozen-lockfile`
+  and §9 already named two disagreeing lockfiles as the reason one commit built
+  differently for different people. `bun.lock` is the lockfile.
+- `lib/envCheck.ts` logs which `EXPO_PUBLIC_*` variables were inlined, from the
+  mount effect right after the crash reporter. It reports; it never gates.
+
+### 10e. The two checks that would have caught it
+
+Neither existing check could: it is not a type error, not a lint error, and the
+bundle builds and compiles cleanly, because the failure is a native lookup at
+runtime.
+
+```
+bun run check:versions      # every SDK-versioned package agrees with expo@54
+bun run check:launch-path   # no unreviewed native lookup in the launch window
+```
+
+Both run in CI on every push and inside `bun run bundle:verify`.
+
+`check-sdk-versions.js` compares `package.json` against the SDK's own
+`bundledNativeModules.json`. It is the cheap one, it catches this class outright
+— and it would have caught §9's `babel-preset-expo@^57` too.
+
+`check-launch-path.js` is the general guard: it parses the built bundle, walks
+the module graph, and lists every `requireNativeModule` the launch window can
+reach, failing on anything not on a reviewed allowlist. Two things make it
+honest, and both were wrong in the first draft:
+
+1. **Two roots, not one.** Seeding only from Metro's `__r(...)` entry points
+   covers ~550 modules and no app code — it passes a bundle with this exact
+   crash still in it. The walk is also seeded from the root layout found behind
+   the route context's `"./_layout.tsx"` getter, which brings it to ~2,670.
+2. **Eager edges, not static ones.** Metro's `__d(f, id, [deps])` dependency
+   array lists every `require()` in a module, including ones inside functions
+   that never run at startup; walking it marks essentially the whole bundle as
+   reachable and proves nothing. Only a `r(d[N])` at the factory's own top level
+   is evaluated on require, so the script parses each factory and asks the AST —
+   which is precisely the difference between the broken and fixed forms of
+   `lib/socialAuth.ts`.
+
+Verified both ways before being trusted: with the static import restored the
+check fails naming `ExpoWebBrowser`; with the lazy import it passes.
+
+**The rule this adds:** a dependency whose major does not match the Expo SDK is
+a launch-safety bug, not a housekeeping chore — and the launch path is defined
+by the bundle, never by the imports you can see.
