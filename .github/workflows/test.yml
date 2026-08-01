@@ -25,6 +25,18 @@ jobs:
         working-directory: expo
         run: bun install --frozen-lockfile
 
+      # A root layout that does not parse reached main and sat there through
+      # four merges: nothing in CI compiled the app, and no test imports
+      # `app/_layout.tsx`, so 278 green tests said nothing about whether a
+      # bundle could be produced at all. These two steps are that check.
+      - name: Typecheck
+        working-directory: expo
+        run: bun run typecheck
+
+      - name: Bundle for iOS (release)
+        working-directory: expo
+        run: bun run bundle:ios
+
       - name: Run unit & integration tests
         working-directory: expo
         run: bunx jest --ci --coverage

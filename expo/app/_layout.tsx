@@ -220,6 +220,7 @@ function RootLayoutContent() {
                                         <RootLayoutNav />
                                         <NotificationBanner />
                                         <LaunchComplete />
+                                      </CosmeticsProvider>
                                     </SavedPlacesProvider>
                                   </ActiveCarProvider>
                                 </RoutesProvider>

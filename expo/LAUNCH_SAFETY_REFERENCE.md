@@ -169,6 +169,48 @@ something written down.
   `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and the RevenueCat platform key. See
   `.env.example`.
 
+## 5b. The build injects code this repository does not contain
+
+Read §5 again and note what it cannot catch. Every check in it is a check on
+the source tree. On 1 Aug 2026 an iOS crash log finally showed the launch path
+containing code that is in no file here (§8), and the mechanism is worth
+stating on its own because it defeats every other rule in this document.
+
+`metro.config.js` wraps Expo's Metro config in `withRorkMetro`. That helper
+does two unrelated things:
+
+- **A resolver half**, which is wanted: web polyfills for `expo-haptics`,
+  `expo-secure-store`, `react-native-maps`, `RefreshControl` and `Alert`, plus
+  an `assert` shim.
+- **A transformer half**, which replaced Metro's `babelTransformerPath` with a
+  wrapper that string-rewrites `app/_layout.tsx` at build time. It regex-matched
+  `export default function <Name>`, demoted that function, and appended a new
+  default export wrapping it in `RorkAnalyticsProvider` — which loads
+  `posthog-react-native`, whose optional integrations `require()`
+  `expo-file-system`, `expo-application`, `expo-device`, `expo-localization`
+  and AsyncStorage at module scope.
+
+So the shipped bundle mounted a third-party analytics provider **above
+`AppErrorBoundary`** and evaluated a native-module-touching SDK **inside the
+bundle-evaluation window** — the two things §2 and §4 exist to prevent — on
+every launch, for every driver. §4's claim that "there is nothing above it left
+to fail" was false in every build ever shipped.
+
+Worse, `@rork-ai/toolkit-sdk` was pinned to `latest`. The code running during
+launch could differ between two builds of the same commit, with no diff to
+review. **This is the direct answer to "we fixed it and it still crashes": the
+launch path was read three times and the interesting code was never in it.**
+
+The transformer half is now switched off in `metro.config.js` (the resolver
+half is kept), and the SDK version is pinned. Confirmed against a release
+bundle: `expo export:embed --platform ios --dev false` went from 3572 modules /
+6.69 MB to 3199 modules / 5.19 MB, with `RorkAnalyticsProvider`,
+`captureAppLifecycleEvents` and the PostHog relay host all absent.
+
+**The rule this adds:** verifying the launch path means verifying the *bundle*,
+not the source. `bun run bundle:ios` and grep the output — that is the only
+artefact that reflects what actually runs.
+
 ## 6. Still unverified
 
 Neither §3b nor the boundary has been confirmed on a physical Android device
@@ -267,3 +309,102 @@ Driveverse → Storage → Clear data) and relaunch. If it starts, it is a
 migration problem, and the fix belongs in whichever hook reads that key —
 tolerate the old shape, don't throw on it. §3c covers the one instance of this
 that has been found and fixed.
+
+## 8. The first real crash log (1 Aug 2026, iOS)
+
+Three "launch crash" fixes had shipped before anyone saw a stack trace. A
+TestFlight crash report finally arrived — build **1.0.2 (9)**, iPad (8th gen,
+`iPad11,6`), iPadOS 26.2, arm64e. It is the first hard evidence this file has
+ever had, and it contradicts part of what §2–§3 assumed. Read it before
+re-reading the import graph again.
+
+### 8a. What the log says
+
+```
+Launch Time:  08:03:50.3110
+Date/Time:    08:03:50.6265          →  died 315 ms after process start
+Exception:    EXC_BAD_ACCESS (SIGSEGV)
+Subtype:      KERN_INVALID_ADDRESS at 0x0a31323a3538303e
+Triggered by: Thread 14
+```
+
+**Thread 14 (the JS thread)** crashed inside Hermes' garbage collector:
+
+```
+hermes::vm::GCScope::_newChunkAndPHV(...)
+hermes::vm::regExpPrototypeSymbolReplace(...)      RegExp.cpp:1759
+hermes::vm::stringPrototypeReplace(...)            String.cpp:1980
+… RuntimeScheduler_Modern::runEventLoop → RCTJSThreadManager runRunLoop
+```
+
+The faulting address is the giveaway. `0x0a31323a3538303e` is not a pointer,
+it is **ASCII**: little-endian, those bytes read `>085:21\n`, and the register
+it came from reads `6085:21\n` — the tail of a JavaScript stack-trace line
+(`…:6085:21`). A pointer inside Hermes' handle machinery had been overwritten
+with JS stack text. That is heap corruption, not a null dereference.
+
+**Thread 10** says where the corruption came from:
+
+```
+ObjCTurboModule::performVoidMethodInvocation(...)  RCTTurboModule.mm:438
+convertNSExceptionToJSError(...)                   RCTTurboModule.mm:222
+convertNSArrayToJSIArray(...)                      RCTTurboModule.mm:76
+-[_NSCallStackArray objectAtIndex:] → backtrace_symbols → dladdr
+… _dispatch_lane_serial_drain → _dispatch_workloop_worker_thread
+```
+
+Read against React Native 0.81.5's source, that is unambiguous. A native
+module method that returns `void` raised an Objective-C exception. RN caught
+it and called `convertNSExceptionToJSError`, which **creates JSI strings,
+arrays and an `Error` object in the Hermes runtime** — on the module's own
+serial dispatch queue, while thread 14 was executing JavaScript. Two threads
+mutating one Hermes heap; thread 14 died on the wreckage a moment later. The
+`Error` it constructs captures a JS stack, which is precisely the text found
+sitting in the corrupted pointer.
+
+### 8b. What that rules in and out
+
+- **Ruled out: a throw during bundle evaluation (§1).** The JS thread was
+  running the RuntimeScheduler event loop, not `runBytecode`. The bundle had
+  finished evaluating, React had mounted, and effects were calling native
+  modules. Three rounds of re-reading module scope were looking in the wrong
+  window. A module-scope scan of all 43 modules reachable from
+  `app/_layout.tsx` now comes back clean.
+- **Ruled in: a native module raising during the mount-effect burst.** At
+  315 ms the loading screen is still up (`LoadingScreen` holds it for 2.5 s),
+  so the provider stack has *not* mounted. The only things running are the
+  root layout's own effects, `useFonts`, the splash hide, the Supabase client's
+  first AsyncStorage read — and, as it turned out, an injected analytics
+  provider that is in no file in this repository (§5b).
+- **Not identified: which module raised.** The log shows RN *handling* the
+  exception, never raising it. Both `@catch` frames are RN infrastructure, and
+  the raising frames are gone by then. `RCTAssert` is compiled out in release
+  and `RCTFatal` swallows its own `@throw`, so it was not RN core: it was a
+  module's own code, or Foundation raising underneath it (a nil insert, a
+  range, an invalid argument).
+
+### 8c. Why this is a React Native bug too
+
+`performVoidMethodInvocation` calling into `jsi::Runtime` from a module's
+method queue is unsafe by construction — it is only reachable when a native
+method raises, which is why it survives. Nothing in this app can fix that. All
+we can do is stop native code from raising during launch, which is what §5b
+does by removing the third-party SDK that had no business being there.
+
+### 8d. If it happens again
+
+The instrumentation from §7 was written *after* build 9 and is not in it —
+which is why this crash left an Apple crash log and no report screen. The next
+build carries both. So:
+
+1. Reopen the app and read the screen (§7a). A JavaScript error now names
+   itself, and the report identifies the binary properly: it carries the
+   **native** build number (`1.0.2 (9)`), not `expoConfig.version`, which still
+   says `1.0.0` in `app.json` for every store build.
+2. If there is no report screen but there is another Apple crash log, compare
+   it to 8a. A `hermes` + `GCScope` fault with `convertNSExceptionToJSError`
+   on another thread is this same shape: a native module raised, and the
+   module has to be found by elimination from the launch window, not from the
+   log.
+3. Bisect by bundle, not by source. `bun run bundle:ios` and grep the output
+   for what is actually in it.

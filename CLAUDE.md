@@ -84,6 +84,24 @@ persisted AsyncStorage state a fresh install does not — so both gates now have
 a timeout and a `catch`. `expo/LAUNCH_SAFETY_REFERENCE.md` §7 is the diagnosis
 procedure; start there rather than at the rule.
 
+The fourth report was the first with an **actual crash log**, and it changed
+the answer (`LAUNCH_SAFETY_REFERENCE.md` §8). The app was not dying during
+bundle evaluation at all: it had mounted, and a native module raised an
+Objective-C exception in a `void` TurboModule method 315 ms in. React Native
+converts that exception to a JS error *on the module's own dispatch queue*,
+which corrupts the Hermes heap and kills the JS thread — so the visible crash
+(a `GCScope` segfault inside `String.replace`) is downstream of the real
+event. The reason three passes over the launch path found nothing: **the
+launch path contained code that is not in this repository.** `metro.config.js`
+wrapped Metro in `withRorkMetro`, whose Babel transformer string-rewrote
+`app/_layout.tsx` at build time to mount a PostHog analytics provider *above*
+`AppErrorBoundary`, out of a dependency pinned to `latest` (§5b). That
+transformer is now switched off — its resolver half, which supplies the web
+polyfills, is kept — and the SDK version is pinned. **Verify the launch path
+against the bundle, not the source**: `bun run bundle:ios` and grep the
+output. CI now typechecks and bundles on every push, because a root layout
+that did not parse had reached `main` and four merges passed over it.
+
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive
 Hub); a `saved_routes` row is written only if they open the save sheet and
