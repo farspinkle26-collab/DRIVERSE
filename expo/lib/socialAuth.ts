@@ -18,14 +18,61 @@
  *     expo-constants manifest or its `scheme` is missing. Now built lazily
  *     through `lib/deepLink.ts`, which cannot throw, on the first sign-in
  *     attempt rather than on every launch.
+ *
+ * DEFERRING THE CALL WAS NOT ENOUGH — deferring the IMPORT is the fix.
+ *
+ * Both deferrals above were in place and the app still died on open, on iOS
+ * and Android alike, because the throw was never in this file. The statement
+ *
+ *     import * as WebBrowser from "expo-web-browser";
+ *
+ * is itself the hazard: `expo-web-browser/build/ExpoWebBrowser.js` is one line
+ * of module-scope native lookup —
+ *
+ *     export default requireNativeModule('ExpoWebBrowser');
+ *
+ * — and `requireNativeModule` THROWS when the native module is not registered
+ * (its sibling `requireOptionalNativeModule` returns null instead; that is the
+ * whole difference, and it is why `expo-apple-authentication` below was
+ * survivable and this was not). Importing the module runs that line, so the
+ * process died while Hermes was still evaluating the bundle: before the first
+ * frame, above `AppErrorBoundary`, and before `installCrashReporter()` had
+ * armed — the black screen with no artefact, every time.
+ *
+ * `package.json` had `expo-web-browser@^56.0.5` in an SDK 54 app (SDK 54 ships
+ * `~15.0.11`), so the JS half was 41 majors ahead of the native half that
+ * autolinking actually built. The version is corrected, but a correct version
+ * only makes the lookup succeed today. The rule in LAUNCH_SAFETY_REFERENCE.md
+ * §1/§2 is that nothing on the launch path may reach a native module at module
+ * scope AT ALL, and a static `import` of a package that does hands that
+ * decision to the package. So the import is lazy now: `webBrowser()` resolves
+ * it on the first sign-in attempt, by which point there is a React tree, an
+ * error boundary and a crash reporter to catch anything it does.
+ *
+ * `require` rather than `await import` deliberately — a dynamic import splits
+ * the module out and makes this an async boundary Metro has to serve; a
+ * `require` inside a function body is inert until called and needs no
+ * plumbing. Keep it that way.
  */
 
 import { Platform } from "react-native";
-import * as WebBrowser from "expo-web-browser";
+import type * as WebBrowserTypes from "expo-web-browser";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { createAppLink } from "@/lib/deepLink";
 import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
+
+/**
+ * Resolves `expo-web-browser` on first use rather than at import.
+ *
+ * Type-only above, value here: the types cost nothing at runtime, so the
+ * call sites stay fully checked while the bundle carries no module-scope
+ * reference to the native module.
+ */
+function webBrowser(): typeof WebBrowserTypes {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("expo-web-browser") as typeof WebBrowserTypes;
+}
 
 export type SocialProvider = "google" | "apple";
 
@@ -52,7 +99,7 @@ function getRedirectTo(): string {
 function completeAnyPendingAuthSession(): void {
   if (Platform.OS !== "web") return;
   try {
-    WebBrowser.maybeCompleteAuthSession();
+    webBrowser().maybeCompleteAuthSession();
   } catch (err) {
     console.warn("[Auth] maybeCompleteAuthSession failed:", err);
   }
@@ -113,7 +160,7 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
     return null;
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const result = await webBrowser().openAuthSessionAsync(data.url, redirectTo);
 
   if (result.type !== "success" || !result.url) {
     return null;
