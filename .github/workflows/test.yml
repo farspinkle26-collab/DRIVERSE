@@ -37,6 +37,15 @@ jobs:
         working-directory: expo
         run: bun run bundle:ios
 
+      # Metro bundling is only half of what the store build does. Xcode then
+      # compiles that bundle to Hermes bytecode, with a parser that is older
+      # than Metro's and rejects syntax Babel may have left in — which is how a
+      # bundle that built here still failed the archive with "private
+      # properties are not supported". This step is that second compile.
+      - name: Compile the bundle with Hermes (hermesc)
+        working-directory: expo
+        run: bun run bundle:hermes
+
       - name: Run unit & integration tests
         working-directory: expo
         run: bunx jest --ci --coverage
