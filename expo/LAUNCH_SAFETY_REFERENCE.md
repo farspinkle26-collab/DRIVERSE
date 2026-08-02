@@ -661,3 +661,188 @@ check fails naming `ExpoWebBrowser`; with the lazy import it passes.
 **The rule this adds:** a dependency whose major does not match the Expo SDK is
 a launch-safety bug, not a housekeeping chore — and the launch path is defined
 by the bundle, never by the imports you can see.
+
+## 11. The crash logs that were already fixed, and what auditing them found (2 Aug 2026)
+
+Four iOS `.ips` files came in for analysis. Read them before reading anything
+else in this section, because the first finding is that **they are not new
+evidence** — and identifying that correctly is most of the work.
+
+### 11a. Dating a crash log before diagnosing it
+
+```
+app_version   1.0.1          build_version 3
+timestamp     2026-07-28 07:12:09 – 07:12:30 -0700
+device        iPhone18,2, iPhone OS 26.6      (one device, four launches)
+incidents     167E02FC / D8C37B82 / 5F9FA4AA / 56F3FAEA
+```
+
+Process lifetimes, from `procStartAbsTime`/`procExitAbsTime` at the arm64 24 MHz
+timebase: **274 ms, 113 ms, 109 ms, 113 ms**. Twenty-one seconds apart on one
+phone — a driver tapping the icon, watching it die, and tapping again.
+
+Three of the four are `EXC_CRASH (SIGABRT)` on
+`com.meta.react.turbomodulemanager.queue`:
+
+```
+ObjCTurboModule::performVoidMethodInvocation → objc_exception_rethrow
+  → __cxa_rethrow → _objc_terminate → abort
+```
+
+The fourth (`D8C37B82`) is the same event photographed one frame later: the
+TurboModule queue is inside `convertNSExceptionToJSError` →
+`convertNSArrayToJSIArray` → `-[_NSCallStackArray objectAtIndex:]` →
+`backtrace_symbols` → `dladdr`, while the JS thread segfaults independently in
+`directRegExpExec` → `JSArray::createNoAllocPropStorage` under
+`String.prototype.match`. That is §8a's mechanism exactly — RN building a JSI
+`Error` on the module's own dispatch queue, corrupting the Hermes heap that
+thread 11 is executing on. The `hermes` and `arrayPrototypeMap`-shaped frames
+are the *wreckage*, not the fault.
+
+Now compare that against §3a, written on 28 July:
+
+> App Store review rejected the build under Guideline 2.1(a); all four crash
+> reports aborted in `ObjCTurboModule::performVoidMethodInvocation →
+> objc_exception_rethrow`, **110–270 ms** after process start.
+
+Same four reports. Commit `79fc286`, dated 2026-07-28 23:21 UTC — sixteen hours
+after these logs were captured — is the fix that was written *from* them:
+`Notifications.setNotificationHandler()` at module scope in
+`hooks/useNotificationStore.ts`, a void TurboModule method raising an
+Objective-C exception during bundle evaluation, inside a `try/catch` that
+cannot catch it. Build 1.0.1 (3) predates that commit and every fix in §5b, §9
+and §10.
+
+**The rule this adds:** read `bundleInfo` and `captureTime` out of an `.ips`
+before reading its stack. A crash log is evidence about *one build*, and this
+project has shipped five since. Re-diagnosing a fixed crash costs a release
+cycle exactly as surely as missing a live one — and had the audit stopped at
+"it's already fixed", §11b would not have been found either.
+
+### 11b. The guard could only see half the dependency tree
+
+`check-launch-path.js` (§10e) walks the built bundle for native-module lookups
+in the launch window. It policed one spelling:
+
+```js
+const THROWING = /(?<!Optional)requireNativeModule\)?\s*\(\s*['"]([A-Za-z0-9_]+)['"]/g;
+```
+
+That is **expo-modules-core's** lookup. React Native's own is
+`TurboModuleRegistry.getEnforcing("X")`, which throws identically — its
+non-throwing sibling is `TurboModuleRegistry.get()` — and it is what every
+package *outside* the Expo SDK uses. Running the walk with `getEnforcing` added
+found 21 lookups where the shipped check found 16, and among the five new ones:
+
+```
+RNGestureHandlerModule  (bundle module 2964, via TurboModuleRegistry.getEnforcing)
+```
+
+`react-native-gesture-handler`, reached by `GestureHandlerRootView` — imported
+by `app/_layout.tsx` itself, which is as high up the launch path as a lookup can
+get. A version bump that put its JS half ahead of the native half autolinking
+builds would have thrown at module scope, above `AppErrorBoundary`, before
+`installCrashReporter()`, with no report screen and no artefact: §10 again, in
+the one package the guard could not see. The other four (`SourceCode`,
+`UIManager`, `PlatformConstants`, `DeviceInfo`) are React Native core and ship
+inside React Native itself.
+
+Nothing was broken. The *guard* was, and it was broken in exactly the half of
+the tree it existed to cover.
+
+Both spellings are policed now, the failure output names which one it found, and
+the check was verified in both directions as §10e requires: with
+`RNGestureHandlerModule` removed from `ALLOWED` it fails naming it and the
+mechanism; restored, it passes.
+
+### 11c. …and only one platform
+
+The same guard had a second blind spot, found by building the Android bundle —
+which nothing in CI had ever done. `bundle:ios` was the only bundle step, so
+`check:launch-path` and `bundle:hermes` both only ever saw iOS.
+
+**The two bundles are not the same code.** Metro resolves `Platform.OS`
+branches at build time, so each platform gets its own module graph. Running the
+check against Android turned up two lookups in the launch window that appear in
+no iOS bundle at all:
+
+```
+ExpoNotificationChannelManager       (android module 3135, via requireNativeModule)
+ExpoNotificationChannelGroupManager  (android module 3141, via requireNativeModule)
+```
+
+Notification channels are an Android concept, so expo-notifications reaches for
+them behind a platform branch. Both are safe — expo-notifications is on the SDK
+54 line and autolinking builds them — but *safe* was never established, because
+nothing looked. Android is the platform that took the Play Console rejection in
+§10, and it was the unbundled one.
+
+`check:launch-path` now takes bundle paths as arguments and walks every one
+against a single shared allowlist; `bundle:verify` and CI build and Hermes-
+compile both platforms. One consequence worth knowing: the "allowlisted but not
+found" note is only meaningful when every platform bundle was checked — an
+Android-only entry looks pruneable if the check ran against iOS alone.
+
+**The rule this adds:** a guard that reads the built artefact has to read
+*every* artefact that ships. "Verify the bundle, not the source" (§5b) was
+right and incomplete — it is the bundle**s**.
+
+### 11d. What `check:versions` never claimed to cover
+
+`bundledNativeModules.json` only lists packages the Expo SDK has an opinion
+about. Everything else hits `if (!expected) continue` and is skipped in
+silence, while the success line reads "every SDK-versioned package agrees with
+expo@54" — true, and much narrower than it sounds. Three native packages sat
+outside it:
+
+| package | declared | installed |
+| --- | --- | --- |
+| `react-native-purchases` | `^10.4.4` | 10.4.4 |
+| `react-native-purchases-ui` | `^10.4.4` | 10.4.4 |
+| `react-native-share` | `^12.2.0` | **12.3.1** |
+
+`react-native-share` had already drifted a minor past its declared range. A
+caret on a native package means `bun install` can move the JS half with no diff
+to review, held still only by `bun.lock` — which is §5b's `latest` pin and §9's
+two-disagreeing-lockfiles in a quieter costume.
+
+All three are pinned exactly now (`bun install` reports no package changes;
+`--frozen-lockfile` still passes), and `check:versions` prints what it cannot
+vouch for instead of implying it checked everything. That note is deliberately
+**not** a failure: there is no manifest to compare these against, and inventing
+an authority would be guesswork. It is a coverage statement, so the next §10
+starts in the right place.
+
+### 11e. What the audit did not find
+
+Recorded because a clean result is only useful if its scope is written down.
+
+- **Module scope is clean.** No native call and no `throw` at the top level of
+  anything reachable from `app/_layout.tsx`; the only column-0 call
+  initialisers are `Platform.select`, `Math.round` and
+  `Animated.createAnimatedComponent`, all pure JS.
+- **`.map`/`.filter`/`.reduce` on Supabase and API data are guarded.** Every
+  call site either sits behind an `if (data)` or uses `(data ?? [])`. Note that
+  this class could not have produced these crash logs anyway: a `TypeError` on
+  `undefined.map` is a JavaScript throw, which lands in `AppErrorBoundary` and
+  the crash reporter — not a `SIGABRT` on the TurboModule queue.
+- **RevenueCat is off the launch path.** `Purchases.configure()` *is* a void
+  TurboModule method — the §3a shape — but `configurePurchases()` runs from
+  `usePlatinumStore`'s effect, and `PlatinumProvider` mounts only after the
+  2.5 s `LoadingScreen` gate clears, well outside the window. `lib/purchases.ts`
+  additionally resolves the SDK through a defensive `require` that returns
+  `null` rather than throwing.
+- **No background location.** `expo-task-manager` is not a dependency and
+  nothing calls `startLocationUpdatesAsync`; the app has foreground GPS only.
+- **One real leak, fixed.** `app/(tabs)/map.tsx` assigned
+  `Location.watchPositionAsync`'s subscription straight into the variable its
+  cleanup reads. Unmounting while that `await` was in flight left the cleanup
+  with nothing to remove and a BestForNavigation watcher running for the life of
+  the process. The `mounted` guard inside the callback hid it — no `setState`
+  warning is ever produced. It is a battery and retention bug, not a crash.
+
+**Still not covered by anything:** there is no ESLint configuration in the
+repository. `eslint` and `eslint-config-expo` are declared in `package.json`,
+there is no `eslint.config.js` and no `lint` script, and CI does not lint. That
+is a gap, not a crash risk — every failure in this document was invisible to
+lint by construction.

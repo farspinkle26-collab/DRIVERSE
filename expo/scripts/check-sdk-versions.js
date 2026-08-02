@@ -89,10 +89,64 @@ if (expoVersion && presetVersion && major(presetVersion) !== major(expoVersion))
   });
 }
 
+/**
+ * What this check CANNOT vouch for, said out loud.
+ *
+ * `bundledNativeModules.json` only lists packages the Expo SDK has an opinion
+ * about. Everything else is skipped by the `if (!expected) continue` above —
+ * silently, while the success line still reads "every SDK-versioned package
+ * agrees", which is true and much narrower than it sounds. A native package
+ * outside the manifest gets its version from a range in `package.json` and
+ * nothing else, and §5b (`@rork-ai/toolkit-sdk` pinned to `latest`) and §9 (two
+ * lockfiles resolving one caret differently) are both cases of a range on the
+ * launch path deciding what shipped, with no diff to review.
+ *
+ * So this is not a failure — there is no authority to compare against, and
+ * inventing one would be guesswork. It is a coverage statement: these are the
+ * packages whose native halves nothing in CI is checking, so a crash that
+ * smells like §10 should start here.
+ *
+ * "Native" is read off the package itself: a podspec, an Android Gradle
+ * project, or an expo-module config means autolinking builds something for it,
+ * which is what makes a version mismatch fatal rather than cosmetic.
+ */
+const isNativePackage = (name) => {
+  const dir = path.join(root, "node_modules", name);
+  try {
+    if (fs.existsSync(path.join(dir, "expo-module.config.json"))) return true;
+    if (fs.existsSync(path.join(dir, "android", "build.gradle"))) return true;
+    return fs.readdirSync(dir).some((f) => f.endsWith(".podspec"));
+  } catch {
+    return false;
+  }
+};
+
+const uncovered = Object.entries(declared)
+  // `expo` is the reference every other package is compared against, not a
+  // package awaiting comparison.
+  .filter(([name]) => name !== "expo" && !bundled[name] && isNativePackage(name))
+  .map(([name, range]) => ({ name, range, installed: installedVersion(name) }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+function reportUncovered() {
+  if (uncovered.length === 0) return;
+  console.log(
+    `[check-sdk-versions] note — ${uncovered.length} native package(s) are not in the SDK ` +
+      "manifest, so this check cannot vouch for them:"
+  );
+  for (const u of uncovered) {
+    // A caret on a native package lets `bun install` move the JS half without
+    // a diff; the lockfile is what actually holds it still.
+    const drift = u.range.startsWith("^") ? "  (caret — pinned only by bun.lock)" : "";
+    console.log(`    ${u.name}  declares ${u.range}, installed ${u.installed}${drift}`);
+  }
+}
+
 if (problems.length === 0) {
   console.log(
     `[check-sdk-versions] OK — every SDK-versioned package agrees with expo@${expoVersion}.`
   );
+  reportUncovered();
   process.exit(0);
 }
 
@@ -109,10 +163,12 @@ for (const p of problems) {
 }
 console.error(
   "A package whose major is ahead of the SDK ships JS written against a native\n" +
-    "module this app does not build. If it looks that module up at import time\n" +
-    "with `requireNativeModule`, the app dies during bundle evaluation — a black\n" +
-    "screen on open, on both platforms, with no stack trace to read.\n\n" +
+    "module this app does not build. If it looks that module up at import time —\n" +
+    "with `requireNativeModule` or `TurboModuleRegistry.getEnforcing`, both of\n" +
+    "which throw — the app dies during bundle evaluation: a black screen on open,\n" +
+    "on both platforms, with no stack trace to read.\n\n" +
     "Fix by matching the version the SDK ships, then re-run `bun install`.\n" +
     "See LAUNCH_SAFETY_REFERENCE.md §10.\n"
 );
+reportUncovered();
 process.exit(1);
