@@ -138,20 +138,7 @@ checks, both in CI and in `bundle:verify`: `bun run check:versions` (every
 SDK-versioned package agrees with `expo@54` — this would have caught §9 too)
 and `bun run check:launch-path` (parses the built bundle, walks eager edges
 only, from both the entry points *and* the root layout behind the route
-context, and fails on any unreviewed native-module lookup).
-
-§11 is the audit that followed, and it starts with a warning: **date an
-`.ips` before diagnosing it.** Four iOS crash logs turned out to be §3a's own
-evidence — build 1.0.1 (3), captured sixteen hours before the commit that fixed
-them — and a `hermes`/`GCScope` fault with `convertNSExceptionToJSError` on
-another thread is always the *wreckage*, never the fault (§8a). The audit's own
-finding was in the guard rather than the app: `check:launch-path` policed only
-expo-modules-core's `requireNativeModule` and was blind to React Native's
-`TurboModuleRegistry.getEnforcing`, which is what every non-Expo package uses —
-including `react-native-gesture-handler`, reached by `app/_layout.tsx` itself.
-Both spellings are policed now. Likewise `check:versions` can only speak for
-packages in the SDK manifest, so it now prints the native packages it cannot
-vouch for instead of implying it checked them.
+context, and fails on any unreviewed `requireNativeModule`).
 
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive

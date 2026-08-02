@@ -1066,16 +1066,8 @@ export default function MapScreen() {
         // Landmarks for where the driver actually is
         fetchLandmarksAround(coords.latitude, coords.longitude);
 
-        // Watch GPS position for real-time tracking.
-        //
-        // Assigned via a local and re-checked afterwards, not straight into
-        // `sub`: the cleanup below can run while this `await` is still in
-        // flight, and it would then find `sub` null, remove nothing, and let a
-        // BestForNavigation watcher outlive the screen — holding GPS at its
-        // highest accuracy and retaining this closure for the life of the
-        // process. The `mounted` guard inside the callback hides it, because
-        // no `setState` warning is ever produced.
-        const watcher = await Location.watchPositionAsync(
+        // Watch GPS position for real-time tracking
+        sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 3, timeInterval: 1000 },
           (pos) => {
             if (!mounted) return;
@@ -1192,12 +1184,6 @@ export default function MapScreen() {
             }
           }
         );
-
-        if (!mounted) {
-          watcher.remove();
-          return;
-        }
-        sub = watcher;
       } catch {
         if (mounted) {
           setLocError(

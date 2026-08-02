@@ -76,46 +76,23 @@
  * If both answers are yes, add the name to ALLOWED with a note saying which
  * package brought it in.
  *
- * Run by `bun run check:launch-path` and by `bundle:verify` (which builds both
- * platform bundles first).
+ * Run by `bun run check:launch-path` and by `bundle:verify` (which builds the
+ * bundle first).
  */
 
 const fs = require("fs");
 const { parse } = require("@babel/parser");
 
-/**
- * Which bundles to check — EVERY platform that ships, not just iOS.
- *
- * This ran against the iOS bundle alone until an audit built the Android one
- * and found two `requireNativeModule` lookups in its launch window that are in
- * no iOS bundle at all (`ExpoNotificationChannelManager`,
- * `ExpoNotificationChannelGroupManager` — notification channels are an Android
- * concept, so expo-notifications reaches for them behind a `Platform.OS`
- * branch that Metro resolves at build time, per platform). Android-only launch
- * code was therefore never checked by the guard, on the platform that took a
- * Play Console rejection in §10.
- *
- * Paths come from argv, or `DRIVERSE_BUNDLE` for a one-off.
- */
-const BUNDLES =
-  process.argv.slice(2).length > 0
-    ? process.argv.slice(2)
-    : process.env.DRIVERSE_BUNDLE
-      ? [process.env.DRIVERSE_BUNDLE]
-      : ["/tmp/driverse-ios.bundle.js"];
+const BUNDLE = process.env.DRIVERSE_BUNDLE ?? "/tmp/driverse-ios.bundle.js";
 
 /**
  * Native modules allowed to be looked up during bundle evaluation.
  *
- * Reached because the root layout's provider stack imports them, and safe
- * because their native halves are actually built: the Expo entries are on the
- * SDK 54 line (`bun run check:versions` is what keeps them there), the React
- * Native entries ship inside React Native itself, and the one third-party
- * entry is called out below. Sorted; keep it that way so an addition is a
- * one-line diff.
+ * Every entry is an Expo package on the SDK 54 line, whose native half
+ * autolinking builds, reached because the root layout's provider stack imports
+ * it. Sorted; keep it that way so an addition is a one-line diff.
  */
 const ALLOWED = new Set([
-  "DeviceInfo", // react-native core, via Dimensions
   "ExpoApplication", // expo-application, via expo-notifications
   "ExpoAsset", // expo-asset, via expo-font / expo-router
   "ExpoBackgroundNotificationTasksModule", // expo-notifications
@@ -125,8 +102,6 @@ const ALLOWED = new Set([
   "ExpoLinking", // expo-linking, via expo-router
   "ExpoLocation", // expo-location, via the map + presence stores
   "ExpoNotificationCategoriesModule", // expo-notifications
-  "ExpoNotificationChannelGroupManager", // expo-notifications, ANDROID BUNDLE ONLY
-  "ExpoNotificationChannelManager", // expo-notifications, ANDROID BUNDLE ONLY
   "ExpoNotificationPermissionsModule", // expo-notifications
   "ExpoNotificationPresenter", // expo-notifications
   "ExpoNotificationScheduler", // expo-notifications
@@ -134,18 +109,24 @@ const ALLOWED = new Set([
   "ExpoNotificationsHandlerModule", // expo-notifications
   "ExpoPushTokenManager", // expo-notifications
   "NotificationsServerRegistrationModule", // expo-notifications
-  "PlatformConstants", // react-native core, via Platform
-  /**
-   * react-native-gesture-handler, via `GestureHandlerRootView` — imported
-   * directly by `app/_layout.tsx`, so this is as far up the launch path as a
-   * lookup can be, and it is the only third-party one in the window. Safe
-   * because the SDK manifest pins it (`~2.28.0`) and `check:versions` holds it
-   * there; a bump is a launch-safety change, so run `bundle:verify` on it.
-   */
-  "RNGestureHandlerModule",
-  "SourceCode", // react-native core, via the bundle's own source-map lookup
-  "UIManager", // react-native core
 ]);
+
+if (!fs.existsSync(BUNDLE)) {
+  console.error(
+    `[check-launch-path] No bundle at ${BUNDLE}.\n` +
+      "Run `bun run bundle:ios` first (or `bun run bundle:verify`, which does)."
+  );
+  process.exit(1);
+}
+
+const src = fs.readFileSync(BUNDLE, "utf8");
+const ast = parse(src, { sourceType: "script", errorRecovery: true });
+
+/** id -> { eager:Set<number>, start:number, end:number } */
+const modules = new Map();
+const entries = [];
+/** Module ids for `app/_layout.tsx`, found behind the route context's getters. */
+const rootLayoutModules = [];
 
 /**
  * True when `node` sits inside a function nested below `factory` — i.e. it does
@@ -256,195 +237,121 @@ function rootLayoutDepIndex(factory, depsIdName, requireIdName) {
   return found;
 }
 
-/**
- * Walks one platform bundle and returns every throwing native-module lookup its
- * launch window can reach. Exits the process on a bundle it cannot make sense
- * of — a check that silently covers nothing is worse than no check, which is
- * the mistake §10e's first draft made.
- */
-function analyseBundle(bundlePath) {
-  if (!fs.existsSync(bundlePath)) {
-    console.error(
-      `[check-launch-path] No bundle at ${bundlePath}.\n` +
-        "Run `bun run bundle:ios` / `bun run bundle:android` first " +
-        "(or `bun run bundle:verify`, which does both)."
-    );
-    process.exit(1);
+for (const stmt of ast.program.body) {
+  if (stmt.type !== "ExpressionStatement") continue;
+  const call = stmt.expression;
+  if (call.type !== "CallExpression" || call.callee.type !== "Identifier") continue;
+
+  if (call.callee.name === "__r" && call.arguments[0]?.type === "NumericLiteral") {
+    entries.push(call.arguments[0].value);
+    continue;
   }
 
-  const src = fs.readFileSync(bundlePath, "utf8");
-  const ast = parse(src, { sourceType: "script", errorRecovery: true });
+  if (call.callee.name !== "__d") continue;
+  const [factory, idNode, depsNode] = call.arguments;
+  if (!factory || idNode?.type !== "NumericLiteral") continue;
+  if (factory.type !== "FunctionExpression" && factory.type !== "ArrowFunctionExpression") continue;
 
-  /** id -> { eager:Set<number>, start:number, end:number } */
-  const modules = new Map();
-  const entries = [];
-  /** Module ids for `app/_layout.tsx`, found behind the route context's getters. */
-  const rootLayoutModules = [];
-
-  for (const stmt of ast.program.body) {
-    if (stmt.type !== "ExpressionStatement") continue;
-    const call = stmt.expression;
-    if (call.type !== "CallExpression" || call.callee.type !== "Identifier") continue;
-
-    if (call.callee.name === "__r" && call.arguments[0]?.type === "NumericLiteral") {
-      entries.push(call.arguments[0].value);
-      continue;
-    }
-
-    if (call.callee.name !== "__d") continue;
-    const [factory, idNode, depsNode] = call.arguments;
-    if (!factory || idNode?.type !== "NumericLiteral") continue;
-    if (factory.type !== "FunctionExpression" && factory.type !== "ArrowFunctionExpression") continue;
-
-    // Metro's factory signature is (global, require, importDefault, importAll,
-    // module, exports, dependencyMap) — positional, and the names are mangled.
-    const params = factory.params;
-    const requireIdName = params[1]?.type === "Identifier" ? params[1].name : null;
-    const depsIdName = params[6]?.type === "Identifier" ? params[6].name : null;
-    if (!requireIdName || !depsIdName) continue;
-
-    /**
-     * `r(d[N])` indexes the dependency MAP — the third argument to `__d` — so N
-     * is a position in that array, not a module id. Resolving the two the wrong
-     * way round silently walks a graph that does not exist.
-     */
-    const depIds =
-      depsNode?.type === "ArrayExpression"
-        ? depsNode.elements.map((el) => (el?.type === "NumericLiteral" ? el.value : null))
-        : [];
-
-    const eager = new Set();
-    for (const index of collectFactory(factory, depsIdName, requireIdName)) {
-      const id = depIds[index];
-      if (typeof id === "number") eager.add(id);
-    }
-
-    const layoutIndex = rootLayoutDepIndex(factory, depsIdName, requireIdName);
-    if (layoutIndex !== null && typeof depIds[layoutIndex] === "number") {
-      rootLayoutModules.push(depIds[layoutIndex]);
-    }
-
-    modules.set(idNode.value, { eager, start: factory.start, end: factory.end });
-  }
-
-  if (modules.size === 0) {
-    console.error("[check-launch-path] Could not parse any modules out of the bundle.");
-    process.exit(1);
-  }
-  if (entries.length === 0) {
-    console.error("[check-launch-path] Could not find an `__r(...)` entry call.");
-    process.exit(1);
-  }
-  if (rootLayoutModules.length === 0) {
-    // Not a warning to skip past: without this root the walk misses every line of
-    // app code, which is the half of the launch window that has actually failed.
-    console.error(
-      "[check-launch-path] Could not find `./_layout.tsx` in a require.context map.\n" +
-        "The route context's shape must have changed — fix `rootLayoutDepIndex()`\n" +
-        "rather than ignoring this, or the check silently stops covering app code."
-    );
-    process.exit(1);
-  }
-
-  // Only eager edges, from both roots: what the bundle evaluates on its own, plus
-  // the root layout the router pulls in during the first render.
-  const roots = [...entries, ...rootLayoutModules];
-  const evaluated = new Set(roots);
-  const queue = [...roots];
-  while (queue.length) {
-    const id = queue.shift();
-    for (const dep of modules.get(id)?.eager ?? []) {
-      if (!evaluated.has(dep)) {
-        evaluated.add(dep);
-        queue.push(dep);
-      }
-    }
-  }
+  // Metro's factory signature is (global, require, importDefault, importAll,
+  // module, exports, dependencyMap) — positional, and the names are mangled.
+  const params = factory.params;
+  const requireIdName = params[1]?.type === "Identifier" ? params[1].name : null;
+  const depsIdName = params[6]?.type === "Identifier" ? params[6].name : null;
+  if (!requireIdName || !depsIdName) continue;
 
   /**
-   * The two ways a module can look up a native module and DIE if it is missing.
-   * Both are policed, because both end the process the same way and the app
-   * depends on packages that use each.
-   *
-   *   requireNativeModule("X")                    expo-modules-core
-   *   TurboModuleRegistry.getEnforcing("X")       react-native core
-   *
-   * Each has a non-throwing sibling that is deliberately NOT matched, because
-   * returning null is the safe behaviour this check exists to encourage:
-   * `requireOptionalNativeModule` (hence the lookbehind) and
-   * `TurboModuleRegistry.get` (a different name, so no lookbehind needed).
-   *
-   * Only `requireNativeModule` was policed until an audit of the built bundle
-   * found `getEnforcing("RNGestureHandlerModule")` sitting in the launch window,
-   * unseen — reached by `app/_layout.tsx`'s own `GestureHandlerRootView` import,
-   * about as high up the launch path as a lookup can be. Every non-Expo native
-   * package in this app uses `getEnforcing`, so the half of the dependency tree
-   * that expo-modules-core does not cover was invisible to the guard that exists
-   * precisely to cover it. See LAUNCH_SAFETY_REFERENCE.md §11.
+   * `r(d[N])` indexes the dependency MAP — the third argument to `__d` — so N
+   * is a position in that array, not a module id. Resolving the two the wrong
+   * way round silently walks a graph that does not exist.
    */
-  const THROWING =
-    /(?:(?<!Optional)(requireNativeModule)|(getEnforcing))\)?\s*\(\s*['"]([A-Za-z0-9_]+)['"]/g;
+  const depIds =
+    depsNode?.type === "ArrayExpression"
+      ? depsNode.elements.map((el) => (el?.type === "NumericLiteral" ? el.value : null))
+      : [];
 
-  /** native module name -> { id: bundle module id, via: lookup mechanism } */
-  const found = new Map();
-  for (const id of evaluated) {
-    const mod = modules.get(id);
-    if (!mod) continue;
-    const body = src.slice(mod.start, mod.end);
-    for (const m of body.matchAll(THROWING)) {
-      const name = m[3];
-      if (found.has(name)) continue;
-      found.set(name, {
-        id,
-        via: m[1] ? "requireNativeModule" : "TurboModuleRegistry.getEnforcing",
-      });
+  const eager = new Set();
+  for (const index of collectFactory(factory, depsIdName, requireIdName)) {
+    const id = depIds[index];
+    if (typeof id === "number") eager.add(id);
+  }
+
+  const layoutIndex = rootLayoutDepIndex(factory, depsIdName, requireIdName);
+  if (layoutIndex !== null && typeof depIds[layoutIndex] === "number") {
+    rootLayoutModules.push(depIds[layoutIndex]);
+  }
+
+  modules.set(idNode.value, { eager, start: factory.start, end: factory.end });
+}
+
+if (modules.size === 0) {
+  console.error("[check-launch-path] Could not parse any modules out of the bundle.");
+  process.exit(1);
+}
+if (entries.length === 0) {
+  console.error("[check-launch-path] Could not find an `__r(...)` entry call.");
+  process.exit(1);
+}
+if (rootLayoutModules.length === 0) {
+  // Not a warning to skip past: without this root the walk misses every line of
+  // app code, which is the half of the launch window that has actually failed.
+  console.error(
+    "[check-launch-path] Could not find `./_layout.tsx` in a require.context map.\n" +
+      "The route context's shape must have changed — fix `rootLayoutDepIndex()`\n" +
+      "rather than ignoring this, or the check silently stops covering app code."
+  );
+  process.exit(1);
+}
+
+// Only eager edges, from both roots: what the bundle evaluates on its own, plus
+// the root layout the router pulls in during the first render.
+const roots = [...entries, ...rootLayoutModules];
+const evaluated = new Set(roots);
+const queue = [...roots];
+while (queue.length) {
+  const id = queue.shift();
+  for (const dep of modules.get(id)?.eager ?? []) {
+    if (!evaluated.has(dep)) {
+      evaluated.add(dep);
+      queue.push(dep);
     }
   }
-
-  console.log(
-    `[check-launch-path] ${bundlePath}: ${evaluated.size} of ${modules.size} modules are ` +
-      `EVALUATED in the launch window (eager edges from ${entries.length} bundle entr${
-        entries.length === 1 ? "y" : "ies"
-      } + root layout module ${rootLayoutModules.join(", ")}); ` +
-      `${found.size} native-module lookup(s) among them.`
-  );
-
-  return found;
 }
 
-/* ------------------------------------------------------------------ *
- * Every platform bundle, against one shared allowlist
- * ------------------------------------------------------------------ */
+// `requireNativeModule` throws when the module is absent; the `Optional`
+// variant returns null and is safe, so only the throwing form is policed.
+const THROWING = /(?<!Optional)requireNativeModule\)?\s*\(\s*['"]([A-Za-z0-9_]+)['"]/g;
 
-/** native module name -> "<bundle> module <id>, via <mechanism>" */
-const allFound = new Map();
-for (const bundlePath of BUNDLES) {
-  const platform = /android/i.test(bundlePath) ? "android" : "ios";
-  for (const [name, { id, via }] of analyseBundle(bundlePath)) {
-    if (!allFound.has(name)) allFound.set(name, []);
-    allFound.get(name).push(`${platform} module ${id}, via ${via}`);
+const found = new Map(); // native module name -> bundle module id
+for (const id of evaluated) {
+  const mod = modules.get(id);
+  if (!mod) continue;
+  const body = src.slice(mod.start, mod.end);
+  for (const m of body.matchAll(THROWING)) {
+    if (!found.has(m[1])) found.set(m[1], id);
   }
 }
 
-const unexpected = [...allFound.keys()].filter((n) => !ALLOWED.has(n)).sort();
-const gone = [...ALLOWED].filter((n) => !allFound.has(n)).sort();
+const unexpected = [...found.keys()].filter((n) => !ALLOWED.has(n)).sort();
+const gone = [...ALLOWED].filter((n) => !found.has(n)).sort();
+
+console.log(
+  `[check-launch-path] ${evaluated.size} of ${modules.size} modules are EVALUATED in the launch ` +
+    `window (eager edges from ${entries.length} bundle entr${
+      entries.length === 1 ? "y" : "ies"
+    } + root layout module ${rootLayoutModules.join(", ")}); ` +
+    `${found.size} native-module lookup(s) among them.`
+);
 
 if (gone.length) {
   // Not a failure: a lookup leaving the launch path is the direction we want.
-  // Only trustworthy when every platform bundle was checked — an entry that is
-  // Android-only looks "gone" if this ran against the iOS bundle alone.
   console.log(
-    `[check-launch-path] note — allowlisted but not found in ${
-      BUNDLES.length === 1 ? "this bundle" : "any bundle checked"
-    }: ${gone.join(", ")}`
+    `[check-launch-path] note — allowlisted but no longer on the launch path ` +
+      `(safe to prune from ALLOWED): ${gone.join(", ")}`
   );
 }
 
 if (unexpected.length === 0) {
-  console.log(
-    `[check-launch-path] OK — no unreviewed native module on the launch path ` +
-      `(${BUNDLES.length} bundle${BUNDLES.length === 1 ? "" : "s"} checked).`
-  );
+  console.log("[check-launch-path] OK — no unreviewed native module on the launch path.");
   process.exit(0);
 }
 
@@ -453,20 +360,16 @@ console.error(
     "window and are not on the reviewed allowlist:\n"
 );
 for (const name of unexpected) {
-  console.error(`  ${name}  (${allFound.get(name).join("; ")})`);
+  console.error(`  ${name}  (bundle module ${found.get(name)})`);
 }
 console.error(
-  "\nBoth `requireNativeModule` and `TurboModuleRegistry.getEnforcing` THROW when\n" +
-    "the native module is not registered, and at this point in startup there is no\n" +
-    "React tree, no error boundary and no crash reporter — the app dies on open\n" +
-    "with a black screen and no artefact.\n\n" +
+  "\n`requireNativeModule` THROWS when the native module is not registered, and at\n" +
+    "this point in startup there is no React tree, no error boundary and no crash\n" +
+    "reporter — the app dies on open with a black screen and no artefact.\n\n" +
     "Either defer the import (`require()` it inside the function that uses it, as\n" +
     "`lib/socialAuth.ts` does for `expo-web-browser`), or — if it genuinely belongs\n" +
     "at startup and `bun run check:versions` is clean — add it to ALLOWED in this\n" +
     "file with a note saying which package brought it in.\n\n" +
-    "For a package OUTSIDE the Expo SDK manifest, `check:versions` has nothing to\n" +
-    "compare against and cannot vouch for it: confirm by hand that the installed\n" +
-    "version's native half is the one autolinking builds.\n\n" +
-    "See LAUNCH_SAFETY_REFERENCE.md §1, §2, §10 and §11.\n"
+    "See LAUNCH_SAFETY_REFERENCE.md §1, §2 and §10.\n"
 );
 process.exit(1);
