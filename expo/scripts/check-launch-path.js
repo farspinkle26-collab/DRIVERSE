@@ -78,6 +78,19 @@
  *
  * Run by `bun run check:launch-path` and by `bundle:verify` (which builds the
  * bundle first).
+ *
+ * WHAT THIS CANNOT SEE — read before trusting a green result.
+ *
+ * This reads the JavaScript bundle, so it only covers failures that have
+ * JavaScript in them. It is blind to the whole native half of startup, and that
+ * half has killed this app too (§11): on Android, autolinking registers every
+ * native module during `ReactInstance.<init>`, before a single line of JS runs,
+ * and an off-SDK module dies there with a `NoClassDefFoundError` that no JS
+ * guard — not a lazy import, not `AppErrorBoundary`, not `crashReporter.ts` —
+ * can reach. A green result here means "no unreviewed native lookup in the JS
+ * launch path", not "the app starts".
+ *
+ * `bun run check:versions` is the guard for that class. Keep both.
  */
 
 const fs = require("fs");

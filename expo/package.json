@@ -82,5 +82,41 @@
     "react-test-renderer": "19.1.0",
     "typescript": "~5.9.0"
   },
+  "//": [
+    "BUILD SAFETY — `overrides`/`resolutions` exist because declaring a version",
+    "in `dependencies` was not enough to get that version into a build.",
+    "",
+    "`expo-web-browser` was corrected to `~15.0.11` and the very next Android",
+    "build (versionCode 14) still shipped the 56.x native module: it died on",
+    "open with `NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeCache` at",
+    "`WebBrowserModule.definition`, a class that only exists in the SDK 56+",
+    "expo-modules-core. The dependency block said one thing and the installer",
+    "resolved another.",
+    "",
+    "The mechanism is `@rork-ai/toolkit-sdk`, which peer-depends on",
+    "`expo-web-browser: \"*\"` (also `expo-blur: \"*\"` and `expo-router: \"*\"`).",
+    "`*` matches every version ever published, so an installer that satisfies",
+    "that peer on its own terms — npm 7+ auto-installs peers — is free to fetch",
+    "the newest release and hoist it over ours. That is almost certainly how the",
+    "`^56.0.5` caret arrived in this file in the first place.",
+    "",
+    "`overrides` (npm/pnpm) and `resolutions` (yarn/bun) are the two spellings of",
+    "'no resolver may choose anything else'. Both are listed because this repo is",
+    "installed by bun locally and in CI, and by Rork's builder in the cloud, and",
+    "the build that reaches a store is the one that matters.",
+    "",
+    "Keep every version here EXACT and identical to the `dependencies` entry.",
+    "`bun run check:versions` fails the build if they drift apart or off the SDK."
+  ],
+  "overrides": {
+    "expo-web-browser": "15.0.11",
+    "expo-blur": "15.0.8",
+    "expo-router": "6.0.24"
+  },
+  "resolutions": {
+    "expo-web-browser": "15.0.11",
+    "expo-blur": "15.0.8",
+    "expo-router": "6.0.24"
+  },
   "private": true
 }

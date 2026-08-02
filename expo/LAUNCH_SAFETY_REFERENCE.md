@@ -661,3 +661,80 @@ check fails naming `ExpoWebBrowser`; with the lazy import it passes.
 **The rule this adds:** a dependency whose major does not match the Expo SDK is
 a launch-safety bug, not a housekeeping chore — and the launch path is defined
 by the bundle, never by the imports you can see.
+
+## 11. The Android stack trace (2 Aug 2026) — and the pin that did not pin
+
+§10 named `expo-web-browser` by reading the bundle, because a store build that
+dies on open leaves no artefact. Android then produced one, and it is the first
+hard proof of a root cause this file has diagnosed three times by inference:
+
+```
+FATAL EXCEPTION: pool-3-thread-1
+Process: app.rork.driverse
+java.lang.NoClassDefFoundError: Failed resolution of: Lexpo/modules/kotlin/types/AnyTypeCache;
+    at expo.modules.webbrowser.WebBrowserModule.definition(WebBrowserModule.kt:181)
+    at expo.modules.kotlin.ModuleRegistry.register(ModuleRegistry.kt:27)
+    at expo.modules.kotlin.AppContext.<init>(AppContext.kt:120)
+    at expo.modules.adapters.react.NativeModulesProxy.<init>(NativeModulesProxy.java:45)
+    at com.facebook.react.runtime.ReactInstance.<init>(ReactInstance.kt:168)
+Caused by: java.lang.ClassNotFoundException: expo.modules.kotlin.types.AnyTypeCache
+```
+
+`expo.modules.kotlin.types.AnyTypeCache` exists in the SDK 56+
+`expo-modules-core` and not in SDK 54's. The 56.x `WebBrowserModule` asks for it
+while registering, and the process dies.
+
+### 11a. Two things this trace settles
+
+**Android fails earlier than iOS, and differently.** Note the frames: this is
+`AppContext.<init>` inside `ReactInstance.<init>` — native module registration,
+**before a single line of JavaScript runs**. No JS guard can help: not the lazy
+`require()` in `lib/socialAuth.ts`, not `AppErrorBoundary`, not
+`crashReporter.ts`. Autolinking registers the module whether or not anything
+imports it. On iOS the same wrong version compiles from Swift source and fails
+later and softer (§8's TurboModule/ObjC path); on Android it ships as a
+**prebuilt `.aar`** already linked against the newer core. Same defect, two
+failure modes — which is why a rebuild fixed iOS and left Android dead.
+
+**`check:launch-path` cannot see this class of bug.** That script parses the JS
+bundle. This crash has no JS in it. `check:versions` is the guard that covers
+it; the launch-path script's scope is JavaScript only, and it should not be
+trusted past that.
+
+### 11b. The pin that did not pin
+
+The correction to `~15.0.11` shipped, and the **next** Android build
+(versionCode 14) still carried the 56.x module, with this same trace.
+`package.json` said one thing and the installer resolved another.
+
+`@rork-ai/toolkit-sdk` peer-depends on `expo-web-browser: "*"` — also
+`expo-blur: "*"` and `expo-router: "*"`. `*` matches every version ever
+published, so an installer that satisfies that peer on its own terms (npm 7+
+auto-installs peers) may fetch the newest release and hoist it over the declared
+one. That is the most likely way the original `^56.0.5` caret arrived in
+`package.json` at all.
+
+**A version in `dependencies` is a request. `overrides`/`resolutions` is the
+instruction.** Both spellings are now set — `overrides` for npm/pnpm,
+`resolutions` for yarn/bun — because this repo is installed by bun locally and
+in CI and by Rork's builder in the cloud, and the install that reaches a store
+is the one that counts. `check:versions` now also polices the pin itself: an
+override must be exact (a range re-opens the hole), must match the SDK, must
+match its own `dependencies` entry, and both spellings must agree.
+
+**The rule this adds:** when a dependency ships as a prebuilt native artefact,
+pin it — a range is an invitation. And when a build disagrees with
+`package.json`, suspect a `*` peer dependency before suspecting the build cache.
+
+### 11c. What to check when a build disagrees with the source
+
+The trap here was assuming the binary matched the repo. It did not, twice.
+
+- Read the **versionCode/build number out of the crash log itself**
+  (`adb logcat` prints it on the `AppSwitchObserver`/`START u0` lines) and
+  compare it to what you think you built. Build 12 and build 14 both crashed;
+  only one of them was ever expected to.
+- `adb shell dumpsys package <id> | grep versionCode` on the device is the same
+  answer in one line.
+- If the source is right and the build is wrong, look at what the **installer**
+  resolved, not at what `package.json` declares.
