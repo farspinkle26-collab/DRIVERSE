@@ -89,9 +89,81 @@ if (expoVersion && presetVersion && major(presetVersion) !== major(expoVersion))
   });
 }
 
+/**
+ * The pin has to be policed too, or it silently stops pinning.
+ *
+ * `package.json` carries `overrides` (npm/pnpm) and `resolutions` (yarn/bun)
+ * because declaring `~15.0.11` in `dependencies` did NOT stop a build from
+ * shipping `expo-web-browser` 56 — `@rork-ai/toolkit-sdk` peer-depends on
+ * `expo-web-browser: "*"`, and an installer that satisfies that peer itself can
+ * hoist any version it likes over ours.
+ *
+ * Three ways that guard rots, all checked here: an override that drifts off the
+ * SDK, an override that no longer matches its own `dependencies` entry, and the
+ * two spellings disagreeing with each other — which would pin one package
+ * manager and quietly free the other.
+ */
+const overrides = pkg.overrides ?? {};
+const resolutions = pkg.resolutions ?? {};
+
+for (const [name, pinned] of Object.entries(overrides)) {
+  // An override must be an exact version. A range here re-opens the hole it
+  // was added to close.
+  if (/^[\^~><=]/.test(String(pinned))) {
+    problems.push({
+      name: `${name} (overrides)`,
+      range: pinned,
+      expected: "an exact version, no ^ or ~ — a range lets the resolver move again",
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+    continue;
+  }
+
+  const expected = bundled[name];
+  if (expected && major(pinned) !== major(expected)) {
+    problems.push({
+      name: `${name} (overrides)`,
+      range: pinned,
+      expected,
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+  }
+
+  const dep = declared[name];
+  if (dep && major(dep) !== major(pinned)) {
+    problems.push({
+      name: `${name} (overrides vs dependencies)`,
+      range: `overrides: ${pinned}`,
+      expected: `dependencies: ${dep} — these must name the same version`,
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+  }
+
+  if (resolutions[name] !== pinned) {
+    problems.push({
+      name: `${name} (overrides vs resolutions)`,
+      range: `overrides: ${pinned}`,
+      expected: `resolutions: ${resolutions[name] ?? "(missing)"} — both spellings must agree, or only one package manager is pinned`,
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+  }
+}
+
+for (const name of Object.keys(resolutions)) {
+  if (!(name in overrides)) {
+    problems.push({
+      name: `${name} (resolutions)`,
+      range: resolutions[name],
+      expected: "a matching `overrides` entry — npm and pnpm ignore `resolutions`",
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+  }
+}
+
 if (problems.length === 0) {
   console.log(
-    `[check-sdk-versions] OK — every SDK-versioned package agrees with expo@${expoVersion}.`
+    `[check-sdk-versions] OK — every SDK-versioned package agrees with expo@${expoVersion}` +
+      `, and ${Object.keys(overrides).length} pinned override(s) agree with both.`
   );
   process.exit(0);
 }
