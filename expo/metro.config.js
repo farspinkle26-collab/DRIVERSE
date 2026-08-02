@@ -1,53 +1,75 @@
 const { getDefaultConfig } = require("expo/metro-config");
-const { withRorkMetro } = require("@rork-ai/toolkit-sdk/metro");
-
-const config = withRorkMetro(getDefaultConfig(__dirname));
 
 /**
- * LAUNCH SAFETY — put Expo's own Babel transformer back.
+ * LAUNCH SAFETY — this config used to be wrapped in `withRorkMetro`, from
+ * `@rork-ai/toolkit-sdk`. Both the wrapper and the dependency are gone now.
+ * The history matters, because each removal fixed a different shipped crash.
  *
- * `withRorkMetro` does two unrelated things. Its resolver half is wanted and
- * is kept: it maps `expo-haptics`, `expo-secure-store`, `react-native-maps`,
- * `RefreshControl` and `Alert` onto web polyfills, and supplies `assert`. Its
- * transformer half is not, and this line is what switches that half off.
+ * ── Why the TRANSFORMER half had to go (§8) ─────────────────────────────────
  *
- * The transformer half replaces `babelTransformerPath` with a wrapper that
- * pattern-matches `app/_layout.tsx` for `export default function <Name>`,
- * rewrites it with string concatenation, and appends a NEW default export:
+ * `withRorkMetro` replaced `babelTransformerPath` with a wrapper that
+ * pattern-matched `app/_layout.tsx` for `export default function <Name>`,
+ * rewrote it with string concatenation, and appended a NEW default export:
  *
  *     import { RorkAnalyticsProvider } from '@rork-ai/toolkit-sdk';
  *     export default function RorkRootLayoutWrapper() {
  *       return <RorkAnalyticsProvider><RootLayout /></RorkAnalyticsProvider>;
  *     }
  *
- * Three consequences, all of which land on the launch path:
+ * That mounted a third-party provider ABOVE `AppErrorBoundary`, so §4's
+ * "there is nothing above it left to fail" was false in every shipped build.
+ * It also pulled in `posthog-react-native`, whose optional integrations
+ * `require()` `expo-file-system`, `expo-application`, `expo-device`,
+ * `expo-localization` and AsyncStorage at MODULE SCOPE — the exact window
+ * §1/§2 exists to keep clear. And none of it was in this repository, which is
+ * why three passes over the launch path found nothing.
  *
- * 1. It mounts a third-party provider ABOVE `AppErrorBoundary`.
- *    `LAUNCH_SAFETY_REFERENCE.md` §4 says the boundary wraps the root
- *    component so that "there is nothing above it left to fail". With this
- *    injection that sentence was false in every shipped build — there was
- *    something above it, and nothing could catch what it threw.
+ * ── Why the DEPENDENCY had to go too (§12) ──────────────────────────────────
  *
- * 2. `RorkAnalyticsProvider` pulls in `posthog-react-native`, whose optional
- *    integrations `require()` `expo-file-system`, `expo-application`,
- *    `expo-device`, `expo-localization` and AsyncStorage at MODULE SCOPE.
- *    That is the bundle-evaluation window §1/§2 exists to keep clear, and it
- *    ran on every launch, for every driver.
+ * Switching the transformer off left the package installed, and its
+ * peerDependencies were the second half of the problem:
  *
- * 3. None of it is in this repository. `@rork-ai/toolkit-sdk` was a `latest`
- *    dependency, so the code executing during launch could change between two
- *    builds of the same commit. That is why the launch path was read three
- *    times without finding anything: the code was never in the source tree.
- *    (The version is pinned in `package.json` now, for the same reason.)
+ *     "expo-web-browser": "*",  "expo-blur": "*",  "expo-router": "*"
  *
- * COST OF THIS LINE: Rork's PostHog analytics and its development preview
- * wrapper are no longer injected. Nothing in the app imports either, and no
- * feature depends on them. To restore them, delete this assignment — and if
- * you do, import `RorkAnalyticsProvider` inside `app/_layout.tsx` BELOW
- * `AppErrorBoundary` instead, so the boundary still guards it.
+ * `*` matches every version ever published. An installer that satisfies that
+ * peer on its own terms — npm 7+ auto-installs peers — is free to fetch the
+ * newest release and hoist it over the pinned one. That is how
+ * `expo-web-browser@^56.0.5` came to sit in an SDK 54 app, and it survived
+ * being corrected in `dependencies` (#167) AND pinned in
+ * `overrides`/`resolutions` (#170): Android build 15, built after both landed,
+ * still died on open with
+ *
+ *     NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeCache
+ *       at expo.modules.webbrowser.WebBrowserModule.definition
+ *
+ * — the 56.x native module, in a build whose `package.json` said 15.0.11.
+ * When a resolver will not honour a pin, the only move left is to remove the
+ * thing doing the pulling. With this package gone there is no path to
+ * `expo-web-browser` except the app's own `dependencies` entry.
+ *
+ * ── WHAT THIS COSTS ─────────────────────────────────────────────────────────
+ *
+ * The resolver half of `withRorkMetro` supplied WEB polyfills — it mapped
+ * `expo-haptics`, `expo-secure-store`, `react-native-maps`, `RefreshControl`
+ * and `Alert` onto browser-safe shims and provided `assert`. Those aliases are
+ * gone, so `bun run start-web` may fail to resolve them in a browser.
+ *
+ * Nothing that ships to a store is affected. The iOS and Android bundles never
+ * used one of those shims, and no file in `app/`, `lib/`, `hooks/` or
+ * `components/` imports `@rork-ai/toolkit-sdk` — verified before removal.
+ * Driveverse is a native app; web is a development convenience.
+ *
+ * The `rork` CLI in `package.json`'s scripts (`bunx rork start …`) is a
+ * SEPARATE package fetched by `bunx` at run time, and is unaffected.
+ *
+ * ── IF YOU EVER RESTORE IT ──────────────────────────────────────────────────
+ *
+ * Re-adding `@rork-ai/toolkit-sdk` re-adds the `*` peers. Pin
+ * `expo-web-browser`, `expo-blur` and `expo-router` in `overrides` AND
+ * `resolutions` first, run `bun run check:versions` after a CLEAN install,
+ * and then check the built APK actually contains the pinned version — a green
+ * check on a laptop said nothing about what the cloud builder resolved, which
+ * is the whole lesson of §12. And keep the transformer off, or mount anything
+ * it injects BELOW `AppErrorBoundary`.
  */
-config.transformer.babelTransformerPath = require.resolve(
-  "@expo/metro-config/babel-transformer"
-);
-
-module.exports = config;
+module.exports = getDefaultConfig(__dirname);
