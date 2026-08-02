@@ -58,6 +58,7 @@
 import { Platform } from "react-native";
 import type * as WebBrowserTypes from "expo-web-browser";
 import * as AppleAuthentication from "expo-apple-authentication";
+import { parseAuthCallback } from "@/lib/authCallback";
 import { createAppLink } from "@/lib/deepLink";
 import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -141,6 +142,25 @@ async function signInWithAppleNative(): Promise<Session | null> {
   return data.session ?? null;
 }
 
+/**
+ * Thrown when the browser sheet closed without ever handing us a callback.
+ *
+ * Worth its own message because the cause is almost never in this repo: the
+ * sheet lands on the Supabase project's **Site URL** — `http://localhost:3000`
+ * in a project nobody has reconfigured since the web prototype — whenever
+ * `myapp://auth-callback` is missing from Authentication → URL Configuration →
+ * Redirect URLs. GoTrue does not reject an unlisted `redirect_to`; it silently
+ * substitutes the Site URL, so the user watches the picker succeed and then
+ * gets "Safari cannot open the page because it could not connect to the
+ * server", on a host that only ever existed on a developer's laptop. From the
+ * app's side that is indistinguishable from a cancel, so it has to be said out
+ * loud rather than inferred. See `GOOGLE_SIGNIN_REFERENCE.md`.
+ */
+const NO_CALLBACK_MESSAGE =
+  "Google sign-in did not return to the app. If the browser showed a " +
+  "localhost page, this app's redirect URL is not on the Supabase project's " +
+  "allow-list yet.";
+
 async function signInWithGoogleOAuth(): Promise<Session | null> {
   const redirectTo = getRedirectTo();
 
@@ -149,6 +169,14 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
     options: {
       redirectTo,
       skipBrowserRedirect: Platform.OS !== "web",
+      queryParams: {
+        // Ask Google for the account chooser every time. The auth session
+        // shares Safari's cookie jar, so a phone already signed in to Google
+        // otherwise gets bounced straight through the picker it expected to
+        // see — which makes a failure further down the redirect chain look
+        // like "it never even asked which account I wanted".
+        prompt: "select_account",
+      },
     },
   });
 
@@ -162,18 +190,42 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
 
   const result = await webBrowser().openAuthSessionAsync(data.url, redirectTo);
 
+  // The user backed out. Not an error — return null and let the caller leave
+  // the screen as it was, with nothing shown.
+  if (result.type === "cancel" || result.type === "dismiss") {
+    return null;
+  }
+
   if (result.type !== "success" || !result.url) {
-    return null;
+    throw new Error(NO_CALLBACK_MESSAGE);
   }
 
-  const url = new URL(result.url);
-  const code = url.searchParams.get("code");
-  if (!code) {
-    return null;
+  const callback = parseAuthCallback(result.url);
+
+  switch (callback.kind) {
+    case "code": {
+      const { data: sessionData, error: exchangeErr } =
+        await supabase.auth.exchangeCodeForSession(callback.code);
+      if (exchangeErr) throw exchangeErr;
+      return sessionData.session ?? null;
+    }
+
+    case "tokens": {
+      // The implicit flow's shape. `lib/supabase.ts` pins `flowType: 'pkce'`
+      // so this should not happen — but a session handed back in a form we can
+      // use is worth using rather than discarding on principle.
+      const { data: sessionData, error: setErr } = await supabase.auth.setSession({
+        access_token: callback.accessToken,
+        refresh_token: callback.refreshToken,
+      });
+      if (setErr) throw setErr;
+      return sessionData.session ?? null;
+    }
+
+    case "error":
+      throw new Error(callback.message);
+
+    case "none":
+      throw new Error(NO_CALLBACK_MESSAGE);
   }
-
-  const { data: sessionData, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
-  if (exchangeErr) throw exchangeErr;
-
-  return sessionData.session ?? null;
 }

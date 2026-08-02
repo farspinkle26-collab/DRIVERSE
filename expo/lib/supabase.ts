@@ -33,6 +33,23 @@ export const supabase = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+
+      // PKCE, explicitly. supabase-js v2 defaults to the IMPLICIT flow, which
+      // returns the session as a URL *fragment* (`#access_token=…`) — and a
+      // fragment is exactly the part of a redirect a native app cannot rely on
+      // receiving. `lib/socialAuth.ts` opens the provider in an auth session
+      // and finishes with `exchangeCodeForSession`, which needs a `?code=` on
+      // the query string and REFUSES TO RUN AT ALL under the implicit flow
+      // ("exchangeCodeForSession is not available in implicit flow"). With the
+      // default left in place, Google sign-in could only ever fail: the
+      // callback carried no `code`, so the flow returned null and the button
+      // did nothing, with no error to see.
+      //
+      // PKCE also stores its code verifier in `storage` above (AsyncStorage),
+      // so the exchange survives the app being backgrounded while the browser
+      // sheet is open. Do not remove this line without moving the callback
+      // handling off `exchangeCodeForSession` first.
+      flowType: 'pkce',
     },
   }
 );
