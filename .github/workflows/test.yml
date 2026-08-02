@@ -43,25 +43,35 @@ jobs:
         working-directory: expo
         run: bun run check:versions
 
+      # BOTH platforms, because Metro resolves `Platform.OS` branches at build
+      # time and the two bundles are not the same code. The Android one carries
+      # native lookups (`ExpoNotificationChannelManager`, and its group sibling)
+      # that appear in no iOS bundle — so for as long as only iOS was bundled
+      # here, Android-only launch code went through CI unchecked, on the
+      # platform that took the Play Console rejection in §10.
       - name: Bundle for iOS (release)
         working-directory: expo
         run: bun run bundle:ios
+
+      - name: Bundle for Android (release)
+        working-directory: expo
+        run: bun run bundle:android
 
       # Metro bundling is only half of what the store build does. Xcode then
       # compiles that bundle to Hermes bytecode, with a parser that is older
       # than Metro's and rejects syntax Babel may have left in — which is how a
       # bundle that built here still failed the archive with "private
       # properties are not supported". This step is that second compile.
-      - name: Compile the bundle with Hermes (hermesc)
+      - name: Compile the bundles with Hermes (hermesc)
         working-directory: expo
-        run: bun run bundle:hermes
+        run: bun run bundle:hermes && bun run bundle:hermes:android
 
       # The launch-safety rule (§1/§2) is "no native call at module scope on
       # anything reachable from app/_layout.tsx". It was written down and
       # broken anyway, twice, because it cannot be checked by reading the
       # source — once the offending code was injected by a Babel transformer
       # (§8), once it was a single line inside node_modules (§10). This walks
-      # the built bundle's own module graph instead.
+      # each built bundle's own module graph instead.
       - name: Check the launch path for module-scope native calls
         working-directory: expo
         run: bun run check:launch-path
