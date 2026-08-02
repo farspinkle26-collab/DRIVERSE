@@ -738,3 +738,75 @@ The trap here was assuming the binary matched the repo. It did not, twice.
   answer in one line.
 - If the source is right and the build is wrong, look at what the **installer**
   resolved, not at what `package.json` declares.
+
+## 12. When the pin does not pin (3 Aug 2026)
+
+§11 pinned `expo-web-browser` to `15.0.11` in `overrides` and `resolutions`.
+Android build **15**, produced six hours after that merged, shipped the 56.x
+native module anyway and died on open with the identical trace:
+
+```
+NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeCache
+  at expo.modules.webbrowser.WebBrowserModule.definition(WebBrowserModule.kt:181)
+```
+
+The project's `package.json` in the cloud builder was byte-identical to `main`,
+`overrides` and `resolutions` included. The builder honoured neither field.
+
+### 12a. Three attempts, and what each one proved
+
+| # | Attempt | Result |
+| --- | --- | --- |
+| §10 | `dependencies: ~15.0.11` | build 14 shipped 56.x |
+| §11 | `overrides` + `resolutions` | build 15 shipped 56.x |
+| §12 | removed the package that pulls it | — |
+
+The escalation is the lesson. **A version in `dependencies` is a request. An
+`overrides` entry is an instruction. Neither is a guarantee, because neither is
+enforced by anything you control** — the install that matters happens on a
+machine you cannot inspect, and it is free to ignore both.
+
+`@rork-ai/toolkit-sdk` peer-depended on `expo-web-browser: "*"`, plus
+`expo-blur: "*"` and `expo-router: "*"`. `*` matches every version ever
+published, so an installer that satisfies that peer on its own terms — npm 7+
+auto-installs peers — may fetch the newest release and hoist it over the pinned
+one. It was the only path to `expo-web-browser` in the tree besides the app's
+own entry, and it is almost certainly how the original `^56.0.5` caret arrived
+in `package.json` at all.
+
+So the package is gone. `metro.config.js` records what that cost: the resolver
+half supplied **web** polyfills (`expo-haptics`, `expo-secure-store`,
+`react-native-maps`, `RefreshControl`, `Alert`, `assert`). No file in `app/`,
+`lib/`, `hooks/` or `components/` imports the SDK, the native bundles never used
+one of those shims, and the bundle is the same 3,233 modules with it removed.
+The `rork` CLI in the `scripts` block is a separate package fetched by `bunx`
+and is unaffected.
+
+### 12b. `postinstall` — fail the build, never ship the crash
+
+The deeper problem is not which version resolved. It is that **three builds went
+out with a dependency that could not possibly work, and every one of them had to
+be caught by a human tapping an icon.** `check:versions` existed and was green
+the whole time — on a laptop, and in CI, neither of which is where the store
+build is made.
+
+`postinstall` now runs it on every install, including the cloud builder's. An
+install that resolves a wrong version fails there, in that build's own log,
+instead of quietly producing an APK that dies on open.
+
+It is also a diagnostic: when a build breaks at `postinstall`, the log names the
+package and the version it actually got — which is the fact this whole chapter
+was missing for three rounds.
+
+### 12c. The rule this adds
+
+**Verify the artefact, not the source.** Nothing in this repository could tell
+you what build 14 or 15 contained; only the device could, via
+`adb logcat` and `adb shell dumpsys package <id> | grep versionCode`. Before
+believing a dependency fix has shipped, read the version out of the thing you
+installed. A green check on a developer machine is evidence about that machine
+and nothing else.
+
+And: **when a dependency ships as a prebuilt native artefact, a range is not a
+version — it is a lottery ticket.** Pin it, and if the pin is ignored, delete
+whatever is holding the door open.
