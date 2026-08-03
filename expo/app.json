@@ -104,6 +104,14 @@
           "iCloudContainerEnvironment": "Production"
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to save your trip cards to your photos.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save your trip cards to your photos.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
       "expo-apple-authentication"
     ],
     "experiments": {

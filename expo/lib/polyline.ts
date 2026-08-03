@@ -72,19 +72,34 @@ export function decodePolyline(encoded: string): LatLng[] {
 }
 
 /**
+ * The indices `simplifyPath` would keep, for a track of `length` fixes.
+ *
+ * Exposed separately because a recorded drive is not one array: the map screen
+ * holds the coordinates and their capture timestamps side by side, and the
+ * speed profile stored alongside `route_polyline` is only meaningful if both
+ * are thinned through *the same* indices. Deriving them twice — once per array
+ * — is how the two silently drift out of step.
+ */
+export function simplifyIndices(length: number, maxPoints = 400): number[] {
+  if (length <= 0) return [];
+  if (length <= maxPoints || maxPoints < 2) {
+    return Array.from({ length }, (_, i) => i);
+  }
+  const step = (length - 1) / (maxPoints - 1);
+  const out: number[] = [];
+  for (let i = 0; i < maxPoints; i++) out.push(Math.round(i * step));
+  // Guarantee the true endpoint is preserved
+  out[out.length - 1] = length - 1;
+  return out;
+}
+
+/**
  * Downsample a dense GPS track to at most `maxPoints`, always keeping the
  * first and last fix. Keeps stored polylines small for long drives.
  */
 export function simplifyPath(points: LatLng[], maxPoints = 400): LatLng[] {
   if (points.length <= maxPoints) return points;
-  const step = (points.length - 1) / (maxPoints - 1);
-  const out: LatLng[] = [];
-  for (let i = 0; i < maxPoints; i++) {
-    out.push(points[Math.round(i * step)]);
-  }
-  // Guarantee the true endpoint is preserved
-  out[out.length - 1] = points[points.length - 1];
-  return out;
+  return simplifyIndices(points.length, maxPoints).map((i) => points[i]);
 }
 
 /** Bounding region {latitude, longitude, latitudeDelta, longitudeDelta} for a path. */

@@ -19,6 +19,11 @@
  *          primary CTA where Instagram is installed.
  *        • `shareViaSheet` — the generic native share sheet (TikTok,
  *          WhatsApp, Messages, save to camera roll, everything else).
+ *        • `saveCardToPhotos` — no destination at all: the PNG goes into the
+ *          user's camera roll (or Files on iOS without the media library) and
+ *          nothing is posted. Its own action because "save the picture" is a
+ *          different intent from "share the picture", and burying it in the
+ *          sheet made it undiscoverable.
  *
  * `react-native-share` is what makes the *direct* Instagram Stories path
  * possible (it owns the pasteboard write on iOS and the intent on Android),
@@ -40,7 +45,7 @@ import { captureRef } from "react-native-view-shot";
  * Types
  * ------------------------------------------------------------------ */
 
-export type ShareChannel = "instagram_story" | "sheet";
+export type ShareChannel = "instagram_story" | "sheet" | "photos" | "files";
 
 export type ShareOutcome =
   /** Content reached (or was handed to) a destination. */
@@ -258,6 +263,111 @@ export async function shareViaSheet(
   } catch (e: unknown) {
     return { status: "error", message: errString(e) };
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Save the PNG
+ * ------------------------------------------------------------------ */
+
+/**
+ * `expo-media-library`, loaded once and only if the native module is actually
+ * linked. Same defensive shape as {@link getRNShare}, and for the same reason
+ * this repo keeps re-learning: a static import of a package whose entry
+ * reaches a native module runs that lookup at *module scope*, and the throwing
+ * variant of that lookup has killed this app on open before
+ * (LAUNCH_SAFETY_REFERENCE.md §10). `lib/shareCard.ts` is imported by screens
+ * on the launch path, so the require happens on first press instead.
+ */
+type MediaLibraryModule = {
+  requestPermissionsAsync: (
+    writeOnly?: boolean
+  ) => Promise<{ granted: boolean; canAskAgain?: boolean }>;
+  saveToLibraryAsync: (localUri: string) => Promise<void>;
+};
+
+let mediaLibResolved = false;
+let mediaLibModule: MediaLibraryModule | null = null;
+
+function getMediaLibrary(): MediaLibraryModule | null {
+  if (mediaLibResolved) return mediaLibModule;
+  mediaLibResolved = true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("expo-media-library");
+    const resolved = (mod?.default ?? mod) as MediaLibraryModule;
+    mediaLibModule =
+      typeof resolved?.saveToLibraryAsync === "function" ? resolved : null;
+  } catch {
+    mediaLibModule = null;
+  }
+  return mediaLibModule;
+}
+
+/**
+ * Put the captured card in the user's own storage, as a PNG, without posting
+ * it anywhere.
+ *
+ * This is a distinct action from {@link shareViaSheet} on purpose. "Save
+ * Image" does exist somewhere inside the OS share sheet, but it is two taps
+ * down a list of apps, it is worded differently on every device, and on
+ * Android it depends on which gallery apps are installed. A driver who wants
+ * the picture — to post later, to send outside the phone, to keep — should not
+ * have to go looking for it.
+ *
+ * Three paths, best first:
+ *   1. `expo-media-library` → straight into the camera roll. The real answer.
+ *   2. iOS without it → the system "Save to Files" sheet, which is a genuine
+ *      save rather than a share.
+ *   3. Anything else → the generic sheet, where Save Image is at least
+ *      reachable. Reported as `sheet` so the caller can word the confirmation
+ *      honestly instead of claiming a save that may not have happened.
+ *
+ * A denied photo permission resolves as `error` with a message the user can
+ * act on, not as a silent no-op.
+ */
+export async function saveCardToPhotos(fileUri: string): Promise<ShareOutcome> {
+  const MediaLibrary = getMediaLibrary();
+
+  if (MediaLibrary) {
+    try {
+      // `true` asks for write-only access where the platform supports it,
+      // which is all we need and the least we can ask for.
+      const permission = await MediaLibrary.requestPermissionsAsync(true);
+      if (!permission?.granted) {
+        return {
+          status: "error",
+          message:
+            "Driveverse needs permission to save photos. You can turn it on in Settings.",
+        };
+      }
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      return { status: "shared", channel: "photos" };
+    } catch (e: unknown) {
+      const message = errString(e);
+      if (isCancellation(message)) return { status: "cancelled" };
+      // Fall through — a save that failed can still be offered as a share.
+    }
+  }
+
+  const Share = getRNShare();
+  if (Share && Platform.OS === "ios") {
+    try {
+      const res = (await Share.open({
+        url: fileUri,
+        type: "image/png",
+        filename: "driverse-trip",
+        saveToFiles: true,
+        failOnCancel: false,
+      })) as { success?: boolean } | undefined;
+      if (res && res.success === false) return { status: "cancelled" };
+      return { status: "shared", channel: "files" };
+    } catch (e: unknown) {
+      const message = errString(e);
+      if (isCancellation(message)) return { status: "cancelled" };
+    }
+  }
+
+  return shareViaSheet(fileUri);
 }
 
 /* ------------------------------------------------------------------ *
