@@ -963,3 +963,86 @@ dependency and configuration changes. When two consecutive fixes fail to change
 observed behaviour, stop fixing and go get an artefact you can inspect —
 because the third, fourth and fifth will fail the same way, and each one costs
 a release cycle to find out.
+
+## 15. `npm install` was failing the whole time (3 Aug 2026)
+
+§14 concluded that five consecutive fixes had failed to reach an Android
+binary, and set up an EAS build to find out why. The first command of that
+experiment answered it:
+
+```
+$ npm install
+npm error code EOVERRIDE
+npm error Override for expo-blur@~15.0.0 conflicts with direct dependency
+```
+
+**`npm install` does not work on this repository, and has not for the entire
+investigation.** Two separate failures, back to back:
+
+| Period | `npm install` result |
+| --- | --- |
+| before §11 | `ERESOLVE` — `@ai-sdk/react` peers on a React this app does not have |
+| §11 onward | `EOVERRIDE` — an `overrides` spec that npm refuses outright |
+
+An installer that errors does not produce an empty `node_modules`; it leaves
+whatever was already there. So a builder that runs `npm install`, sees it fail,
+and carries on builds from a **stale cache** — which is exactly the observed
+behaviour: `package.json` said `expo-web-browser@15.0.11` and the APK contained
+56.x, five times running, including after the module was excluded from
+autolinking altogether.
+
+Every fix in §10–§13 was correct. None of them was ever installed.
+
+### 15a. The two failures
+
+**`EOVERRIDE` — self-inflicted, in §11.** npm refuses an `overrides` entry for a
+package you also depend on directly unless the two specs match
+character-for-character. `dependencies` said `~15.0.0`; the override said
+`15.0.8`. Both are "the same version" to a human and to bun, and a hard error to
+npm. The correct form is npm's reference syntax:
+
+```json
+"dependencies": { "expo-blur": "15.0.8" },
+"overrides":    { "expo-blur": "$expo-blur" }
+```
+
+The dependency carries the exact version; the override points at it. Nothing to
+keep in sync, and nothing for npm to object to. `check:versions` understands
+`$name` now and resolves it before applying the exactness rule.
+
+**`ERESOLVE` — pre-existing, and older.** `@ai-sdk/react@^2.0.72` floats to
+2.0.227, which peers on `react ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1`. This app
+pins `react@19.1.0`, which satisfies none of them. It was never imported by
+anything — it arrived as part of the `@rork-ai/toolkit-sdk` era and was orphaned
+when that package was removed in §12, along with
+`@stardazed/streams-text-encoding` and `@ungap/structured-clone`. All three are
+gone.
+
+Removing it exposed one more: `lucide-react-native@0.475.0` peers on React
+≤18. The icons work fine on React 19 — the metadata is stale — and jumping to
+its 1.x line is a major version change across every icon in the app, not
+something to do inside a launch-crash fix. `.npmrc` sets
+`legacy-peer-deps=true`, which restores npm 6 behaviour and makes npm agree
+with the tree bun has been building all along.
+
+### 15b. Why this hid for so long
+
+Everything green ran on bun. CI installs with `bun install --frozen-lockfile`;
+`bundle:verify`, the tests and the typecheck all followed. Bun resolves this
+tree without complaint and always has. **The one package manager nobody ran was
+the one the cloud builder uses.**
+
+`package-lock.json` was deleted in §10 as "the stale, disagreeing lockfile".
+That was right about the disagreement and wrong about the consequence: it also
+removed the last artefact that would have shown npm's view of this tree.
+
+### 15c. The rule this adds
+
+**Run the installer your build server runs.** A repository that only installs
+under one package manager is a repository with an untested build path, and the
+untested one is usually the one that ships. `postinstall` now runs
+`check:versions` under whichever installer is used, so a resolution failure is
+loud — but a resolution failure that stops the install never reaches
+`postinstall` at all, which is why the install itself has to be exercised.
+
+CI runs `npm ci --dry-run` alongside the bun install for exactly this reason.

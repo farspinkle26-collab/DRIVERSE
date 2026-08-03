@@ -25,6 +25,20 @@ jobs:
         working-directory: expo
         run: bun install --frozen-lockfile
 
+      # `npm install` failed on this repository for the whole of the launch-crash
+      # investigation — first ERESOLVE, then EOVERRIDE — while every check here
+      # stayed green, because everything here runs on bun. An installer that
+      # errors leaves the previous `node_modules` in place, so the cloud builder
+      # kept shipping a cached `expo-web-browser` 56.x through five consecutive
+      # fixes that were each correct and never installed (§15).
+      #
+      # This step exercises the package manager the build server uses. It only
+      # resolves the tree — no scripts, no artefacts — so it is fast and cannot
+      # affect the bun install above.
+      - name: Resolve the tree with npm too (the builder's package manager)
+        working-directory: expo
+        run: npm install --package-lock-only --ignore-scripts
+
       # A root layout that does not parse reached main and sat there through
       # four merges: nothing in CI compiled the app, and no test imports
       # `app/_layout.tsx`, so 278 green tests said nothing about whether a
