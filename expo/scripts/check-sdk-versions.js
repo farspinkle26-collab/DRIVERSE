@@ -106,8 +106,43 @@ if (expoVersion && presetVersion && major(presetVersion) !== major(expoVersion))
 const overrides = pkg.overrides ?? {};
 const resolutions = pkg.resolutions ?? {};
 
-for (const [name, pinned] of Object.entries(overrides)) {
-  // An override must be an exact version. A range here re-opens the hole it
+for (const [name, rawPinned] of Object.entries(overrides)) {
+  /**
+   * `$name` is npm's reference syntax: "use whatever `dependencies` says for
+   * this package". It is REQUIRED here rather than merely allowed — npm
+   * refuses, with EOVERRIDE, any override of a direct dependency whose spec is
+   * not character-for-character the dependency's own. Writing the version
+   * twice therefore breaks `npm install` outright, which is how five
+   * dependency fixes came to be silently discarded by a builder that fell back
+   * to a cached `node_modules` (§15). So resolve the reference and hold the
+   * exactness requirement against the `dependencies` entry it points at.
+   */
+  const isReference = String(rawPinned).startsWith("$");
+  const referent = isReference ? String(rawPinned).slice(1) : null;
+
+  if (isReference && referent !== name) {
+    problems.push({
+      name: `${name} (overrides)`,
+      range: rawPinned,
+      expected: `$${name} — a reference must point at its own package`,
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+    continue;
+  }
+
+  const pinned = isReference ? declared[name] : rawPinned;
+
+  if (pinned == null) {
+    problems.push({
+      name: `${name} (overrides)`,
+      range: rawPinned,
+      expected: "a `dependencies` entry to point at — `$name` references one",
+      installed: installedVersion(name) ?? "(not installed)",
+    });
+    continue;
+  }
+
+  // An override must resolve to an exact version. A range re-opens the hole it
   // was added to close.
   if (/^[\^~><=]/.test(String(pinned))) {
     problems.push({
@@ -133,16 +168,19 @@ for (const [name, pinned] of Object.entries(overrides)) {
   if (dep && major(dep) !== major(pinned)) {
     problems.push({
       name: `${name} (overrides vs dependencies)`,
-      range: `overrides: ${pinned}`,
+      range: `overrides: ${rawPinned} -> ${pinned}`,
       expected: `dependencies: ${dep} — these must name the same version`,
       installed: installedVersion(name) ?? "(not installed)",
     });
   }
 
+  // `resolutions` (bun/yarn) has no `$` syntax, so it carries the literal
+  // version. Compare it against what the override RESOLVES to, not against
+  // the reference string, or every `$name` entry looks like a mismatch.
   if (resolutions[name] !== pinned) {
     problems.push({
       name: `${name} (overrides vs resolutions)`,
-      range: `overrides: ${pinned}`,
+      range: `overrides: ${rawPinned} -> ${pinned}`,
       expected: `resolutions: ${resolutions[name] ?? "(missing)"} — both spellings must agree, or only one package manager is pinned`,
       installed: installedVersion(name) ?? "(not installed)",
     });
