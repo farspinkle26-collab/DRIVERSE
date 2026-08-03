@@ -1,10 +1,11 @@
 # FLOW 1 (failure variant) — Onboarding with location permission DENIED
-# The "Your Nation" step offers GPS auto-detect. With location denied the app
+# The "Your Nation" step (now on /customize-profile, reached right after
+# account creation) offers GPS auto-detect. With location denied the app
 # must degrade gracefully: show a clear inline error and leave the manual
 # nation list fully usable — never crash or hang.
 #
-# Expected copy (signup.tsx): "Location permission denied. Pick your nation
-# from the list."
+# Expected copy (customize-profile.tsx): "Location permission denied. Pick
+# your nation from the list."
 appId: app.rork.driverse
 tags:
   - failure
@@ -22,7 +23,7 @@ env:
 - tapOn: "Sign Up"
 - assertVisible: "Create Account"
 
-# Minimal step-1 so we can reach the nation step.
+# Account creation, then land on /customize-profile.
 - evalScript: ${output.email = 'maestro+denied' + Date.now() + '@driverse.test'}
 - tapOn: "Full Name"
 - inputText: "Denied Location"
@@ -34,10 +35,12 @@ env:
 - inputText: "${PASSWORD}"
 - hideKeyboard
 - tapOn:
-    text: "NEXT"
+    text: "CREATE ACCOUNT"
 
 # Nation step — attempt GPS detect while permission is denied.
-- assertVisible: "Your Nation"
+- extendedWaitUntil:
+    visible: "Your Nation"
+    timeout: 20000
 - tapOn: "Detect with GPS"
 
 # Graceful failure: the exact inline error, and the manual path still works.
