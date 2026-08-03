@@ -1046,3 +1046,33 @@ loud — but a resolution failure that stops the install never reaches
 `postinstall` at all, which is why the install itself has to be exercised.
 
 CI runs `npm ci --dry-run` alongside the bun install for exactly this reason.
+
+## 16. `eas.json` shipped a config EAS itself rejects (3 Aug 2026)
+
+`eas.json` (§14) listed the five `EXPO_PUBLIC_*` variables under `env` with
+empty-string placeholders, on the reasoning that a committed file must not
+carry real secrets. EAS's own schema validation disagreed:
+
+```
+eas.json is not valid.
+- "build.diagnostic.env.EXPO_PUBLIC_SUPABASE_URL" is not allowed to be empty
+```
+
+An empty string is not "unset" to that schema; it is an invalid value, and
+`eas build` refuses to start at all — for every profile, since both
+`diagnostic` and `production` had the same block. There is no string that is
+both a valid placeholder and not a secret, so the fix is not a better
+placeholder. It is no `env` block.
+
+With the key omitted, a profile picks up whatever EAS secrets are registered
+for the project (`eas secret:create`) — none, until someone adds them. That is
+the correct default for `diagnostic`: its only job is proving the app opens,
+and `lib/supabase.ts` already degrades to an inert client rather than throwing
+when these are absent (§3). A missing key should cost a feature, never a
+build.
+
+**The rule this adds, again:** a config file that has never been run by the
+tool that reads it is a guess, the same as a dependency change nobody installed
+(§15). `eas.json` was written and committed without ever calling `eas build`
+against it — the first real invocation, from the user's own machine, is what
+caught this.
