@@ -37,7 +37,7 @@ Monthly and yearly are auto-renewing subscriptions in one subscription group.
 
 ### Test Store
 
-`EXPO_PUBLIC_REVENUECAT_TEST_KEY` (a `test_` key) routes purchases to
+`EXPO_PUBLIC_REVENUECAT_TEST_API_KEY` (a `test_` key) routes purchases to
 RevenueCat's own sandbox, so the whole flow — offerings, paywall, purchase,
 entitlement, Customer Center — is exercisable before any store product exists.
 
@@ -340,15 +340,18 @@ Platinum-only. Distinct from the existing `generate-car-image`, which restyles
 the garage photo *in place*; a showcase is a standalone artwork with its own
 bucket, its own ledger row, and a path out to the share sheet.
 
-- **Provider:** Gemini 3.1 Flash Lite Image via OpenRouter — the same provider,
-  key and model the garage render already uses. A second vendor would double
-  the billing surface and the failure modes for no product gain.
+- **Provider:** Gemini 3.1 Flash Lite Image (`google/gemini-3.1-flash-lite-image`)
+  through Rork Toolkit, with OpenRouter fallback for existing edge deployments.
+  A second vendor would double the billing surface and failure modes for no
+  product gain.
 - **Cost control lives on the server.** `generate-showcase` checks the
   entitlement mirror and the `ai_showcases` ledger before calling the provider,
   and writes the ledger row *before* returning, so a burst of parallel requests
   cannot each see the same remaining count.
-- Three looks (studio / night / track). Unique storage path per generation, so
-  a second render never destroys a first the driver may already have shared.
+- Every render uses one Driveverse Signature style: charcoal-to-espresso studio,
+  amber rim light, low three-quarter framing and a restrained floor reflection.
+  Unique storage paths mean a second render never destroys a first the driver may
+  already have shared.
 - **Sharing reuses the Share Trip export path**: a `showcase` variant was added
   to `ShareableCard`, and `ShareCardModal` drives the same 1080×1920
   capture-and-hand-to-the-OS flow. Nothing about the export is reimplemented.

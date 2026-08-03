@@ -86,6 +86,8 @@ export const PLATINUM_PACKAGE_IDS = {
 export const PLATINUM_FALLBACK_PRICE = {
   monthly: "Rp 49.000",
   yearly: "Rp 449.000",
+  /** Only used when the Test Store lifetime product is configured. */
+  lifetime: "—",
 } as const;
 
 /* ------------------------------------------------------------------ *

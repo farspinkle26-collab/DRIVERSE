@@ -10,7 +10,7 @@
 
 import { supabase } from "@/lib/supabase";
 
-export type ShowcaseStyle = "studio" | "night" | "track";
+export type ShowcaseStyle = "signature";
 
 export interface ShowcaseStyleOption {
   id: ShowcaseStyle;
@@ -20,9 +20,11 @@ export interface ShowcaseStyleOption {
 }
 
 export const SHOWCASE_STYLES: ShowcaseStyleOption[] = [
-  { id: "studio", label: "Studio", note: "Seamless backdrop, hard rim light." },
-  { id: "night", label: "Night", note: "Wet street, neon on the paint." },
-  { id: "track", label: "Track", note: "Circuit at golden hour." },
+  {
+    id: "signature",
+    label: "Driveverse Signature",
+    note: "Charcoal-to-espresso studio, amber rim light, consistent across every car.",
+  },
 ];
 
 export interface ShowcaseQuota {
@@ -44,6 +46,7 @@ export async function generateShowcase(params: {
   carId: string;
   imageBase64: string;
   mimeType: string;
+  /** Kept in the request for backwards compatibility; the server enforces Signature. */
   style: ShowcaseStyle;
 }): Promise<ShowcaseResult> {
   const { data, error } = await supabase.functions.invoke("generate-showcase", {

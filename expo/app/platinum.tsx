@@ -131,8 +131,10 @@ function renewalState(entitlement: EntitlementSnapshot): string {
  * introductory offer on the selected product.
  */
 function ctaTitle(
-  introOffer: StoreProduct["introPrice"]
+  introOffer: StoreProduct["introPrice"],
+  period: PlatinumPeriod
 ): string {
+  if (period === "lifetime") return "Unlock Lifetime Platinum";
   if (introOffer && introOffer.price === 0) return "Start Free Trial";
   return "Upgrade to Platinum";
 }
@@ -186,10 +188,12 @@ export default function PlatinumPaywallScreen() {
 
   const monthly = packages.find((p) => p.period === "monthly") ?? null;
   const yearly = packages.find((p) => p.period === "yearly") ?? null;
+  const lifetime = packages.find((p) => p.period === "lifetime") ?? null;
 
   const packageFor = useCallback(
-    (p: PlatinumPeriod) => (p === "yearly" ? yearly : monthly),
-    [monthly, yearly]
+    (p: PlatinumPeriod) =>
+      p === "yearly" ? yearly : p === "lifetime" ? lifetime : monthly,
+    [lifetime, monthly, yearly]
   );
   const selected = packageFor(period);
 
@@ -431,6 +435,15 @@ export default function PlatinumPaywallScreen() {
                 active={period === "yearly"}
                 onPress={() => setPeriod("yearly")}
               />
+              {lifetime ? (
+                <PeriodOption
+                  label="Lifetime"
+                  price={priceFor("lifetime")}
+                  note="one-time"
+                  active={period === "lifetime"}
+                  onPress={() => setPeriod("lifetime")}
+                />
+              ) : null}
             </View>
 
             {loadingPackages && (
@@ -441,7 +454,7 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <CutCornerButton
-              title={busy === "purchase" ? "Opening store…" : ctaTitle(introOffer)}
+              title={busy === "purchase" ? "Opening store…" : ctaTitle(introOffer, period)}
               variant="primary"
               size="lg"
               corners="topRight"
@@ -457,7 +470,9 @@ export default function PlatinumPaywallScreen() {
             )}
 
             <Text style={styles.terms}>
-              {`Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
+              {period === "lifetime"
+                ? `One-time purchase through ${STORE_NAME}. Platinum stays on this store account.`
+                : `Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
             </Text>
 
             {/* App Store guideline 3.1.1 requires restore to be reachable

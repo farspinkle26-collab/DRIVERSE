@@ -66,8 +66,8 @@ export interface StoreProduct {
   } | null;
 }
 
-/** The billing periods Platinum is sold in. */
-export type PlatinumPeriod = "monthly" | "yearly";
+/** Billing options Platinum can expose from the RevenueCat offering. */
+export type PlatinumPeriod = "monthly" | "yearly" | "lifetime";
 
 export interface PlatinumPackage {
   /** RevenueCat package identifier, passed back to `purchase()`. */
@@ -243,8 +243,8 @@ export function isPurchasesAvailable(): boolean {
  * server side of the webhook). Set them in `.env`; see `.env.example`.
  */
 const PLATFORM_KEY = Platform.select({
-  ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY,
-  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY,
+  ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
+  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
   default: undefined,
 });
 
@@ -254,7 +254,7 @@ const PLATFORM_KEY = Platform.select({
  * can all be exercised before a single App Store Connect / Play Console
  * product exists.
  */
-const TEST_STORE_KEY = process.env.EXPO_PUBLIC_REVENUECAT_TEST_KEY;
+const TEST_STORE_KEY = process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY;
 
 /**
  * Which key this build uses.
@@ -271,7 +271,7 @@ function resolveKey(): string | null {
   if (!TEST_STORE_KEY.startsWith("test_")) {
     // Someone put a real key in the test slot. Use it — it is valid — but say so.
     console.warn(
-      "[purchases] EXPO_PUBLIC_REVENUECAT_TEST_KEY is not a Test Store key. " +
+      "[purchases] EXPO_PUBLIC_REVENUECAT_TEST_API_KEY is not a Test Store key. " +
         "Move it to the platform-specific variable."
     );
     return TEST_STORE_KEY;
@@ -279,7 +279,7 @@ function resolveKey(): string | null {
   if (!__DEV__) {
     console.error(
       "[purchases] Refusing to configure with a Test Store key in a release " +
-        "build. Set EXPO_PUBLIC_REVENUECAT_IOS_KEY / _ANDROID_KEY before " +
+        "build. Set EXPO_PUBLIC_REVENUECAT_IOS_API_KEY / _ANDROID_API_KEY before " +
         "shipping. Purchases are disabled for this build."
     );
     return null;
@@ -524,7 +524,7 @@ export function onEntitlementChange(
  * ------------------------------------------------------------------ */
 
 /**
- * RevenueCat's package types, normalised to our two periods.
+ * RevenueCat's package types, normalised to the billing options the app can show.
  *
  * `packageType` is authoritative — it is what the dashboard's Monthly /
  * Annual slots set. The identifier is only consulted for packages
@@ -534,8 +534,10 @@ function periodOf(packageType: string, identifier: string): PlatinumPeriod | nul
   const type = packageType.toUpperCase();
   if (type === PACKAGE_TYPE.ANNUAL) return "yearly";
   if (type === PACKAGE_TYPE.MONTHLY) return "monthly";
+  if (type === "LIFETIME") return "lifetime";
 
   const value = `${type} ${identifier}`.toUpperCase();
+  if (value.includes("LIFETIME")) return "lifetime";
   if (value.includes("ANNUAL") || value.includes("YEAR")) return "yearly";
   if (value.includes("MONTH")) return "monthly";
   return null;

@@ -53,6 +53,7 @@ import {
   textStyle,
 } from "@/constants/theme";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
+import { resizeForUpload } from "@/lib/resizeForUpload";
 import {
   fetchShowcaseQuota,
   generateShowcase,
@@ -74,7 +75,7 @@ export default function ShowcaseModal({ visible, onClose, car }: ShowcaseModalPr
   const insets = useSafeAreaInsets();
   const { isPlatinum, openPaywall } = usePlatinum();
 
-  const [style, setStyle] = useState<ShowcaseStyle>("studio");
+  const [style, setStyle] = useState<ShowcaseStyle>("signature");
   const [quota, setQuota] = useState<ShowcaseQuota | null>(null);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -124,17 +125,12 @@ export default function ShowcaseModal({ visible, onClose, car }: ShowcaseModalPr
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.9,
-        base64: true,
       });
       const asset = picked.canceled ? null : picked.assets?.[0];
-      const imageBase64 = asset?.base64;
-      if (!asset || !imageBase64) return;
-
-      const mimeType =
-        asset.mimeType ??
-        (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+      if (!asset) return;
 
       setGenerating(true);
+      const { base64: imageBase64, mimeType } = await resizeForUpload(asset.uri);
       const outcome = await generateShowcase({
         carId: car.id,
         imageBase64,
@@ -270,12 +266,12 @@ export default function ShowcaseModal({ visible, onClose, car }: ShowcaseModalPr
               /* ═══ SETUP ═══ */
               <View style={styles.setupBlock}>
                 <Text style={styles.body}>
-                  Pick a look, then choose a photo of{" "}
-                  {car?.name ?? "your car"}. We re-light and re-stage it —
-                  same car, same colour, new setting.
+                  Choose a photo of {car?.name ?? "your car"}. Gemini keeps the
+                  real vehicle intact and applies the Driveverse Signature style
+                  used for every generated car.
                 </Text>
 
-                <Text style={styles.overline}>LOOK</Text>
+                <Text style={styles.overline}>DRIVEVERSE SIGNATURE</Text>
                 <View style={styles.styleList}>
                   {SHOWCASE_STYLES.map((option) => {
                     const active = option.id === style;

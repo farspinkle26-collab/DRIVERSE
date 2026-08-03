@@ -123,6 +123,7 @@ import {
 import { tripCode } from "@/lib/tripStats";
 import { supabase } from "@/lib/supabase";
 import { generateCarImage } from "@/lib/generateCarImage";
+import { resizeForUpload } from "@/lib/resizeForUpload";
 import { parseLimitRejection } from "@/lib/platinumLimits";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -872,18 +873,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         allowsEditing: true,
         aspect: [16, 10],
         quality: 0.9,
-        base64: true,
       });
       if (result.canceled) return;
       const asset = result.assets?.[0];
-      // Narrowed here rather than in the guard above: the picker types
-      // `base64` as optional, and reading it off `result.assets[0]` a second
-      // time does not carry the guard's narrowing with it.
-      const base64 = asset?.base64;
-      if (!asset || !base64) return;
-      const mimeType = asset.mimeType ?? (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+      if (!asset) return;
 
       setGenerating(true);
+      const { base64, mimeType } = await resizeForUpload(asset.uri);
       await generateCarImage(car.id, base64, mimeType);
       setGenerating(false);
       setPremiumOpen(false);
