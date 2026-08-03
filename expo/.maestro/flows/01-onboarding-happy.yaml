@@ -1,6 +1,6 @@
 # FLOW 1 (happy path) — Onboarding
-# Guest launch → the sign-in gate → Sign Up → 4-step profile setup →
-# garage gate → main Map screen.
+# Guest launch → the sign-in gate → Sign Up (account only) →
+# /customize-profile (nation + car setup) → garage gate → main Map screen.
 #
 # "Guest mode": a fresh install starts as GUEST_USER (useAuthStore), which is
 # unauthenticated, so app/index.tsx redirects to /login. There is no

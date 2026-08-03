@@ -63,6 +63,7 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={darkScreenOptions}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="customize-profile" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="select-car" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="terms-and-conditions" />

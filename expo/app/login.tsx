@@ -38,7 +38,9 @@ export default function LoginScreen() {
     if (!email.trim() || !password.trim()) return;
     const success = await login(email.trim(), password);
     if (success) {
-      router.replace("/select-car" as any);
+      // `app/index.tsx` sends an account that never finished nation/car
+      // customization to `/customize-profile` instead of straight in.
+      router.replace("/" as any);
     }
   };
 
@@ -46,7 +48,7 @@ export default function LoginScreen() {
     setSocialLoading("google");
     try {
       const success = await signInWithGoogle();
-      if (success) router.replace("/select-car" as any);
+      if (success) router.replace("/" as any);
     } finally {
       setSocialLoading(null);
     }
@@ -56,7 +58,7 @@ export default function LoginScreen() {
     setSocialLoading("apple");
     try {
       const success = await signInWithApple();
-      if (success) router.replace("/select-car" as any);
+      if (success) router.replace("/" as any);
     } finally {
       setSocialLoading(null);
     }
