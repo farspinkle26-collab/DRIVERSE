@@ -11,6 +11,7 @@ import {
   driveScoreBreakdown,
   formatDistance,
   formatDuration,
+  formatShareStamp,
   formatSpeed,
   type TripLike,
 } from "@/lib/tripStats";
@@ -182,5 +183,25 @@ describe("calculateDriveXP", () => {
       durationSeconds: 1_800,
     });
     expect(withEstimate).toBe(withoutEstimate);
+  });
+});
+
+describe("formatShareStamp", () => {
+  it("stamps an absolute date and 24-hour time", () => {
+    // Constructed from local parts so the assertion does not depend on the
+    // machine's timezone — the stamp is deliberately local, like the clock the
+    // driver read when they finished.
+    const d = new Date(2026, 7, 3, 16, 17, 42);
+    expect(formatShareStamp(d.toISOString())).toBe("03 AUG 2026 · 16:17");
+  });
+
+  it("zero-pads the day and the clock", () => {
+    const d = new Date(2026, 0, 9, 7, 5, 0);
+    expect(formatShareStamp(d.toISOString())).toBe("09 JAN 2026 · 07:05");
+  });
+
+  it("returns nothing for a date it cannot read, rather than 'Invalid Date'", () => {
+    expect(formatShareStamp("not a date")).toBe("");
+    expect(formatShareStamp("")).toBe("");
   });
 });

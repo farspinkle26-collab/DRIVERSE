@@ -31,7 +31,7 @@ import { Image, StyleSheet, Text, View } from "react-native";
 import Svg, { Line } from "react-native-svg";
 import { CutCornerBadge, CutCornerSurface } from "@/components/CutCorner";
 import DriverseLogo from "@/components/DriverseLogo";
-import RoutePreview from "@/components/RoutePreview";
+import SpeedTrace, { SpeedLegend } from "@/components/SpeedTrace";
 import RankBadge from "@/components/RankBadge";
 import type { Trip } from "@/components/TripCard";
 import { endpointLabels, shareTripTitle } from "@/lib/tripEndpoints";
@@ -43,9 +43,11 @@ import {
   driveScore,
   formatDistance,
   formatDuration,
+  formatShareStamp,
   formatSpeed,
 } from "@/lib/tripStats";
 import { decodePolyline } from "@/lib/polyline";
+import { speedDomain, speedProfileForTrip } from "@/lib/speedTrace";
 import { PlatinumBadge } from "@/components/platinum/PlatinumBadge";
 import { platinum } from "@/constants/platinum";
 import {
@@ -54,6 +56,7 @@ import {
   colors,
   cut,
   fontFamily,
+  onRacingRed,
   spacing,
 } from "@/constants/theme";
 
@@ -72,8 +75,52 @@ const CONTENT_WIDTH = CARD_WIDTH - FRAME_PADDING * 2;
  * Payloads
  * ------------------------------------------------------------------ */
 
+/**
+ * How the drive's route is drawn — the driver's choice, made in the share
+ * sheet before posting.
+ *
+ *   `map`    a still of the real map (Mapbox tiles on the native map surface),
+ *            produced by `components/TripMapSnapshot.tsx`, with the speed
+ *            heatmap drawn over it. The default when a map can be produced.
+ *   `trace`  the route shape alone on the card's own black, no tiles. Faster,
+ *            and the honest choice for a driver who does not want to publish a
+ *            legible map of where they live.
+ *   `hidden` no route at all — a stats-only card. Same reason, taken further.
+ */
+export type TripRouteStyle = "map" | "trace" | "hidden";
+
+/**
+ * The car a drive was recorded in, flattened to what the card draws. A subset
+ * of `GarageCar` on purpose: the card should not be able to render a field
+ * that the garage adds later without someone deciding it belongs here.
+ */
+export interface ShareTripCar {
+  name: string;
+  make?: string | null;
+  model?: string | null;
+  year?: string | null;
+  /** Hex, from the garage. Used for the swatch when there is no photo. */
+  color?: string | null;
+  hp?: number | null;
+  photo_url?: string | null;
+}
+
 export interface TripSharePayload {
   trip: Trip;
+  /** The car this drive was logged with, when one is known. */
+  car?: ShareTripCar | null;
+  /** Show the car strip. Ignored when `car` is absent. Default: true. */
+  showCar?: boolean;
+  /** Default: `map`. */
+  routeStyle?: TripRouteStyle;
+  /** Colour the route by speed rather than flat red. Default: true. */
+  speedHeat?: boolean;
+  /**
+   * A map still from `TripMapSnapshot`. Until it arrives (or if it never
+   * does) a `map` card draws the SVG trace instead, so the block is never
+   * empty and never pops from blank to image.
+   */
+  mapImageUri?: string | null;
 }
 
 export interface RankSharePayload {
@@ -199,28 +246,24 @@ function Overline({ label, color = colors.textSecondary }: { label: string; colo
  * A single big readout: mono value + Inter unit + Inter caption label.
  * ------------------------------------------------------------------ */
 
+/**
+ * Sized to its content, not to a fraction of the row: the rank and quest rows
+ * are centred, and two fixed 50% halves plus the divider and its gaps overflow
+ * the row and push the left stat's label off the card edge.
+ */
 function BigStat({
   label,
   value,
   unit,
   accent = false,
-  half = false,
 }: {
   label: string;
   value: string;
   unit?: string;
   accent?: boolean;
-  /**
-   * Take a fixed half of the row — the trip variant's 2-column wrapping grid.
-   * Off (the default) sizes the stat to its content, which is what the
-   * centered rank/quest rows need: two fixed 50% halves plus the divider and
-   * its gaps overflow the row and, under `justifyContent: "center"`, push the
-   * left stat's label off the card edge.
-   */
-  half?: boolean;
 }) {
   return (
-    <View style={[styles.bigStat, half && styles.bigStatHalf]}>
+    <View style={styles.bigStat}>
       <View style={styles.bigStatValueRow}>
         <Text style={[styles.bigStatValue, accent && { color: colors.racingRed }]}>
           {value}
@@ -236,27 +279,149 @@ function BigStat({
  * Variant: Trip
  * ------------------------------------------------------------------ */
 
-function TripVariant({ trip }: TripSharePayload) {
+/**
+ * Height of the route block, in the two layouts that exist.
+ *
+ * Fixed rather than flexed, because the trace is an SVG that has to be told
+ * its size and the map still is captured at a known aspect. Two values, not
+ * one: dropping the car strip frees 60pt, and a card that leaves that as a
+ * hole above the brand mark looks like a layout bug rather than a choice.
+ */
+const ROUTE_HEIGHT_WITH_CAR = 200;
+export const ROUTE_HEIGHT_NO_CAR = 244;
+
+/**
+ * Size the map still should be captured at: the block's exact width, and its
+ * taller height. One capture serves both layouts — the shorter one crops it
+ * vertically (`resizeMode="cover"`), which is invisible, where re-capturing on
+ * every car toggle would be a second and a half of blank map.
+ */
+export const MAP_SNAPSHOT_WIDTH = CONTENT_WIDTH;
+export const MAP_SNAPSHOT_HEIGHT = ROUTE_HEIGHT_NO_CAR;
+
+/**
+ * A compact mono readout in the stat row under the hero. Three of these fit
+ * across the card with hairline dividers between them.
+ */
+function SmallStat({
+  label,
+  value,
+  unit,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  accent?: boolean;
+}) {
+  return (
+    <View style={styles.smallStat}>
+      <Text style={styles.smallStatLabel}>{label}</Text>
+      <View style={styles.smallStatValueRow}>
+        <Text style={[styles.smallStatValue, accent && { color: colors.racingRed }]}>
+          {value}
+        </Text>
+        {unit ? <Text style={styles.smallStatUnit}>{unit}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The car the drive was logged in, as one strip along the bottom of the card.
+ *
+ * A photo where the garage has one, a colour swatch where it does not — never
+ * a placeholder car icon, which is the single most template-looking element a
+ * card like this can carry. The spec line is assembled from whatever the
+ * garage actually knows, so a car entered as just a name renders as just a
+ * name rather than as "Custom · 2024 · 300 hp" boilerplate.
+ */
+function CarStrip({ car }: { car: ShareTripCar }) {
+  const specs = [
+    [car.make, car.model].filter(Boolean).join(" ").trim(),
+    car.year ? String(car.year).trim() : "",
+    car.hp && car.hp > 0 ? `${Math.round(car.hp)} HP` : "",
+  ].filter((part) => part.length > 0 && part.toLowerCase() !== "custom");
+
+  return (
+    <View style={styles.carStrip}>
+      {car.photo_url ? (
+        <Image source={{ uri: car.photo_url }} style={styles.carPhoto} resizeMode="cover" />
+      ) : (
+        <View
+          style={[
+            styles.carSwatch,
+            { backgroundColor: car.color || colors.carbonSurface },
+          ]}
+        />
+      )}
+      <View style={styles.carLabels}>
+        <Text style={styles.carLabel}>DRIVEN IN</Text>
+        <Text style={styles.carName} numberOfLines={1}>
+          {car.name}
+        </Text>
+      </View>
+      {specs.length > 0 ? (
+        <Text style={styles.carSpec} numberOfLines={1}>
+          {specs.join(" · ")}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function TripVariant({
+  trip,
+  car,
+  showCar = true,
+  routeStyle = "map",
+  speedHeat = true,
+  mapImageUri,
+}: TripSharePayload) {
   const distance = formatDistance(trip.distance_km);
   const duration = formatDuration(trip.duration_seconds);
-  const speed = formatSpeed(trip.avg_speed_kmh);
+  const avg = formatSpeed(trip.avg_speed_kmh);
+  const top = formatSpeed(trip.top_speed_kmh ?? 0);
   const score = driveScore(trip);
+  const stamp = formatShareStamp(trip.completed_at);
 
-  // A very short / instant trip may have no recorded trace — fall back to a
-  // stat-only layout rather than a broken empty map box.
-  const hasRoute =
-    !!trip.route_polyline && decodePolyline(trip.route_polyline).length > 1;
+  const points = React.useMemo(
+    () => (trip.route_polyline ? decodePolyline(trip.route_polyline) : []),
+    [trip.route_polyline]
+  );
+  const profile = React.useMemo(
+    () => speedProfileForTrip(trip, points),
+    [trip, points]
+  );
+  const domain = React.useMemo(
+    () => speedDomain(profile.speeds),
+    [profile.speeds]
+  );
+
+  // A very short / instant drive may have no recorded trace. It cannot show a
+  // route whatever the driver picked, and saying so is better than framing an
+  // empty box.
+  const hasRoute = points.length > 1;
+  const showRoute = hasRoute && routeStyle !== "hidden";
+  // Heat needs a profile to be about anything; a flat line is what an
+  // untimed, unscaled drive honestly is.
+  const heat = speedHeat && profile.source !== "none";
 
   // Where the drive actually started and ended, resolved by the map when it
   // recorded the trip. `lib/tripEndpoints` is what stops the field names
   // ("Current Location", "Dropped Pin", "Unknown") reaching the card — an
   // unnamed leg reads Point A → Point B instead.
   const legs = endpointLabels(trip);
+  const showCarStrip = !!car && showCar;
+  const routeHeight = showCarStrip ? ROUTE_HEIGHT_WITH_CAR : ROUTE_HEIGHT_NO_CAR;
 
   return (
-    <View style={styles.variant}>
+    <View style={[styles.variant, styles.tripVariant]}>
       <View style={styles.tripHeader}>
-        <Overline label="TRIP LOGGED" />
+        <View style={styles.tripEyebrow}>
+          <Overline label="TRIP LOGGED" />
+          {stamp ? <Text style={styles.stamp}>{stamp}</Text> : null}
+        </View>
         <Text style={styles.tripTitle} numberOfLines={1}>
           {shareTripTitle(trip)}
         </Text>
@@ -271,34 +436,79 @@ function TripVariant({ trip }: TripSharePayload) {
         </View>
       </View>
 
-      {hasRoute ? (
-        <View style={styles.mapWrap}>
-          <RoutePreview
-            polyline={trip.route_polyline as string}
-            width={CONTENT_WIDTH}
-            height={220}
-            color={colors.racingRed}
-            strokeWidth={4}
+      {showRoute ? (
+        <View style={styles.routeBlock}>
+          <CutCornerSurface
+            fill={colors.voidBlack}
+            borderColor={colors.hairline}
+            borderWidth={borderWidth.hairline}
+            cutSize={cut.lg}
+            corners="topRight"
+            style={[styles.routeFrame, { height: routeHeight }]}
+            contentStyle={styles.routeFrameContent}
+          >
+            {routeStyle === "map" && mapImageUri ? (
+              <Image
+                source={{ uri: mapImageUri }}
+                style={styles.mapImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <SpeedTrace
+                points={points}
+                speeds={profile.speeds}
+                domain={domain}
+                width={CONTENT_WIDTH}
+                height={routeHeight}
+                strokeWidth={4}
+                flat={!heat}
+              />
+            )}
+          </CutCornerSurface>
+          {heat ? (
+            <SpeedLegend topSpeedKmh={domain.max} width={CONTENT_WIDTH} />
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* Hero: distance dominates, the score sits beside it as a mark rather
+          than as a fourth equal number. With the route hidden it grows to fill
+          the space the map would have taken — a stats-only card wants a centre
+          of gravity, not a gap. */}
+      <View style={[styles.heroRow, !showRoute && styles.heroRowTall]}>
+        <View style={styles.hero}>
+          <View style={styles.heroValueRow}>
+            <Text style={[styles.heroValue, !showRoute && styles.heroValueTall]}>
+              {distance.value}
+            </Text>
+            <Text style={styles.heroUnit}>{distance.unit}</Text>
+          </View>
+          <Text style={styles.heroLabel}>DISTANCE</Text>
+        </View>
+        <View style={styles.scoreBlock}>
+          <Text style={styles.scoreLabel}>SCORE</Text>
+          <CutCornerBadge
+            label={String(score)}
+            numeric
+            solid={score >= 90}
+            color={score >= 90 ? colors.racingRed : colors.hairline}
+            textColor={score >= 90 ? onRacingRed : colors.textPrimary}
+            corners="topRight"
           />
         </View>
-      ) : (
-        // Stat-only fallback: a single dominant distance readout stands in for
-        // the map, so the card still has a centre of gravity.
-        <View style={styles.noRoute}>
-          <Text style={styles.noRouteValue}>{distance.value}</Text>
-          <Text style={styles.noRouteUnit}>{distance.unit.toUpperCase()}</Text>
-        </View>
-      )}
-
-      {/* Readouts — the visual centrepiece, all JetBrains Mono. */}
-      <View style={styles.statGrid}>
-        {hasRoute ? (
-          <BigStat label="DISTANCE" value={distance.value} unit={distance.unit} half />
-        ) : null}
-        <BigStat label="TIME" value={duration.value} unit={duration.unit} half />
-        <BigStat label="AVG SPEED" value={speed.value} unit={speed.unit} half />
-        <BigStat label="SCORE" value={String(score)} accent={score >= 90} half />
       </View>
+
+      {/* Time, average and — the one the drive is actually bragging about —
+          top speed. Always three columns, so the row never reflows. */}
+      <View style={styles.statRow}>
+        <SmallStat label="TIME" value={duration.value} unit={duration.unit} />
+        <View style={styles.statColDivider} />
+        <SmallStat label="AVG" value={avg.value} unit={avg.unit} />
+        <View style={styles.statColDivider} />
+        <SmallStat label="TOP" value={top.value} unit={top.unit} accent />
+      </View>
+
+      {showCarStrip ? <CarStrip car={car as ShareTripCar} /> : null}
     </View>
   );
 }
@@ -480,9 +690,9 @@ const styles = StyleSheet.create({
   frameInner: {
     flex: 1,
     paddingHorizontal: FRAME_PADDING,
-    paddingTop: spacing.spacingXxxl,
-    // Extra bottom room so content never collides with the brand mark.
-    paddingBottom: spacing.spacingXxxl + spacing.spacingXl,
+    paddingTop: spacing.spacingXxl,
+    // Room for the brand mark, which is absolutely positioned over this.
+    paddingBottom: spacing.spacingXxxl,
   },
   cornerAccent: {
     position: "absolute",
@@ -507,6 +717,15 @@ const styles = StyleSheet.create({
   centeredVariant: {
     alignItems: "center",
     justifyContent: "center",
+  },
+  /**
+   * The trip card carries five blocks (header, route, hero, stats, car) where
+   * the others carry three, so it takes the tighter gap. Every combination of
+   * the route/car toggles has been sized against `CARD_HEIGHT` at this value —
+   * widen it and the fullest card (map + car) overflows the frame.
+   */
+  tripVariant: {
+    gap: spacing.spacingLg,
   },
 
   overline: {
@@ -558,9 +777,21 @@ const styles = StyleSheet.create({
     color: platinum.chrome,
   },
 
-  // Trip
+  // Trip — header
   tripHeader: {
     gap: spacing.spacingSm,
+  },
+  tripEyebrow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  /** The drive's own date. Mono, so it reads as a record, not a caption. */
+  stamp: {
+    fontFamily: fontFamily.dataRegular,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: colors.textSecondary,
   },
   tripTitle: {
     fontFamily: fontFamily.displayBold,
@@ -585,40 +816,166 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.racingRed,
   },
-  mapWrap: {
-    alignItems: "center",
+
+  // Trip — route block
+  routeBlock: {
+    gap: spacing.spacingSm,
   },
-  noRoute: {
+  routeFrame: {
+    width: CONTENT_WIDTH,
+  },
+  routeFrameContent: {
+    flex: 1,
+    overflow: "hidden",
+  },
+  mapImage: {
+    flex: 1,
+    width: "100%",
+  },
+
+  // Trip — hero readout
+  heroRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+  },
+  heroRowTall: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
+  },
+  heroValueTall: {
+    fontSize: 88,
+    lineHeight: 92,
+    letterSpacing: -4,
+  },
+  hero: {
     gap: spacing.spacingXs,
   },
-  noRouteValue: {
+  heroValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
+  },
+  heroValue: {
     fontFamily: fontFamily.dataBold,
-    fontSize: 96,
-    lineHeight: 100,
+    fontSize: 52,
+    lineHeight: 56,
     letterSpacing: -2,
     color: colors.textPrimary,
   },
-  noRouteUnit: {
+  heroUnit: {
     fontFamily: fontFamily.bodyMedium,
-    fontSize: 16,
-    letterSpacing: 4,
+    fontSize: 15,
+    color: colors.textSecondary,
+  },
+  heroLabel: {
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: colors.textSecondary,
+  },
+  scoreBlock: {
+    alignItems: "flex-end",
+    gap: spacing.spacingXs,
+    paddingBottom: spacing.spacingXs,
+  },
+  scoreLabel: {
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 10,
+    letterSpacing: 2,
     color: colors.textSecondary,
   },
 
-  // Stat grid (trip)
-  statGrid: {
+  // Trip — secondary stat row
+  statRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    rowGap: spacing.spacingLg,
+    alignItems: "stretch",
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
   },
-  bigStat: {
+  statColDivider: {
+    width: borderWidth.hairline,
+    alignSelf: "stretch",
+    marginHorizontal: spacing.spacingMd,
+    backgroundColor: colors.hairline,
+  },
+  smallStat: {
+    flex: 1,
     gap: spacing.spacingXs,
   },
-  bigStatHalf: {
-    width: "50%",
+  smallStatLabel: {
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: colors.textSecondary,
+  },
+  smallStatValueRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing.spacingXs,
+  },
+  smallStatValue: {
+    fontFamily: fontFamily.dataBold,
+    fontSize: 22,
+    lineHeight: 26,
+    letterSpacing: -0.5,
+    color: colors.textPrimary,
+  },
+  smallStatUnit: {
+    fontFamily: fontFamily.bodyRegular,
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+
+  // Trip — car strip
+  carStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingMd,
+    borderTopWidth: borderWidth.hairline,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.spacingMd,
+  },
+  carPhoto: {
+    width: spacing.spacingXxl + spacing.spacingSm,
+    height: spacing.spacingXl + spacing.spacingXs,
+    backgroundColor: colors.carbonSurface,
+  },
+  carSwatch: {
+    width: spacing.spacingXxl + spacing.spacingSm,
+    height: spacing.spacingXl + spacing.spacingXs,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+  },
+  carLabels: {
+    flex: 1,
+    gap: 2,
+  },
+  carLabel: {
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    color: colors.textSecondary,
+  },
+  carName: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 16,
+    lineHeight: 20,
+    letterSpacing: 0.4,
+    color: colors.textPrimary,
+  },
+  carSpec: {
+    fontFamily: fontFamily.dataRegular,
+    fontSize: 10,
+    letterSpacing: 0,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+
+  // Big stat (rank / quest rows)
+  bigStat: {
+    gap: spacing.spacingXs,
   },
   bigStatValueRow: {
     flexDirection: "row",

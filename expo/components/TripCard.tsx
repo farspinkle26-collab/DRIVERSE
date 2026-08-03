@@ -51,6 +51,16 @@ export interface Trip {
   destination_lat?: number | null;
   destination_lng?: number | null;
   route_polyline?: string | null;
+  /**
+   * One whole km/h reading per point of `route_polyline`, comma-separated —
+   * what the speed heatmap on the share card is drawn from. Written by the
+   * recorder; absent on every drive logged before
+   * `database_migration_trip_speed_profile.sql`, which `lib/speedTrace.ts`
+   * handles by deriving a profile from the geometry instead.
+   */
+  speed_profile?: string | null;
+  /** The garage car this drive was recorded in, if one was selected. */
+  car_id?: string | null;
   distance_km: number;
   duration_seconds: number;
   avg_speed_kmh: number;
