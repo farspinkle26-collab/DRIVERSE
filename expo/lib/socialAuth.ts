@@ -45,35 +45,31 @@
  * only makes the lookup succeed today. The rule in LAUNCH_SAFETY_REFERENCE.md
  * §1/§2 is that nothing on the launch path may reach a native module at module
  * scope AT ALL, and a static `import` of a package that does hands that
- * decision to the package. So the import is lazy now: `webBrowser()` resolves
- * it on the first sign-in attempt, by which point there is a React tree, an
- * error boundary and a crash reporter to catch anything it does.
+ * decision to the package.
  *
- * `require` rather than `await import` deliberately — a dynamic import splits
- * the module out and makes this an async boundary Metro has to serve; a
- * `require` inside a function body is inert until called and needs no
- * plumbing. Keep it that way.
+ * AND THAT WAS STILL NOT ENOUGH ON ANDROID (§13).
+ *
+ * The lazy import fixed iOS, where the failure was a JavaScript throw. Android
+ * kept crashing, because there the failure is not in JavaScript at all: Expo
+ * registers `WebBrowserModule` during `ReactInstance.<init>`, before any JS
+ * runs, and the 56.x module Rork's builder keeps installing dies there looking
+ * for a class the SDK 54 core does not have. No import discipline in this file
+ * can reach a crash that happens before the bundle is evaluated.
+ *
+ * So `expo-web-browser` is now excluded from Android autolinking entirely, and
+ * every use of it goes through `lib/authBrowser.ts`, which asks whether the
+ * native module exists and picks the in-app sheet or the system browser
+ * accordingly. Nothing in this file imports `expo-web-browser` any more, on
+ * any platform. See `lib/authBrowser.ts` for the full account.
  */
 
 import { Platform } from "react-native";
-import type * as WebBrowserTypes from "expo-web-browser";
 import * as AppleAuthentication from "expo-apple-authentication";
+import { loadWebBrowser, openAuthSession } from "@/lib/authBrowser";
 import { parseAuthCallback } from "@/lib/authCallback";
 import { createAppLink } from "@/lib/deepLink";
 import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
-
-/**
- * Resolves `expo-web-browser` on first use rather than at import.
- *
- * Type-only above, value here: the types cost nothing at runtime, so the
- * call sites stay fully checked while the bundle carries no module-scope
- * reference to the native module.
- */
-function webBrowser(): typeof WebBrowserTypes {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("expo-web-browser") as typeof WebBrowserTypes;
-}
 
 export type SocialProvider = "google" | "apple";
 
@@ -100,7 +96,7 @@ function getRedirectTo(): string {
 function completeAnyPendingAuthSession(): void {
   if (Platform.OS !== "web") return;
   try {
-    webBrowser().maybeCompleteAuthSession();
+    loadWebBrowser()?.maybeCompleteAuthSession();
   } catch (err) {
     console.warn("[Auth] maybeCompleteAuthSession failed:", err);
   }
@@ -188,15 +184,19 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
     return null;
   }
 
-  const result = await webBrowser().openAuthSessionAsync(data.url, redirectTo);
+  // `lib/authBrowser.ts` picks the transport: the in-app sheet where
+  // `expo-web-browser`'s native module is linked (iOS), the system browser
+  // plus the `myapp://` deep link where it is not (Android, where the module
+  // is excluded from autolinking — see that file's header for why).
+  const result = await openAuthSession(data.url, redirectTo);
 
   // The user backed out. Not an error — return null and let the caller leave
   // the screen as it was, with nothing shown.
-  if (result.type === "cancel" || result.type === "dismiss") {
+  if (result.type === "cancel") {
     return null;
   }
 
-  if (result.type !== "success" || !result.url) {
+  if (!result.url) {
     throw new Error(NO_CALLBACK_MESSAGE);
   }
 

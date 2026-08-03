@@ -124,5 +124,42 @@
     "expo-blur": "15.0.8",
     "expo-router": "6.0.24"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "//": [
+      "ANDROID AUTOLINKING \u2014 `expo-web-browser` is deliberately NOT linked here.",
+      "",
+      "Rork's cloud builder resolves expo-web-browser 56.x into this SDK 54 app",
+      "regardless of what the dependency block says. Three attempts failed to",
+      "change that: correcting `dependencies` (#167), pinning it exactly in",
+      "`overrides`/`resolutions` (#170), and deleting @rork-ai/toolkit-sdk whose",
+      "`\"*\"` peer was pulling it (#171). Every build after every one of those",
+      "still shipped the 56.x module and died on open with",
+      "`NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeCache` at",
+      "`WebBrowserModule.definition`.",
+      "",
+      "That crash happens while Expo REGISTERS native modules, inside",
+      "`ReactInstance.<init>`, before a single line of JavaScript runs \u2014 so no",
+      "JavaScript in this repo could prevent it. Refusing to link the module can:",
+      "an excluded module is never registered, `definition()` never runs, and the",
+      "missing class is never looked up, whatever version the builder installed.",
+      "",
+      "ANDROID ONLY, on purpose. iOS links expo-web-browser normally and keeps its",
+      "in-app SFSafariViewController sheet, which works. `lib/authBrowser.ts`",
+      "chooses the transport by asking whether the native module is present, not",
+      "by checking Platform.OS \u2014 so if a future Android build ever does link a",
+      "correct version, it starts using the better route with no code change.",
+      "",
+      "TO REMOVE THIS: confirm a built APK actually contains expo-web-browser",
+      "15.0.11 (not just that package.json says so \u2014 that has been true and wrong",
+      "three times), then delete the `exclude` array below and rebuild."
+    ],
+    "autolinking": {
+      "android": {
+        "exclude": [
+          "expo-web-browser"
+        ]
+      }
+    }
+  }
 }

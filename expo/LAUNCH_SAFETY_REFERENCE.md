@@ -810,3 +810,80 @@ and nothing else.
 And: **when a dependency ships as a prebuilt native artefact, a range is not a
 version — it is a lottery ticket.** Pin it, and if the pin is ignored, delete
 whatever is holding the door open.
+
+## 13. Refusing to link it (3 Aug 2026)
+
+Build 15 crashed. #171 removed `@rork-ai/toolkit-sdk`, whose `"*"` peer was the
+last path to `expo-web-browser`. The build after that crashed too, with the
+same trace, on the same `versionCode=15`.
+
+Four attempts, none of which changed what the builder installed:
+
+| # | Attempt | Result |
+| --- | --- | --- |
+| §10 | `dependencies: ~15.0.11` | build 14 shipped 56.x |
+| §11 | `overrides` + `resolutions` | build 15 shipped 56.x |
+| §12 | removed the `"*"` peer | still 56.x |
+| §13 | **refuse to link it** | — |
+
+Every one of the first three tries to persuade a resolver we do not control to
+pick a different version. The fourth stops arguing about the version and takes
+the module out of the build:
+
+```json
+"expo": { "autolinking": { "android": { "exclude": ["expo-web-browser"] } } }
+```
+
+The crash is at `WebBrowserModule.definition`, reached from
+`ModuleRegistry.register` inside `AppContext.<init>` — Expo *registering* its
+native modules, before any JavaScript exists. An excluded module is never
+registered, so `definition()` never runs and `AnyTypeCache` is never looked up.
+**Whatever version the builder installs stops mattering**, which is the only
+property that survives a build pipeline you cannot inspect.
+
+Verified with Expo's own resolver rather than by reasoning:
+
+```
+expo-modules-autolinking resolve -p android  → 21 modules, expo-web-browser absent
+expo-modules-autolinking resolve -p apple    → 25 modules, expo-web-browser present
+```
+
+### 13a. Android only, and asked rather than assumed
+
+iOS links the module normally and keeps its in-app `SFSafariViewController`
+sheet, which works today. Degrading it for an Android build problem would be
+paying twice.
+
+`lib/authBrowser.ts` therefore chooses its transport by **asking whether the
+native module is there**, not by branching on `Platform.OS`:
+
+- present → `openAuthSessionAsync`, the in-app sheet (iOS)
+- absent → `Linking.openURL` plus the `myapp://` deep link (Android)
+
+Same PKCE flow, same `redirectTo`, same `parseAuthCallback` on the far side.
+The driver sees a browser app-switch instead of a sheet. And if a future
+Android build ever does link a correct `expo-web-browser`, it starts using the
+better route on its own, with no code change and nothing to remember.
+
+The one subtlety, and the reason `RETURN_GRACE_MS` exists: coming back to the
+foreground and receiving the deep link are two events with no guaranteed order.
+Resolving `cancel` the moment the app is foregrounded races a successful
+sign-in and loses it at random. A 400 ms grace period removes the race — the
+cost is 400 ms of nothing on a real cancel, against telling a driver who just
+finished signing in that they cancelled. Eight tests in
+`lib/__tests__/authBrowser.test.ts` hold that behaviour down, including the
+late-arriving-callback case specifically.
+
+### 13b. What to do before removing this
+
+Do **not** delete the `exclude` array because `package.json` says `15.0.11`.
+That has been true and wrong three times. Confirm a *built APK* actually
+contains 15.0.11 first — then remove it, rebuild, and check the app still
+opens.
+
+### 13c. The rule this adds
+
+**When you cannot control what a build installs, control what it links.**
+Dependency declarations, lockfiles, `overrides` and `resolutions` are all
+requests to a resolver. Autolinking configuration is a statement about the
+binary. If four rounds of the former have failed, reach for the latter.
