@@ -887,3 +887,79 @@ opens.
 Dependency declarations, lockfiles, `overrides` and `resolutions` are all
 requests to a resolver. Autolinking configuration is a statement about the
 binary. If four rounds of the former have failed, reach for the latter.
+
+## 14. Five fixes, zero verified builds (3 Aug 2026)
+
+§13 excluded `expo-web-browser` from Android autolinking and verified it with
+Expo's own resolver: 21 modules linked, that one absent. The next Play Store
+build registered it anyway and died at the same line.
+
+That is the fifth change in a row that could not be shown to have reached a
+binary:
+
+| # | Change | Android result |
+| --- | --- | --- |
+| §10 | `dependencies: ~15.0.11` | shipped 56.x |
+| §11 | `overrides` + `resolutions` | shipped 56.x |
+| §12 | removed the `"*"` peer | shipped 56.x |
+| §13 | `autolinking.android.exclude` | module still registered |
+
+The first four try to change which version a resolver picks. §13 does not even
+do that — it tells the autolinker not to link the module at all, which is a
+statement about the binary rather than a request to a resolver. **A build that
+registers `WebBrowserModule` after §13 is a build that did not use this
+repository's `package.json`.**
+
+At that point the evidence stops being about the code. Nothing further written
+here can prove anything, because every proof runs on a developer machine and
+the artefact is produced somewhere else.
+
+### 14a. The mistake worth naming
+
+Four of those five changes were shipped on the strength of a local green check.
+`check:versions` passed, `check:launch-path` passed, the bundle compiled, the
+autolinking resolver reported the module excluded — and none of it was evidence
+about the APK that a driver installs. The whole point of §12c was "verify the
+artefact, not the source", and the next two rounds went out without doing it.
+
+The habit that would have caught it after the first attempt, not the fifth:
+
+```bash
+adb shell dumpsys package app.rork.driverse | grep versionCode
+```
+
+Run against the crashing build, that returned `15` three separate times, across
+builds that were each supposed to be new. A build number that does not move is
+a build that did not happen — and that single line, checked early, is worth
+more than any amount of reasoning about dependency resolution.
+
+### 14b. Getting one build we can see inside
+
+`eas.json` and `EAS_BUILD_REFERENCE.md` exist for exactly one purpose: produce
+an Android APK from *this* repository, with a build log that names the versions
+it installed.
+
+```bash
+npx eas build --platform android --profile diagnostic
+```
+
+It is a controlled experiment, not a migration. Rork stays the primary
+pipeline; nothing in CI or the `start` scripts changes; `eas.json` is inert
+until someone runs `eas build`.
+
+Two outcomes, both worth having:
+
+- **It launches** — the repository is correct, the pipeline is not, and there
+  is now a reproduction to hand Rork along with a working APK.
+- **It crashes identically** — the repository is still wrong, and the build log
+  finally names the `expo-web-browser` version that got installed, which is the
+  fact five rounds of inference never had.
+
+### 14c. The rule this adds
+
+**A fix you cannot verify in the artefact is a hypothesis, not a fix.** §7
+opens by saying that about reading the launch path; it applies just as much to
+dependency and configuration changes. When two consecutive fixes fail to change
+observed behaviour, stop fixing and go get an artefact you can inspect —
+because the third, fourth and fifth will fail the same way, and each one costs
+a release cycle to find out.
