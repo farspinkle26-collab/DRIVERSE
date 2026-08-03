@@ -12,19 +12,16 @@
       "ios": {
         "simulator": false
       },
-      "distribution": "internal",
-      "channel": "diagnostic"
+      "distribution": "internal"
     },
     "preview": {
-      "extends": "diagnostic",
-      "channel": "preview"
+      "extends": "diagnostic"
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
       },
-      "autoIncrement": true,
-      "channel": "production"
+      "autoIncrement": true
     }
   },
   "submit": {

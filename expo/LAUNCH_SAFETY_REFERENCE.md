@@ -1076,3 +1076,40 @@ tool that reads it is a guess, the same as a dependency change nobody installed
 (§15). `eas.json` was written and committed without ever calling `eas build`
 against it — the first real invocation, from the user's own machine, is what
 caught this.
+
+## 17. `eas.json`'s `channel` needs `expo-updates`, which this app does not have (3 Aug 2026)
+
+Third strike on the same file. `eas build` got past validation this time and
+then stopped:
+
+```
+The build profile "diagnostic" specifies the channel "diagnostic", but the
+"expo-updates" package is missing. To use channels in your builds, install
+the "expo-updates" package and run "eas update:configure".
+```
+
+`channel` is an EAS Update concept — which OTA update stream a build should
+poll — and EAS refuses to attach a build to a channel unless `expo-updates` is
+installed to actually check it. This app has no OTA updates and does not want
+`expo-updates` added as a side effect of a diagnostic test build: it is a
+native module, and a native module is precisely the kind of thing this whole
+investigation (§10–§13) has spent five rounds fighting on Android.
+
+Accepting EAS's own offer to auto-install it failed anyway, for a reason worth
+recording: `expo install` picks a package manager by which lockfile it finds,
+saw `bun.lock`, and ran `bun add` — on a Windows machine where bun is not on
+`PATH`. `spawn bun ENOENT`.
+
+The fix is not installing anything. `channel` is removed from `eas.json`
+entirely — `diagnostic`, `preview` and `production` did not need OTA update
+channels for what this file is for, which is producing an installable APK, not
+serving updates to one.
+
+### 17a. The rule this file keeps re-teaching
+
+§15 was `npm install` never having been run. §16 was `eas.json` never having
+been validated by `eas build`. This is the same category a third time: a
+config field copied in from habit (`channel` is a normal thing to set on a real
+EAS project) without checking what it requires on THIS one. Three strikes on
+one file is not bad luck — it is what a config file looks like when nobody runs
+the tool that reads it before committing it.
