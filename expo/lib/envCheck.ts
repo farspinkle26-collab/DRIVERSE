@@ -73,8 +73,8 @@ function readEnv(): EnvVar[] {
     {
       name: "EXPO_PUBLIC_MAPBOX_TOKEN",
       value: process.env.EXPO_PUBLIC_MAPBOX_TOKEN,
-      impact: "map tiles fall back to the token bundled in constants/mapbox.ts",
-      optional: true,
+      impact: "the map, Mapbox search, directions, and reverse geocoding are unavailable",
+      optional: false,
     },
   ];
 }

@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import MapboxMapStatus from "@/components/MapboxMapStatus";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { createAppLink } from "@/lib/deepLink";
@@ -274,6 +275,7 @@ export default function RouteDetailScreen() {
               style={StyleSheet.absoluteFill}
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
+              mapType={Platform.OS === "web" ? undefined : "none"}
               onMapReady={fitToRoute}
               customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               scrollEnabled={false}
@@ -300,6 +302,7 @@ export default function RouteDetailScreen() {
                 </Marker>
               )}
             </MapView>
+            <MapboxMapStatus style={styles.mapboxStatus} />
           </View>
 
           <View style={styles.body}>
@@ -477,6 +480,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   topTitle: { flex: 1, fontSize: 17, fontWeight: "800", color: "#FFFFFF", textAlign: "center" },
+  mapboxStatus: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+  },
   mapWrap: {
     height: 260,
     marginHorizontal: 16,

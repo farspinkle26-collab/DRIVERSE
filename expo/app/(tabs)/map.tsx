@@ -47,6 +47,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import MapboxMapStatus from "@/components/MapboxMapStatus";
 import { SettledMarker } from "@/components/SettledMarker";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import {
@@ -2500,6 +2501,7 @@ export default function MapScreen() {
           </SettledMarker>
         )}
       </MapView>
+      <MapboxMapStatus style={[styles.mapboxStatus, { bottom: insets.bottom + spacing.spacingXl }]} />
 
       {/* --- Locating --- */}
       {locating && (
@@ -4352,6 +4354,11 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  mapboxStatus: {
+    position: "absolute",
+    right: spacing.spacingMd,
+    zIndex: 5,
   },
 
   /* ---------------- Status pills and banners ---------------- */

@@ -1,5 +1,6 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { AppState } from "react-native";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
@@ -50,6 +51,14 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   // AUTH STATE LISTENER — runs once on mount, handles session restore
   // ================================================================
   useEffect(() => {
+    // Keep Supabase's refresh loop aligned with the native app lifecycle so
+    // persisted sessions stay valid after backgrounding and returning.
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") supabase.auth.startAutoRefresh();
+      else supabase.auth.stopAutoRefresh();
+    });
+    supabase.auth.startAutoRefresh();
+
     // Restore the persisted session.
     //
     // LAUNCH SAFETY — `loading` starts true and `app/index.tsx` shows the
@@ -109,6 +118,8 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
     return () => {
       subscription.unsubscribe();
+      appStateSubscription.remove();
+      supabase.auth.stopAutoRefresh();
     };
   }, []);
 
