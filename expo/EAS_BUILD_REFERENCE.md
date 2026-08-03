@@ -90,9 +90,26 @@ it belongs in a Rork support ticket verbatim.
 they are a property of the build machine, not the phone. `lib/envCheck.ts`
 logs which ones landed; a build missing them starts but cannot reach Supabase.
 
-The `env` blocks in `eas.json` are deliberately **empty strings**, not real
-values — this file is committed, and even a publishable key does not belong in
-git. Set them as EAS secrets instead, once per project:
+`eas.json` deliberately carries **no `env` block at all** for any profile — an
+earlier version of this file listed the five variables with empty-string
+placeholders, and EAS's own schema validation rejects that outright:
+
+```
+eas.json is not valid.
+- "build.diagnostic.env.EXPO_PUBLIC_SUPABASE_URL" is not allowed to be empty
+```
+
+An empty string is not "unset" to EAS; it is an invalid value, and the build
+refuses to start. There is no placeholder that satisfies the schema and also
+avoids committing a real secret, so the field is omitted entirely.
+
+With no `env` block, a profile gets whatever EAS secrets are registered for the
+project — none, until you create some. That is fine for `diagnostic`: it exists
+to test whether the app *opens*, and `lib/supabase.ts` already falls back to an
+inert client rather than throwing when these are absent (§3). A missing key
+degrades a feature; it does not crash the build or the app.
+
+To set real values, once per project:
 
 ```bash
 npx eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_URL --value https://YOUR.supabase.co
@@ -102,10 +119,6 @@ npx eas secret:create --scope project --name EXPO_PUBLIC_REVENUECAT_IOS_KEY --va
 npx eas secret:create --scope project --name EXPO_PUBLIC_REVENUECAT_ANDROID_KEY --value goog_...
 npx eas secret:list
 ```
-
-Secrets override the empty defaults. For the diagnostic build they are optional
-— the app is being tested for whether it *opens*, and `lib/supabase.ts` already
-falls back to an inert client rather than throwing when they are absent (§3).
 
 See `.env.example` for what each one is for.
 

@@ -13,14 +13,7 @@
         "simulator": false
       },
       "distribution": "internal",
-      "channel": "diagnostic",
-      "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "",
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "",
-        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_KEY": ""
-      }
+      "channel": "diagnostic"
     },
     "preview": {
       "extends": "diagnostic",
@@ -31,14 +24,7 @@
         "buildType": "app-bundle"
       },
       "autoIncrement": true,
-      "channel": "production",
-      "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "",
-        "EXPO_PUBLIC_MAPBOX_TOKEN": "",
-        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "",
-        "EXPO_PUBLIC_REVENUECAT_ANDROID_KEY": ""
-      }
+      "channel": "production"
     }
   },
   "submit": {
