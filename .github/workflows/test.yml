@@ -57,6 +57,15 @@ jobs:
         working-directory: expo
         run: bun run check:versions
 
+      # @rork-ai/toolkit-sdk was removed twice (§12, §18) — once by a reviewed
+      # PR, once because a commit authored `Rork <agent@rork.com>` pushed
+      # directly to main and brought it back along with the Metro wrapper that
+      # injects a provider above AppErrorBoundary (§8). check:versions cannot
+      # see it (it is not an Expo SDK package). This is the guard that can.
+      - name: Check @rork-ai/toolkit-sdk has not come back
+        working-directory: expo
+        run: bun run check:no-rork-toolkit
+
       - name: Bundle for iOS (release)
         working-directory: expo
         run: bun run bundle:ios

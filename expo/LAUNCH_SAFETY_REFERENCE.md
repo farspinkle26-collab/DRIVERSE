@@ -1113,3 +1113,102 @@ config field copied in from habit (`channel` is a normal thing to set on a real
 EAS project) without checking what it requires on THIS one. Three strikes on
 one file is not bad luck — it is what a config file looks like when nobody runs
 the tool that reads it before committing it.
+
+## 18. The fix reverted itself: a direct push undid §8 and §12 in one commit (4 Aug 2026)
+
+The exact `AnyTypeCache` / `WebBrowserModule` trace from §10–§13 came back,
+after everything in §14–§17 had been fixed and verified working with a real
+EAS build. The reason was not a sixth version of the same bug. It was that the
+fifth version's fix had been undone.
+
+Between two of tonight's PRs, a commit landed on `main`:
+
+```
+449e2e2  Rork <agent@rork.com>  2026-08-03 14:29:00 +0000
+  Added real-time driver map, trip tracking, and profile pages with car collections.
+```
+
+Authored directly, pushed directly, no branch, no PR, no CI run against it. In
+the same commit, alongside genuine feature work:
+
+```diff
+-    "zustand": "^5.0.2"
++    "zustand": "^5.0.2",
++    "@rork-ai/toolkit-sdk": "latest"
+```
+
+That is the exact package §12 removed, for the exact reason §12 removed it —
+its `"expo-web-browser": "*"` peer is how the wrong native module version
+enters this app. Two more direct-push commits followed in the same session,
+also unreviewed.
+
+### 18a. It was worse than the dependency
+
+`metro.config.js` — the file §8 fixed by switching off `withRorkMetro`'s Babel
+transformer — was overwritten back to its original two-line form, with **no
+override at all**:
+
+```js
+const { withRorkMetro } = require("@rork-ai/toolkit-sdk/metro");
+module.exports = withRorkMetro(getDefaultConfig(__dirname));
+```
+
+`app/_layout.tsx` itself was untouched and reads correctly — `AppErrorBoundary`
+still wraps the whole tree in the source. That is precisely why this is
+dangerous rather than merely wrong: `withRorkMetro`'s transformer rewrites this
+file **at build time**, appending a new default export that mounts
+`RorkAnalyticsProvider` above the boundary. Reading the source finds nothing,
+because the source is not what runs. Every driver on the next build would have
+been back to §8's exact bug — a provider above `AppErrorBoundary`, pulling in
+`posthog-react-native`'s module-scope `require()`s of `expo-file-system`,
+`expo-application`, `expo-device`, `expo-localization` — and none of us would
+have known until a launch crash with no error and no message pointed at it,
+same as three times before.
+
+### 18b. Why nothing caught it
+
+`check:versions` does not know `@rork-ai/toolkit-sdk` — it is not an Expo SDK
+package, so it has no entry in `bundledNativeModules.json` to compare against.
+Nothing parsed `metro.config.js` at all. Both regressions sat on `main`,
+green across every existing check, until a build actually ran on a device.
+
+### 18c. The fixes
+
+- `@rork-ai/toolkit-sdk` removed from `dependencies` again.
+- `metro.config.js` restored to `module.exports = getDefaultConfig(__dirname);`
+  with the full history in its own header — third time this exact file has
+  needed the reason written down.
+- `scripts/check-no-rork-toolkit.js` — a narrow, explicit denylist. It fails on
+  the package appearing in any dependency field, and separately fails if
+  `metro.config.js` requires it or calls `withRorkMetro(...)`. Regression-tested
+  both ways before trusting it: fails when the exact reverted `metro.config.js`
+  is restored, passes on the fixed one. Wired into `postinstall` (every
+  install, everywhere, including whatever installs on Rork's side) and into
+  `bundle:verify`.
+- CI runs it explicitly, with the two-line story in the workflow comment: this
+  package was removed once by a reviewed PR and once by nothing at all.
+
+### 18d. What a script cannot fix
+
+A `postinstall` guard only runs where something installs dependencies. A
+direct push to `main` skips CI by construction — GitHub only runs workflows
+that are already configured to run, and a repo without branch protection lets
+any commit land regardless. The technical guard here catches the dependency
+and the Metro config reappearing on the **next install anywhere that installs**
+— that is real and worth having — but it does not stop another direct push
+from reintroducing a *different* regression tomorrow.
+
+The structural fix is outside this file: branch protection on `main` requiring
+a pull request before merge, for every author, including automation. That is a
+repository setting, not a code change, and it is the difference between "the
+next regression fails a check" and "the next regression never becomes `main`
+in the first place."
+
+### 18e. The rule this adds
+
+**A fix is not permanent because it is merged.** Anything with write access to
+`main` can undo it, and the diff that undoes it can be folded into an
+unrelated, well-intentioned feature commit that nobody reads line by line. The
+guard that matters is not "did this get fixed" but "can this get un-fixed
+silently" — and until tonight, the answer for both `@rork-ai/toolkit-sdk` and
+`metro.config.js` was yes.
