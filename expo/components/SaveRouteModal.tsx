@@ -84,6 +84,13 @@ interface SaveRouteModalProps {
   onClose: () => void;
   onSaved?: (routeId: string) => void;
   path: LatLng[];
+  /**
+   * Measured per-point speeds for `path`, already encoded and already thinned
+   * through the same indices `simplifyPath` will use below. Stored alongside
+   * the polyline so a saved route keeps the drive's real speed profile rather
+   * than only its shape.
+   */
+  speedProfile?: string | null;
   distanceMeters: number;
   durationSeconds: number;
   avgSpeedKmh: number;
@@ -173,6 +180,7 @@ export default function SaveRouteModal({
   onClose,
   onSaved,
   path,
+  speedProfile,
   distanceMeters,
   durationSeconds,
   avgSpeedKmh,
@@ -241,6 +249,7 @@ export default function SaveRouteModal({
         description: description.trim(),
         activity_type: activity,
         route_polyline: polyline,
+        speed_profile: speedProfile ?? null,
         start_lat: start.latitude,
         start_lng: start.longitude,
         end_lat: end.latitude,

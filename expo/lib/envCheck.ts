@@ -53,22 +53,28 @@ function readEnv(): EnvVar[] {
       optional: false,
     },
     {
-      name: "EXPO_PUBLIC_REVENUECAT_IOS_KEY",
-      value: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY,
+      name: "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY",
+      value: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
       impact: "Platinum cannot be bought or restored on iOS; the paywall shows no prices",
       optional: false,
     },
     {
-      name: "EXPO_PUBLIC_REVENUECAT_ANDROID_KEY",
-      value: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY,
+      name: "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY",
+      value: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
       impact: "Platinum cannot be bought or restored on Android; the paywall shows no prices",
       optional: false,
     },
     {
+      name: "EXPO_PUBLIC_REVENUECAT_TEST_API_KEY",
+      value: process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY,
+      impact: "RevenueCat Test Store purchases are unavailable in development",
+      optional: true,
+    },
+    {
       name: "EXPO_PUBLIC_MAPBOX_TOKEN",
       value: process.env.EXPO_PUBLIC_MAPBOX_TOKEN,
-      impact: "map tiles fall back to the token bundled in constants/mapbox.ts",
-      optional: true,
+      impact: "the map, Mapbox search, directions, and reverse geocoding are unavailable",
+      optional: false,
     },
   ];
 }

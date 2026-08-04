@@ -251,7 +251,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
         return { completed: [], error: error.message };
       }
 
-      const rows = ((data ?? []) as QuestEventResult[]) ?? [];
+      const rows = (data as QuestEventResult[] | null) ?? [];
       // Realtime will refresh, but refresh immediately for snappy UI.
       await fetchState();
       return { completed: rows.filter((r) => r.completed) };

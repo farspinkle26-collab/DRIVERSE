@@ -2,12 +2,17 @@
 //
 // Takes a driver's own car photo and restyles it into the dark studio-lit
 // showcase look (matte finish, dramatic rim light, gradient backdrop) using
-// Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") via OpenRouter. The
+// Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") through the shared
+// renderer. The
 // result is stored in the `car-photos` bucket and written to
 // `car_collections.photo_url`, the same column the manual-upload flow used
 // before this replaced it — so every other place that reads photo_url
 // (garage cards, public profile, FeaturedCar) needs no changes.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  CarRenderError,
+  generateCarRender,
+} from "../_shared/carRender.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -16,16 +21,8 @@ const CORS_HEADERS = {
 };
 
 const CAR_PHOTOS_BUCKET = "car-photos";
-const OPENROUTER_MODEL = "google/gemini-3.1-flash-lite-image";
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB, generous for a phone-camera JPEG
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // Provider-side guard; the app compresses to 3MB before upload.
 
-const STYLE_PROMPT =
-  "Restyle this exact car photo into a premium automotive studio render: " +
-  "solid dark charcoal-to-warm-brown gradient background, soft dramatic side " +
-  "rim lighting, matte glossy showroom finish, low three-quarter front angle, " +
-  "no text, watermark, or people. Keep the car's real make, model, color, and " +
-  "body shape unchanged — it must still be recognizably the same vehicle, only " +
-  "re-lit and re-staged like a high-end car advertisement.";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -94,7 +91,7 @@ Deno.serve(async (req) => {
 
   // ── Gate: entitlement ──────────────────────────────────────
   // AI car generation is a Platinum benefit; the client checks this too, but
-  // the function is what actually bounds the OpenRouter bill.
+  // the function is what actually bounds the image-provider bill.
   const { data: isPlatinum, error: entitlementError } = await adminClient.rpc(
     "is_platinum",
     { uid: userId }
@@ -110,51 +107,16 @@ Deno.serve(async (req) => {
     );
   }
 
-  const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
-  if (!openRouterKey) {
-    console.error("[generate-car-image] OPENROUTER_API_KEY is not configured");
-    return jsonResponse({ error: "Image generation is not available right now" }, 500);
-  }
-
   let generatedDataUrl: string;
   try {
-    const orResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        modalities: ["image", "text"],
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: STYLE_PROMPT },
-              { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (!orResp.ok) {
-      const errText = await orResp.text().catch(() => "");
-      console.error(`[generate-car-image] OpenRouter error ${orResp.status}: ${errText}`);
-      return jsonResponse({ error: "Couldn't generate your car render, try again." }, 502);
-    }
-
-    const orJson = await orResp.json();
-    const images = orJson?.choices?.[0]?.message?.images;
-    const url = images?.[0]?.image_url?.url;
-    if (typeof url !== "string" || !url.startsWith("data:")) {
-      console.error("[generate-car-image] OpenRouter response had no image", JSON.stringify(orJson).slice(0, 500));
-      return jsonResponse({ error: "Couldn't generate your car render, try again." }, 502);
-    }
-    generatedDataUrl = url;
+    generatedDataUrl = await generateCarRender({ imageBase64, mimeType });
   } catch (err) {
-    console.error(`[generate-car-image] fetch failed: ${err instanceof Error ? err.message : err}`);
+    if (err instanceof CarRenderError) {
+      return jsonResponse({ error: err.message }, err.status);
+    }
+    console.error(
+      `[generate-car-image] render failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
     return jsonResponse({ error: "Couldn't generate your car render, try again." }, 502);
   }
 

@@ -1,5 +1,6 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { AppState } from "react-native";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
@@ -43,12 +44,21 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [needsRoleSelection, setNeedsRoleSelection] = useState<boolean>(false);
+  const [needsProfileCustomization, setNeedsProfileCustomization] = useState<boolean>(false);
   const [session, setSession] = useState<Session | null>(null);
 
   // ================================================================
   // AUTH STATE LISTENER — runs once on mount, handles session restore
   // ================================================================
   useEffect(() => {
+    // Keep Supabase's refresh loop aligned with the native app lifecycle so
+    // persisted sessions stay valid after backgrounding and returning.
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") supabase.auth.startAutoRefresh();
+      else supabase.auth.stopAutoRefresh();
+    });
+    supabase.auth.startAutoRefresh();
+
     // Restore the persisted session.
     //
     // LAUNCH SAFETY — `loading` starts true and `app/index.tsx` shows the
@@ -100,6 +110,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         } else if (event === "SIGNED_OUT") {
           setUser(GUEST_USER);
           setNeedsRoleSelection(false);
+          setNeedsProfileCustomization(false);
           setError(null);
         }
       }
@@ -107,6 +118,8 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
     return () => {
       subscription.unsubscribe();
+      appStateSubscription.remove();
+      supabase.auth.stopAutoRefresh();
     };
   }, []);
 
@@ -150,6 +163,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           canSwitchRoles: false,
           country: defaultProfile.country ?? undefined,
         });
+        // A brand-new profile row (created here, not by the signup flow) has
+        // never been through nation/car customization — this is the path
+        // every social sign-in was silently taking, straight into the app.
+        setNeedsProfileCustomization(true);
         return;
       }
 
@@ -169,6 +186,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
       };
 
       setUser(loadedUser);
+      setNeedsProfileCustomization(!profile.registration_completed_at);
       setError(null);
     } catch (err) {
       console.error("Profile load error:", err);
@@ -473,6 +491,43 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, [user, session]);
 
+  // ================================================================
+  // COMPLETE PROFILE CUSTOMIZATION — the step every signup path (email,
+  // Google, Apple) is routed through once, before it ever reaches the app.
+  // ================================================================
+  const completeProfileCustomization = useCallback(async (country?: string) => {
+    if (!user || !session?.user) return false;
+    try {
+      const updates: { registration_completed_at: string; country?: string } = {
+        registration_completed_at: new Date().toISOString(),
+      };
+      const trimmedCountry = country?.trim();
+      if (trimmedCountry) updates.country = trimmedCountry;
+
+      const { error: updErr } = await supabase
+        .from("profiles")
+        .update(updates)
+        .eq("id", session.user.id);
+
+      if (updErr) {
+        setError(updErr.message);
+        return false;
+      }
+
+      setUser({
+        ...user,
+        registrationCompletedAt: updates.registration_completed_at as unknown as number,
+        country: trimmedCountry || user.country,
+      });
+      setNeedsProfileCustomization(false);
+      return true;
+    } catch (err) {
+      console.error("Profile customization error:", err);
+      setError("Failed to save your profile. Please try again.");
+      return false;
+    }
+  }, [user, session]);
+
   // alias for simplified signup
   const signUp = useCallback(async (email: string, password: string) => {
     return signup(email, password, email.split("@")[0]);
@@ -484,6 +539,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     loading,
     error,
     needsRoleSelection,
+    needsProfileCustomization,
     login,
     signup,
     signUp,
@@ -495,6 +551,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     switchAccountType,
     updateProfilePicture,
     updateCountry,
+    completeProfileCustomization,
     loadUserProfile,
     getTitleForLevel,
     isAuthenticated: !!user && user.id !== GUEST_USER.id,
@@ -506,5 +563,5 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     isAccountActive: user?.accountStatus === "active",
     requiresDocuments: user?.verificationStatus === "requires_documents",
     isVerifiedCustomer: user?.role === "customer",
-  }), [user, session, loading, error, needsRoleSelection, login, signup, signUp, signInWithGoogle, signInWithApple, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, loadUserProfile]);
+  }), [user, session, loading, error, needsRoleSelection, needsProfileCustomization, login, signup, signUp, signInWithGoogle, signInWithApple, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, completeProfileCustomization, loadUserProfile]);
 });

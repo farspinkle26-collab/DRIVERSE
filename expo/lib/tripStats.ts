@@ -84,6 +84,32 @@ export function formatTripTimestamp(iso: string): string {
 }
 
 /**
+ * The date stamp on a share card: `03 AUG 2026 · 16:17`.
+ *
+ * Deliberately not {@link formatTripTimestamp}. "Today, 14:02" is right in the
+ * Drive Hub, where the list is read minutes after the drive — and wrong on an
+ * exported image, which outlives the day it was made: a card posted on Tuesday
+ * and looked at on Friday would claim the drive happened on Friday. An
+ * absolute stamp is also a large part of what stops a card reading as
+ * generated rather than recorded.
+ *
+ * Uppercased month, 24-hour clock, and the whole thing set in mono so it sits
+ * with the other measurements rather than with the prose.
+ */
+export function formatShareStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const months = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+  ];
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${day} ${months[d.getMonth()]} ${d.getFullYear()} · ${hh}:${mm}`;
+}
+
+/**
  * Trip identifier shown on the card header, newest first: `R-014`.
  * `total` is the number of trips in the list so the newest keeps the
  * highest number as the log grows.

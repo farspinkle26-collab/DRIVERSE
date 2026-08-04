@@ -297,11 +297,12 @@ export async function searchNearby(
   proximity: RoutePoint,
   language: string = "id"
 ): Promise<NearbyCandidate[]> {
-  if (!MAPBOX_ACCESS_TOKEN) return [];
+  const token = MAPBOX_ACCESS_TOKEN;
+  if (!token) return [];
 
   const requests = queryTerms.map(async (term) => {
     const params = new URLSearchParams({
-      access_token: MAPBOX_ACCESS_TOKEN,
+      access_token: token,
       language,
       limit: "10",
       types: "poi",

@@ -20,12 +20,16 @@
 // five-image allowance.
 //
 // PROVIDER
-//   Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") via OpenRouter — the
-//   same provider, key and model the existing garage render already uses.
+//   Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") through the shared
+//   Rork Toolkit renderer, with an OpenRouter fallback for existing deployments.
 //   Adding a second vendor for a second image feature would double the
 //   billing surface and the failure modes for no product gain.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  CarRenderError,
+  generateCarRender,
+} from "../_shared/carRender.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -34,30 +38,9 @@ const CORS_HEADERS = {
 };
 
 const SHOWCASE_BUCKET = "car-showcases";
-const OPENROUTER_MODEL = "google/gemini-3.1-flash-lite-image";
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // Provider-side guard; the app compresses to 3MB before upload.
+const SHOWCASE_STYLE = "signature";
 
-/** The showcase looks, keyed by the `style` the client asks for. */
-const STYLE_PROMPTS: Record<string, string> = {
-  studio:
-    "Restage this exact car as a premium studio showcase: seamless dark " +
-    "charcoal backdrop, hard rim light along the shoulder line, soft fill " +
-    "under the arches, low three-quarter front angle, glossy floor with a " +
-    "restrained reflection.",
-  night:
-    "Restage this exact car on a wet city street at night: neon spill on the " +
-    "paint, long reflections on the tarmac, deep shadows, cool colour grade, " +
-    "low three-quarter angle.",
-  track:
-    "Restage this exact car on a race circuit at golden hour: kerbs and " +
-    "run-off visible but defocused, warm low sun raking across the bodywork, " +
-    "slight motion in the background, panning-shot framing.",
-};
-
-const SHARED_CONSTRAINTS =
-  " No text, watermark, logos of other brands, or people. Keep the car's real " +
-  "make, model, colour, wheels and body shape unchanged — it must still be " +
-  "recognisably the same vehicle, only re-lit and re-staged.";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -96,9 +79,9 @@ Deno.serve(async (req) => {
   const carId = typeof body?.carId === "string" ? body.carId : null;
   const imageBase64 = typeof body?.imageBase64 === "string" ? body.imageBase64 : null;
   const mimeType = typeof body?.mimeType === "string" ? body.mimeType : "image/jpeg";
-  const style = typeof body?.style === "string" && body.style in STYLE_PROMPTS
-    ? body.style
-    : "studio";
+  // The client may send an older style value, but every generated car is now
+  // forced through the same Driveverse Signature treatment.
+  const style = SHOWCASE_STYLE;
 
   if (!carId || !imageBase64) {
     return jsonResponse({ error: "carId and imageBase64 are required" }, 400);
@@ -166,56 +149,16 @@ Deno.serve(async (req) => {
   }
 
   // ── Generate ───────────────────────────────────────────────
-  const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
-  if (!openRouterKey) {
-    console.error("[generate-showcase] OPENROUTER_API_KEY is not configured");
-    return jsonResponse({ error: "Showcase generation is not available right now" }, 500);
-  }
-
   let generatedDataUrl: string;
   try {
-    const orResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        modalities: ["image", "text"],
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: STYLE_PROMPTS[style] + SHARED_CONSTRAINTS },
-              {
-                type: "image_url",
-                image_url: { url: `data:${mimeType};base64,${imageBase64}` },
-              },
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (!orResp.ok) {
-      const errText = await orResp.text().catch(() => "");
-      console.error(`[generate-showcase] OpenRouter error ${orResp.status}: ${errText}`);
-      return jsonResponse({ error: "Couldn't generate your showcase, try again." }, 502);
-    }
-
-    const orJson = await orResp.json();
-    const url = orJson?.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    if (typeof url !== "string" || !url.startsWith("data:")) {
-      console.error(
-        "[generate-showcase] OpenRouter response had no image",
-        JSON.stringify(orJson).slice(0, 500)
-      );
-      return jsonResponse({ error: "Couldn't generate your showcase, try again." }, 502);
-    }
-    generatedDataUrl = url;
+    generatedDataUrl = await generateCarRender({ imageBase64, mimeType });
   } catch (err) {
-    console.error(`[generate-showcase] fetch failed: ${err instanceof Error ? err.message : err}`);
+    if (err instanceof CarRenderError) {
+      return jsonResponse({ error: err.message }, err.status);
+    }
+    console.error(
+      `[generate-showcase] render failed: ${err instanceof Error ? err.message : "unknown error"}`
+    );
     return jsonResponse({ error: "Couldn't generate your showcase, try again." }, 502);
   }
 

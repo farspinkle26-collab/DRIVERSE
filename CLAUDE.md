@@ -46,7 +46,7 @@ including `jsonb` sub-structures):
 Other schema areas, one migration file per feature (self-descriptive names):
 community v2, daily quests, realtime events, garage + public profiles, online
 users presence, OSM places, parties/convoys, platinum, problem signal, profile
-v2, saved routes, trip names, trip privacy. `expo/database_setup_complete.sql`
+v2, saved routes, trip names, trip privacy, trip speed profile. `expo/database_setup_complete.sql`
 is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
 Functions.
 
@@ -148,6 +148,40 @@ Sharing needs neither — the share card renders from the in-memory trip, so
 the Share action is never gated on a successful save.
 `expo/SAVE_ROUTE_REFERENCE.md` covers the sheet, the failure modes and how
 to verify it; `expo/lib/routeDraft.ts` holds the pure guards and their tests.
+
+**The share card** (`expo/components/ShareableCard.tsx`, exported as a
+1080×1920 PNG by `expo/lib/shareCard.ts`) is the growth loop's product half,
+and its trip variant is the one a driver produces several times a week. Full
+spec, including the device checks that are still unverified, in
+`expo/SHARE_CARD_REFERENCE.md`. The load-bearing points:
+
+- **The card contains an `<Image>` of a map, never a `MapView`.** view-shot
+  rasterises the RN view tree and a native map surface is not in it — on
+  Android that captures as a black rectangle. `TripMapSnapshot` uses
+  `MapView.takeSnapshot` instead, from a stage mounted *outside* the modal at
+  1% opacity (offscreen maps don't fetch tiles; maps inside a `Modal` are
+  where `react-native-maps` is least reliable on Android). Every failure path
+  resolves to `null` and the card falls back to its SVG trace — a share card
+  must never render a hole.
+- **The route is a speed heatmap**, `expo/lib/speedTrace.ts` (pure, tested).
+  Per-point km/h come from `trips.speed_profile` where the recorder wrote one
+  (`database_migration_trip_speed_profile.sql`) and are otherwise *derived*
+  from segment lengths — the recorder samples on a ~1 Hz timer and
+  `simplifyPath` thins by a constant index step, so segment length is
+  proportional to speed — then rescaled onto the row's stored top/average.
+  `simplifyIndices` exists so the polyline and the profile are thinned through
+  the same indices; a profile off by one point colours the wrong corner, and a
+  mismatched length is refused rather than realigned. The four-stop ramp is a
+  sanctioned exception to the six-colour palette, quarantined in that file.
+- **The driver composes the card before posting**: Route (Map / Trace / Off),
+  Speed heat, and the car it was driven in. Trace and Off exist because a map
+  of a drive that starts at your house is a map of your house. Controls
+  disable themselves when the thing they show is unavailable rather than
+  silently drawing something else.
+- **Save PNG** is its own action (`saveCardToPhotos`), not a line item in the
+  OS sheet. `expo-media-library` is **lazily required inside the function** —
+  a static import of a package that reaches a native module runs that lookup
+  at module scope, which is §10's crash.
 
 **Online presence** — who each driver sees on the map — runs on two paths at
 once, both in `expo/hooks/useOnlineUsers.ts`: Supabase Realtime Presence on

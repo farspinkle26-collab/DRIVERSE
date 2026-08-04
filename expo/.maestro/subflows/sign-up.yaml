@@ -1,5 +1,7 @@
-# Reusable: drive the 4-step Sign Up wizard from the login screen through to
-# a signed-in account landing on the garage gate (/select-car).
+# Reusable: create an account on the (now single-step) Sign Up screen, then
+# drive the customization screen (/customize-profile) it lands on — nation
+# and car setup — through to a signed-in account on the garage gate
+# (/select-car).
 #
 # Preconditions: the login screen ("WELCOME BACK") is showing.
 # Env (all overridable by the caller via `runFlow: env:`):
@@ -10,6 +12,11 @@
 # NOTE: signup() hits Supabase. This subflow needs a reachable (staging)
 # backend and a fresh EMAIL — callers pass a timestamped address so re-runs
 # never collide on an already-registered email.
+#
+# Customization is no longer part of the sign-up wizard itself: every
+# account — email, Google or Apple — is routed to /customize-profile by
+# app/index.tsx (needsProfileCustomization) once, immediately after account
+# creation, before it can ever reach the garage gate.
 appId: app.rork.driverse
 env:
   NAME: "Maestro Driver"
@@ -22,7 +29,7 @@ env:
 - tapOn: "Sign Up"
 - assertVisible: "Create Account"
 
-# ── Step 1: account ──────────────────────────────────────────────
+# ── Account creation ─────────────────────────────────────────────
 - tapOn: "Full Name"
 - inputText: "${NAME}"
 - tapOn: "Email address"
@@ -33,11 +40,16 @@ env:
 - inputText: "${PASSWORD}"
 - hideKeyboard
 - tapOn:
-    text: "NEXT"
+    text: "CREATE ACCOUNT"
 
-# ── Step 2: nation (pick from the list; GPS detect is exercised
-#    separately in the onboarding failure variant) ────────────────
-- assertVisible: "Your Nation"
+# signup() → success replaces to "/", which routes a fresh account straight
+# to /customize-profile. Give the network call room.
+- extendedWaitUntil:
+    visible: "Your Nation"
+    timeout: 20000
+
+# ── Customization step 1: nation (pick from the list; GPS detect is
+#    exercised separately in the onboarding failure variant) ─────
 - tapOn: "Search nations"
 - inputText: "${COUNTRY}"
 - hideKeyboard
@@ -45,18 +57,17 @@ env:
 - tapOn:
     text: "NEXT"
 
-# ── Step 3: car make + colour (a colour is pre-selected) ─────────
+# ── Customization step 2: car make + colour (a colour is pre-selected) ──
 - assertVisible: "Your Drive"
 - tapOn: "${CAR_MAKE}"
 - tapOn:
     text: "NEXT"
 
-# ── Step 4: name the ride, then create the account ───────────────
+# ── Customization step 3: name the ride, then enter the garage ──
 - assertVisible: "Name Your Ride"
 - tapOn:
-    text: "CREATE ACCOUNT"
+    text: "ENTER THE GARAGE"
 
-# signup() → success replaces to the garage gate. Give the network call room.
 - extendedWaitUntil:
     visible: "YOUR GARAGE"
     timeout: 20000

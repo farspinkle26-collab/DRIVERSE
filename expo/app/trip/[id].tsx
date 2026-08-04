@@ -3,6 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import MapboxMapStatus from "@/components/MapboxMapStatus";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Flag, Pencil, Share2 } from "lucide-react-native";
@@ -24,6 +25,9 @@ interface TripDetail {
   destination_lat: number;
   destination_lng: number;
   route_polyline: string;
+  /** Per-point km/h behind the share card's speed heatmap. Null on old rows. */
+  speed_profile: string | null;
+  car_id: string | null;
   distance_km: number;
   duration_seconds: number;
   avg_speed_kmh: number;
@@ -31,6 +35,17 @@ interface TripDetail {
   xp_earned: number;
   was_faster_than_estimation: boolean;
   completed_at: string;
+}
+
+/** The garage car this drive was logged in, as the share card wants it. */
+interface TripCar {
+  name: string;
+  make: string | null;
+  model: string | null;
+  year: string | null;
+  color: string | null;
+  hp: number | null;
+  photo_url: string | null;
 }
 
 function fmtDuration(seconds: number): string {
@@ -49,6 +64,7 @@ export default function TripDetailScreen() {
   const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const [trip, setTrip] = useState<TripDetail | null>(null);
+  const [car, setCar] = useState<TripCar | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRename, setShowRename] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -60,10 +76,24 @@ export default function TripDetailScreen() {
       if (!id) return;
       setLoading(true);
       const { data } = await supabase.from("trips").select("*").eq("id", id).maybeSingle();
-      if (!cancelled) {
-        setTrip((data as TripDetail) ?? null);
-        setLoading(false);
+      if (cancelled) return;
+      const row = (data as TripDetail) ?? null;
+      setTrip(row);
+      setLoading(false);
+
+      // The car is a second round trip on purpose: it only feeds the share
+      // card, so it must never hold up the screen, and a garage car that has
+      // since been deleted just means the card has no car strip.
+      if (!row?.car_id) {
+        setCar(null);
+        return;
       }
+      const { data: carRow } = await supabase
+        .from("car_collections")
+        .select("name, make, model, year, color, hp, photo_url")
+        .eq("id", row.car_id)
+        .maybeSingle();
+      if (!cancelled) setCar((carRow as TripCar) ?? null);
     })();
     return () => {
       cancelled = true;
@@ -160,6 +190,7 @@ export default function TripDetailScreen() {
               style={StyleSheet.absoluteFill}
               provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
               initialRegion={region}
+              mapType={Platform.OS === "web" ? undefined : "none"}
               customMapStyle={isDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT}
               onMapReady={fitToPoints}
             >
@@ -192,6 +223,7 @@ export default function TripDetailScreen() {
                 </Marker>
               )}
             </MapView>
+            <MapboxMapStatus style={styles.mapboxStatus} />
           </View>
 
           <View style={styles.body}>
@@ -257,7 +289,7 @@ export default function TripDetailScreen() {
           visible={showShare}
           onClose={() => setShowShare(false)}
           type="trip"
-          payload={{ trip: trip as unknown as Trip }}
+          payload={{ trip: trip as unknown as Trip, car }}
           caption={`${tripDisplayName} · ${trip.distance_km.toFixed(1)} km on Driveverse`}
         />
       )}
@@ -285,6 +317,11 @@ const styles = StyleSheet.create({
   },
   topTitle: { flex: 1, fontSize: 17, fontWeight: "800", color: "#FFFFFF", textAlign: "center" },
   topActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  mapboxStatus: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+  },
   mapWrap: {
     height: 300,
     marginHorizontal: 16,

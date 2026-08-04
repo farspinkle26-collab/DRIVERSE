@@ -18,13 +18,13 @@ cached in Postgres, merged with community submissions.
 - `places-nearby` — `GET /places-nearby?lat=&lng=&radius=&category=`. Cache-or-provider, merges in approved `places` rows, returns `{ places: [...] }`. **A provider failure only 502s when nothing is cached for that bucket** — a stale row is served in preference to an error, because POIs don't move.
 - `places-submit` — authenticated `POST /places-submit` inserting a community place (auto-approved — no moderation UI exists yet).
 - `places-refresh-cache` — background job that refreshes the oldest stale cache rows so real requests rarely hit a live provider call. Not invoked by user traffic — **schedule it** (Supabase dashboard → Edge Functions → this function → Schedule, e.g. every 6h, or a pg_cron job hitting its URL). Unscheduled, the cache only ever holds what a driver already waited for, which is also what the stale-serving fallback in `places-nearby` has to draw on.
-- `generate-car-image` — authenticated `POST /generate-car-image` (`{ carId, imageBase64, mimeType }`). Verifies the car belongs to the caller, sends the photo to Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") via OpenRouter with a fixed studio-render style prompt, uploads the result to the `car-photos` storage bucket, writes it to `car_collections.photo_url`, and returns `{ photoUrl }`. Requires the `OPENROUTER_API_KEY` secret. This is what powers the "Generate My Car" flow in `components/ProfileScreen.tsx` — it replaced an earlier stub that just let the user manually pick their own photo as the "render".
+- `generate-car-image` — authenticated `POST /generate-car-image` (`{ carId, imageBase64, mimeType }`). Verifies the car belongs to the caller, sends the photo to Gemini 3.1 Flash Lite Image ("Nano Banana 2 Lite") through the shared Rork Toolkit renderer with a fixed Driveverse Signature style prompt, uploads the result to the `car-photos` storage bucket, writes it to `car_collections.photo_url`, and returns `{ photoUrl }`. Existing deployments can use the `OPENROUTER_API_KEY` fallback. This is what powers the "Generate My Car" flow in `components/ProfileScreen.tsx` — it replaced an earlier stub that just let the user manually pick their own photo as the "render".
 
 ## Platinum
 
 See `../../PLATINUM_REFERENCE.md` for the tier as a whole.
 
-- `generate-showcase` — authenticated `POST /generate-showcase` (`{ carId, imageBase64, mimeType, style }`, style ∈ `studio | night | track`). The Platinum AI Car Showcase. Unlike `generate-car-image` it does **not** touch `car_collections`; it writes a standalone artwork to the `car-showcases` bucket and a row to `ai_showcases`, returning `{ imageUrl, style, quota }`. Gates, in order: Platinum entitlement (via `is_platinum()` against the webhook-written mirror — never anything the client sends) and the monthly quota (via `ai_showcase_quota()`). The ledger row is written before the response so parallel requests can't each spend the same remaining allowance. Shares `OPENROUTER_API_KEY` with `generate-car-image`.
+- `generate-showcase` — authenticated `POST /generate-showcase` (`{ carId, imageBase64, mimeType, style }`). The server ignores legacy style values and always applies the Driveverse Signature treatment. Unlike `generate-car-image` it does **not** touch `car_collections`; it writes a standalone artwork to the `car-showcases` bucket and a row to `ai_showcases`, returning `{ imageUrl, style, quota }`. Gates, in order: Platinum entitlement (via `is_platinum()` against the webhook-written mirror — never anything the client sends) and the monthly quota (via `ai_showcase_quota()`). The ledger row is written before the response so parallel requests can't each spend the same remaining allowance.
 - `revenuecat-webhook` — `POST /revenuecat-webhook`, called by RevenueCat, not by the app. Keeps `platinum_subscribers` in step with subscription lifecycle events. Derives activity from `expiration_at_ms` plus a small set of terminal event types, so an event type we haven't seen yet fails toward the expiry date rather than toward a wrong boolean. Drops duplicate and out-of-order deliveries; returns 500 on a write failure so RevenueCat retries. Requires `REVENUECAT_WEBHOOK_SECRET`, matched against the Authorization header configured in the RevenueCat dashboard — without it set, every request is refused rather than allowing unauthenticated writes to the entitlement mirror.
 
 ## Deploy
@@ -45,13 +45,17 @@ CHECK to accept `mapbox` and brings both `category` CHECKs up from the original
 four categories to all nine. Without it, `places-submit` and bookmarking reject
 every category added in the marker rebuild.
 
-`places-nearby` and `places-refresh-cache` need a Mapbox token,
-`generate-car-image` and `generate-showcase` need an OpenRouter API key, and the
-webhook needs its shared secret:
+`places-nearby` and `places-refresh-cache` need a Mapbox token. The AI car
+functions use Rork Toolkit's Gemini route when its server secret is configured,
+with OpenRouter retained as a fallback for existing deployments. The webhook
+needs its shared secret:
 
 ```
 supabase secrets set MAPBOX_ACCESS_TOKEN=pk....
-supabase secrets set OPENROUTER_API_KEY=sk-or-...
+supabase secrets set RORK_TOOLKIT_URL=https://toolkit.rork.com
+supabase secrets set RORK_TOOLKIT_SECRET_KEY=...
+# Existing deployments can keep this fallback:
+# supabase secrets set OPENROUTER_API_KEY=sk-or-...
 supabase secrets set REVENUECAT_WEBHOOK_SECRET=...
 ```
 

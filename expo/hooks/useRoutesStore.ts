@@ -57,6 +57,13 @@ export interface SaveRouteInput {
   description?: string;
   activity_type?: ActivityType;
   route_polyline: string;
+  /**
+   * One whole km/h per point of `route_polyline`, comma-separated — the
+   * measured speed profile behind the share card's heatmap. Optional: a drive
+   * recorded without timings has none, and `lib/speedTrace.ts` derives an
+   * approximate one from the geometry instead.
+   */
+  speed_profile?: string | null;
   start_lat: number;
   start_lng: number;
   end_lat: number;
@@ -237,6 +244,7 @@ export const [RoutesProvider, useRoutes] = createContextHook(() => {
             description: (input.description ?? "").trim(),
             activity_type: input.activity_type ?? "drive",
             route_polyline: input.route_polyline,
+            speed_profile: input.speed_profile ?? null,
             start_lat: input.start_lat,
             start_lng: input.start_lng,
             end_lat: input.end_lat,

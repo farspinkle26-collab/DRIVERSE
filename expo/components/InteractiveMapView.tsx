@@ -297,8 +297,8 @@ const InteractiveMapView: React.FC<InteractiveMapViewProps> = ({
         provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
         mapType={Platform.OS === 'web' ? undefined : 'none'}
         initialRegion={getInitialRegion()}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
         showsCompass={true}
         zoomEnabled={true}
         scrollEnabled={true}

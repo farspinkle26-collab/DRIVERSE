@@ -56,11 +56,11 @@ Copy `.env.example` to `.env` and fill in.
 
 ```bash
 # Development, before any store products exist:
-EXPO_PUBLIC_REVENUECAT_TEST_KEY=test_…
+EXPO_PUBLIC_REVENUECAT_TEST_API_KEY=test_…
 
 # Production, from RevenueCat → Project Settings → API keys → App specific keys:
-EXPO_PUBLIC_REVENUECAT_IOS_KEY=appl_…
-EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=goog_…
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_…
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_…
 ```
 
 `resolveKey()` in `lib/purchases.ts` picks between them:
@@ -352,7 +352,7 @@ operation.
 
 ### Test Store — no store setup required
 
-Set `EXPO_PUBLIC_REVENUECAT_TEST_KEY` and run a dev build. Purchases complete
+Set `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY` and run a dev build. Purchases complete
 against RevenueCat's own sandbox: offerings load, the paywall renders, the
 entitlement is granted, and the Customer Center works — before a single App
 Store Connect or Play Console product exists.
@@ -384,7 +384,7 @@ production; there is no separate code path. `entitlement.isSandbox` drives the
 
 ## 9. Before shipping
 
-- [ ] `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `_ANDROID_KEY` set in the release
+- [ ] `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` and `_ANDROID_KEY` set in the release
       build's environment. A `test_` key is refused at runtime, but do not rely
       on that as the only check.
 - [ ] Both products **Approved** in both stores, and attached to the

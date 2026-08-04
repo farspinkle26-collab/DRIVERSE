@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 /**
  * Priority #1 — Entitlement / Platinum cap enforcement.
  *

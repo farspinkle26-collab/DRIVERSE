@@ -47,6 +47,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import MapboxTileLayer from "@/components/MapboxTileLayer";
+import MapboxMapStatus from "@/components/MapboxMapStatus";
 import { SettledMarker } from "@/components/SettledMarker";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import {
@@ -139,7 +140,8 @@ import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
 import ShareCardModal from "@/components/ShareCardModal";
-import { encodePolyline, simplifyPath } from "@/lib/polyline";
+import { encodePolyline, simplifyIndices, simplifyPath } from "@/lib/polyline";
+import { encodeSpeedProfile, speedProfileFromFixes } from "@/lib/speedTrace";
 import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeDraft";
 import { calculateDriveXP } from "@/lib/tripStats";
 import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
@@ -758,6 +760,14 @@ export default function MapScreen() {
   const pauseStartRef = useRef<number>(0);
   const pausedAccumRef = useRef<number>(0);
   const speedSamplesRef = useRef<number[]>([]);
+  /** Capture time (epoch ms) of each fix in `recordedPath`, same length. */
+  const pathTimesRef = useRef<number[]>([]);
+  /**
+   * The finished drive's per-point speed profile, encoded — written to
+   * `trips.speed_profile` and handed to the share card so its heatmap uses
+   * measured speeds rather than the geometry-derived approximation.
+   */
+  const [recordedSpeedProfile, setRecordedSpeedProfile] = useState<string | null>(null);
   const photoToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scenicToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Save & Share Route modal
@@ -1089,6 +1099,14 @@ export default function MapScreen() {
               // Capture the previous fix before setRecordedPath overwrites the ref,
               // so we can derive travel direction for the chase camera.
               const prevCoord = lastCoordRef.current;
+              // When each fix landed, appended in lockstep with the path so
+              // the drive can be stored with a real per-point speed profile
+              // (`trips.speed_profile`, drawn as the share card's heatmap).
+              // Pushed here rather than inside the updater below because a
+              // state updater is not guaranteed to run exactly once, and a
+              // times array one entry longer than the path is a profile that
+              // silently colours the wrong corner of the map.
+              pathTimesRef.current.push(now);
               setRecordedPath((prev) => {
                 const next = [...prev, newCoord];
                 if (lastCoordRef.current) {
@@ -1513,6 +1531,8 @@ export default function MapScreen() {
     // card), otherwise recordedPath stays non-empty and permanently
     // hides the Drive/Convoy/Chat stack and online banner.
     setRecordedPath([]);
+    pathTimesRef.current = [];
+    setRecordedSpeedProfile(null);
     setTripDistance(0);
     setElapsedMs(0);
     setTripStartMs(null);
@@ -1695,6 +1715,8 @@ export default function MapScreen() {
     setElapsedMs(0);
     setTripDistance(0);
     setRecordedPath([]);
+    pathTimesRef.current = [];
+    setRecordedSpeedProfile(null);
     setXpEarned(null);
     setSavedRouteId(null);
     setLastTripId(null);
@@ -1720,6 +1742,7 @@ export default function MapScreen() {
     originRequestRef.current++;
     if (userLocation) {
       setRecordedPath([userLocation]);
+      pathTimesRef.current = [now];
       lastCoordRef.current = userLocation;
       void resolveOriginName(userLocation);
     }
@@ -1750,6 +1773,25 @@ export default function MapScreen() {
       endedAt: now,
     };
     setTripHistory((prev) => [trip, ...prev]);
+
+    // --- Per-point speed profile (the share card's heatmap) ---
+    // Thinned through the SAME indices as the polyline, or the two arrays
+    // describe different points and the colours land on the wrong stretch of
+    // road. A times array that fell out of step with the path (which should
+    // not happen, but is cheap to check and expensive to miss) writes no
+    // profile at all — `lib/speedTrace.ts` then derives one from the geometry,
+    // exactly as it does for every drive recorded before this existed.
+    const storedIndices = simplifyIndices(recordedPath.length, 400);
+    const fixTimes = pathTimesRef.current;
+    const speedProfile =
+      recordedPath.length > 1 && fixTimes.length === recordedPath.length
+        ? encodeSpeedProfile(
+            speedProfileFromFixes(
+              storedIndices.map((i) => ({ ...recordedPath[i], t: fixTimes[i] }))
+            )
+          )
+        : null;
+    setRecordedSpeedProfile(speedProfile);
 
     // --- XP calculation ---
     // Scaled off distance covered, time driven and the pace that implies,
@@ -1790,7 +1832,12 @@ export default function MapScreen() {
         // draw the drive. It was being dropped on the floor here, which is
         // why saved trips came back as stat rows with no map.
         route_polyline:
-          recordedPath.length > 1 ? encodePolyline(simplifyPath(recordedPath, 400)) : "",
+          recordedPath.length > 1
+            ? encodePolyline(storedIndices.map((i) => recordedPath[i]))
+            : "",
+        // One whole km/h per point of the polyline above. Null on a drive too
+        // short to have one; see database_migration_trip_speed_profile.sql.
+        speed_profile: speedProfile,
         distance_km: sanitizeMetric(tripDistance / 1000),
         duration_seconds: sanitizeCount(actualDurationSec),
         avg_speed_kmh: sanitizeMetric(avgSpeed),
@@ -2500,6 +2547,7 @@ export default function MapScreen() {
           </SettledMarker>
         )}
       </MapView>
+      <MapboxMapStatus style={[styles.mapboxStatus, { bottom: insets.bottom + spacing.spacingXl }]} />
 
       {/* --- Locating --- */}
       {locating && (
@@ -2893,6 +2941,8 @@ export default function MapScreen() {
                 hitSlop={spacing.spacingSm}
                 onPress={() => {
                   setRecordedPath([]);
+                  pathTimesRef.current = [];
+                  setRecordedSpeedProfile(null);
                   setTripDistance(0);
                   setElapsedMs(0);
                   setXpEarned(null);
@@ -4273,6 +4323,7 @@ export default function MapScreen() {
           elapsedMs > 0 ? (tripDistance / 1000) / (elapsedMs / 1000 / 3600) : 0
         }
         topSpeedKmh={tripTopSpeed}
+        speedProfile={recordedSpeedProfile}
         xpEarned={xpEarned ?? 0}
         carId={activeCar?.id ?? null}
         tripId={lastTripId}
@@ -4298,6 +4349,10 @@ export default function MapScreen() {
               recordedPath.length > 1
                 ? encodePolyline(simplifyPath(recordedPath, 400))
                 : null,
+            // Measured, not derived — this drive's own timings, computed when
+            // recording stopped. Keeps the heatmap exact on the one card that
+            // is shared straight off the road.
+            speed_profile: recordedSpeedProfile,
             distance_km: tripDistance / 1000,
             duration_seconds: Math.round(elapsedMs / 1000),
             avg_speed_kmh:
@@ -4305,7 +4360,19 @@ export default function MapScreen() {
             top_speed_kmh: tripTopSpeed,
             xp_earned: xpEarned ?? 0,
             completed_at: new Date().toISOString(),
+            car_id: activeCar?.id ?? null,
           },
+          car: activeCar
+            ? {
+                name: activeCar.name,
+                make: activeCar.make,
+                model: activeCar.model,
+                year: activeCar.year,
+                color: activeCar.color,
+                hp: activeCar.hp,
+                photo_url: activeCar.photo_url,
+              }
+            : null,
         }}
         caption="Just recorded a drive on Driveverse"
       />
@@ -4352,6 +4419,11 @@ const styles = StyleSheet.create({
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  mapboxStatus: {
+    position: "absolute",
+    right: spacing.spacingMd,
+    zIndex: 5,
   },
 
   /* ---------------- Status pills and banners ---------------- */
