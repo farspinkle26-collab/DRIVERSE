@@ -114,7 +114,8 @@
           "isAccessMediaLocationEnabled": false
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "@rnmapbox/maps"
     ],
     "experiments": {
       "typedRoutes": true

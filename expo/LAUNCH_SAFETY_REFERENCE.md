@@ -1333,3 +1333,82 @@ chance to catch it — in dev and in release alike. The only reliable way to
 avoid a module-scope throw on a platform where a native module is known to be
 absent is to never call `require()` for it on that platform at all, checked
 *before* the call, not around it.
+
+---
+
+## 20. `@rnmapbox/maps` carries §10's hazard, and is loaded accordingly (5 Aug 2026)
+
+The map is migrating off `react-native-maps` onto Mapbox's own native SDK
+(`MAP_MARKER_REFERENCE.md` §11 records why: the Google Maps API key that
+`react-native-maps` needs on Android was being rejected, and Google's engine
+is a hard dependency of that library even though every visible tile already
+came from Mapbox). This section records what the new package does at import
+time, because it is §10 again, in a package nobody has burned themselves on
+yet.
+
+### 20a. What it does at module scope
+
+`@rnmapbox/maps`'s entry re-exports `components/MapView.js`,
+`components/Camera.js`, `components/ShapeSource.js` and others. Each of those
+carries a **static** `import … from '../specs/Native…Module'`, and each of
+those spec files is one line:
+
+```js
+export default TurboModuleRegistry.getEnforcing('RNMBXMapViewModule');
+```
+
+`getEnforcing` throws when the native half is not registered — it is
+`requireNativeModule`'s behaviour under a different name, and the counterpart
+`TurboModuleRegistry.get` (which returns null) is not what this package uses.
+Static imports are hoisted, so a bare
+
+```ts
+import Mapbox from "@rnmapbox/maps";
+```
+
+puts that throw at module scope in whatever file writes it. Ten spec files do
+this; `MapView`, `Camera` and `ShapeSource` are all on the eager path from the
+package entry, so importing *anything* from the package pulls them in.
+
+That is §10 exactly — `expo-web-browser`'s `requireNativeModule` — and §19
+says the obvious defence does not work: the first `require()` of a module runs
+its body inside Metro's own guard, which reports a throw there as fatal
+without rethrowing, so no `try`/`catch` at the call site ever sees it.
+
+### 20b. How it is loaded here
+
+`lib/mapboxNative.ts` is the only file that names the package, and it follows
+§19's rule — the platform check comes **before** the `require`, not around it:
+
+```ts
+export function loadMapbox() {
+  if (Platform.OS === "web") return null;
+  return require("@rnmapbox/maps").default;
+}
+```
+
+Web is the platform where the native half cannot exist, so web never calls
+`require`. On native the module is linked by the config plugin in `app.json`,
+so the require resolves; if a broken build ever means it does not, that fails
+on the map screen rather than at launch, which is the trade this shape is
+chosen to make.
+
+`Mapbox.setAccessToken()` is a native call, and every example in the wild puts
+it at module scope beside the import. That is §1/§2. It lives in
+`initMapbox()` here, which map screens call from a **mount effect** — after
+React exists, inside `AppErrorBoundary`, after the crash reporter has armed.
+It is idempotent and returns a boolean rather than throwing, so a map that
+cannot start renders a message instead of killing the screen.
+
+`lib/__tests__/mapboxNative.test.ts` guards both properties with a mock that
+throws the way the real package does, so a regression to a static import — or
+to a `require` above the platform check — fails there instead of on a phone.
+
+### 20c. What this does NOT protect
+
+`check:launch-path` will not catch a mistake here on its own. It walks eager
+edges from the bundle entries and the root layout, and the map screens are
+route modules behind `expo-router`'s lazy `require.context` getters — so a
+static `@rnmapbox/maps` import inside `app/(tabs)/map.tsx` is not on the
+launch path and the check stays green while the map tab crashes on open. The
+check is a floor, not a proof; the rule in 20b is the actual defence.
