@@ -2129,13 +2129,7 @@ export default function MapScreen() {
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
-        // TEMP DIAGNOSTIC (revert before merge): mapType="none" is the
-        // suspected reason getTile() is never called on the Mapbox
-        // UrlTile overlay at all (see MAP_MARKER_REFERENCE.md §11
-        // investigation). Leaving Google's own base map on for one test
-        // build to see whether tiles paint at all, and whether the Mapbox
-        // overlay then shows on top of it.
-        mapType={undefined}
+        mapType={Platform.OS === "web" ? undefined : "none"}
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}

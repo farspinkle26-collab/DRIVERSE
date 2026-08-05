@@ -393,33 +393,71 @@ markers — has always handled this: track until the content is `ready` and
 wrappers with two different freeze policies is precisely what left one layer
 blank while the other was fine.
 
-## 11. Base map tiles invisible under the New Architecture (5 Aug 2026, Android)
+## 11. Blank map on a local Gradle build — a rejected Google Maps API key, not Mapbox (5 Aug 2026, Android)
 
 A local Gradle build (see EAS_BUILD_REFERENCE.md for why local) came up with
 every other screen working — GPS fix, weather, chrome buttons, live feed —
 and the map itself a blank field the colour of Google Maps' own idle
-background. No crash, no error anywhere: not in `adb logcat`, not in
+background. No crash, no error anywhere at first: not in `adb logcat`, not in
 `ReactNativeJS`. The Mapbox access token was confirmed present in the built
-bundle (`grep -o "pk\.eyJ"` on the extracted APK's `index.android.bundle`),
-so this was not a missing-env-var repeat of EAS_BUILD_REFERENCE.md's
-Secret-visibility issue.
+bundle (`grep -o "pk\.eyJ"` on the extracted APK's `index.android.bundle`)
+and confirmed valid by fetching a real tile from `api.mapbox.com` directly in
+a browser, so this was not a missing-env-var repeat of
+EAS_BUILD_REFERENCE.md's Secret-visibility issue, and not a bad token either.
 
-The map draws its visible tiles entirely from `MapboxTileLayer`'s `UrlTile`
-— `mapType="none"` turns Google's own base map off on purpose (file header,
-`components/MapboxTileLayer.tsx`), so a `UrlTile` that fails to paint leaves
-nothing behind it. `react-native-maps` (pinned `1.20.1`) does not yet fully
-support React Native's New Architecture, and `UrlTile` specifically is one of
-the components with open Fabric bugs — silent non-rendering among them,
-distinct from the crashing kind, which is why nothing showed up in any log.
-This app had `newArchEnabled: true` in `app.json` (Expo SDK 54's default) the
-whole time; nothing about the tile layer itself was wrong.
+**Two theories were tried and disproven before the real cause turned up —
+recorded here so the same dead ends aren't re-walked:**
 
-**Fixed by setting `newArchEnabled: false`.** The native Google Maps surface
-`react-native-maps` sits on doesn't need Fabric to work correctly — it is
-`UrlTile` under Fabric specifically that is broken upstream. Re-enabling New
-Architecture in the future needs a check that base tiles still render on a
-real Android device, not just that the build succeeds — this failure mode
-produces no signal any automated check in this repo currently catches.
+- **Not New Architecture / Fabric.** `react-native-maps` does have open
+  upstream Fabric bugs in `UrlTile`, and disabling `newArchEnabled` looked
+  like a plausible fix. It shipped, and the map was still blank afterward,
+  identically. Whether to revert that config change is still open — it may
+  still be worth keeping as a defence against the *other*, real Fabric bugs
+  in this library, but it was not what caused this.
+- **Not the tile-fetch code path.** `MapTileProvider.java`
+  (`node_modules/react-native-maps/android/...`) silently uses Google Play
+  Services' own built-in tile fetcher unless `customTileProviderNeeded` is
+  set, and that path logs nothing on failure — which is why nothing showed up
+  in logcat at first. `MapboxTileLayer` now passes `doubleTileSize={false}`
+  to force react-native-maps' own fetch path instead, which does log. Worth
+  keeping for the visibility alone, but it didn't fix anything either: with
+  it in place, `getTile()` was still never called, at all, by either fetcher.
+
+That last point was the actual break in the case: **`getTile()` never being
+called, regardless of which fetcher was wired up, meant nothing was wrong
+with tile fetching — the map session itself was never becoming ready to ask
+for tiles.** Confirmed by temporarily removing `mapType="none"` for one test
+build: **Google's own base map didn't render either.** Nothing on the canvas,
+base layer or overlay, pointed away from Mapbox entirely.
+
+`adb logcat` filtered for the Maps SDK's own initialization tags (not
+something grepped for until this point — `MapsInitializer`, `Google Android
+Maps SDK`) had the answer:
+
+```
+E Google Maps Android API: Error requesting API token. StatusCode=INVALID_ARGUMENT
+E Google Android Maps SDK:       API Key: AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628
+```
+
+**The Google Maps API key itself is being rejected.** `android.config.
+googleMaps.apiKey` in `app.json` almost certainly carries an "Android apps"
+restriction in Google Cloud Console — package name + signing-certificate
+SHA-1 — and every prior build was signed by EAS's managed remote keystore.
+This local Gradle build has no release keystore configured, so it falls back
+to the machine's auto-generated debug keystore, whose SHA-1 was never on
+that key's allow-list. The Maps SDK never establishes a session, so it never
+asks *any* tile source — Google's or Mapbox's — for a single tile. No crash,
+because Play Services degrades to a blank placeholder canvas instead of
+throwing.
+
+**The fix is entirely in Google Cloud Console, not in this repo**: either add
+the local debug keystore's SHA-1 (`keytool -list -v -keystore
+~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass
+android`) to the key's allowed Android apps, or, for local test builds only,
+loosen the restriction. No code change and no rebuild fixes a rejected API
+key — the diagnostic dead end here was assuming a blank map on Android is a
+Mapbox/react-native-maps problem before ruling out Google's own map session
+first.
 
 ### What this changes about §7
 
