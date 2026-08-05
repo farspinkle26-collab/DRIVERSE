@@ -1,4 +1,6 @@
+import { Platform } from "react-native";
 import {
+  loadWebBrowser,
   openViaSystemBrowser,
   RETURN_GRACE_MS,
   type AuthBrowserDeps,
@@ -37,6 +39,29 @@ function makeDeps() {
     emitAppState: (s: string) => appHandler?.(s),
   };
 }
+
+describe("loadWebBrowser", () => {
+  const originalOS = Platform.OS;
+
+  afterEach(() => {
+    Object.defineProperty(Platform, "OS", { value: originalOS, configurable: true });
+  });
+
+  it("returns null on Android without ever requiring expo-web-browser", () => {
+    // The bug this guards (§19): a try/catch around require("expo-web-browser")
+    // cannot recover from the module's module-scope throw, because Metro's own
+    // loader reports it fatal before the catch block runs. If loadWebBrowser
+    // regresses to calling require() unconditionally on Android, this mock
+    // throwing is what would make that regression visible here — the same way
+    // it kills the app for real.
+    jest.doMock("expo-web-browser", () => {
+      throw new Error("Cannot find native module 'ExpoWebBrowser'");
+    });
+    Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
+
+    expect(loadWebBrowser()).toBeNull();
+  });
+});
 
 describe("openViaSystemBrowser", () => {
   beforeEach(() => jest.useFakeTimers());

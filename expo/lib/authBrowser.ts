@@ -31,14 +31,16 @@
  * the only difference the driver sees is a browser app-switch rather than a
  * sheet sliding up.
  *
- * The transport is chosen by ASKING, not by checking `Platform.OS`: if the
- * native module is present it is used. That way iOS keeps its sheet, Android
- * falls back, and if a future build ever does link a correct
- * `expo-web-browser` on Android, it silently starts using the better route
- * with no code change.
+ * The transport used to be chosen by ASKING — try `require("expo-web-browser")`
+ * and see if it throws — rather than by checking `Platform.OS`, so that a
+ * future build which does link a correct `expo-web-browser` on Android would
+ * silently start using the better route with no code change. That design
+ * shipped a crash: see `loadWebBrowser` below, and LAUNCH_SAFETY_REFERENCE.md
+ * §19. The transport is now chosen by `Platform.OS`, at the cost of that
+ * self-healing property.
  */
 
-import { AppState, Linking, type AppStateStatus, type EmitterSubscription } from "react-native";
+import { AppState, Linking, Platform, type AppStateStatus, type EmitterSubscription } from "react-native";
 import type * as WebBrowserTypes from "expo-web-browser";
 
 /** What the caller needs to know: a callback URL, or the user backing out. */
@@ -83,13 +85,25 @@ const nativeDeps: AuthBrowserDeps = {
 /**
  * Resolves `expo-web-browser`, or null when its native module is not linked.
  *
- * `require` rather than a static import, and inside a `try`, for two reasons.
- * The package's entry is one line of `requireNativeModule('ExpoWebBrowser')`,
- * which THROWS when the module is absent — which is exactly the state Android
- * is now deliberately in. And a static import would put that throw on the
- * launch path, which is the rule in LAUNCH_SAFETY_REFERENCE.md §1/§2.
+ * MUST check `Platform.OS` FIRST and skip the `require` entirely on Android —
+ * a `try/catch` around the `require()` call is not enough, and this file
+ * shipped that exact bug (§19). `expo-web-browser`'s package entry is one
+ * line of `requireNativeModule('ExpoWebBrowser')`, which throws when the
+ * module is absent (deliberately, on Android — see the file header). The
+ * first time ANY code requires a module, Metro's own loader
+ * (`metro-runtime/src/polyfills/require.js`, `guardedLoadModule`) wraps that
+ * module's top-level evaluation in ITS OWN try/catch and, if it throws, calls
+ * `global.ErrorUtils.reportFatalError(e)` directly — unconditionally, without
+ * rethrowing, in production too. That fatally kills the app before the
+ * exception ever reaches any try/catch in calling code, including the one
+ * that used to be here. A static import would put the same throw on the
+ * launch path (LAUNCH_SAFETY_REFERENCE.md §1/§2); this guards the same throw
+ * one call later, at first use.
  */
 export function loadWebBrowser(): typeof WebBrowserTypes | null {
+  if (Platform.OS === "android") {
+    return null;
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require("expo-web-browser") as typeof WebBrowserTypes;
