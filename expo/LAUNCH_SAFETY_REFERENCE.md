@@ -1212,3 +1212,124 @@ unrelated, well-intentioned feature commit that nobody reads line by line. The
 guard that matters is not "did this get fixed" but "can this get un-fixed
 silently" — and until tonight, the answer for both `@rork-ai/toolkit-sdk` and
 `metro.config.js` was yes.
+
+## 19. A `try`/`catch` around `require()` cannot save you (5 Aug 2026, Android)
+
+`lib/authBrowser.ts`'s `loadWebBrowser()` called `expo-web-browser` "the safe
+way": `require("expo-web-browser")` wrapped in `try { … } catch { return
+null; }`, specifically so that Android — which excludes the module from
+autolinking per §13 — would get `null` back instead of a crash. A verified,
+freshly-built APK (`eas.dev` build `0e8a458 · Merge origin/main`, installed
+straight from the dashboard, no stale-build ambiguity) crashed anyway, on the
+same line, with the same message: `Cannot find native module
+'ExpoWebBrowser'`, `FATAL EXCEPTION: mqt_v_native`.
+
+The source had the `try`/`catch`. The compiled bundle had the `try`/`catch` —
+this was checked by decompiling the shipped bundle, not just by reading
+`.ts`. It still crashed, because the `try`/`catch` was never the thing
+standing between the throw and the crash.
+
+### 19a. What actually happens
+
+The throw happens inside `expo-web-browser`'s own package entry, which calls
+`requireNativeModule('ExpoWebBrowser')` at **module scope** — the first time,
+and only the first time, anything anywhere `require()`s that package. That
+first-time evaluation does not run inside our `try`/`catch`. It runs inside
+Metro's own module loader, `metro-runtime/src/polyfills/require.js`:
+
+```js
+let inGuard = false;
+function guardedLoadModule(moduleId, module) {
+  if (!inGuard && global.ErrorUtils) {
+    inGuard = true;
+    let returnValue;
+    try {
+      returnValue = loadModuleImplementation(moduleId, module);
+    } catch (e) {
+      global.ErrorUtils.reportFatalError(e);
+    }
+    inGuard = false;
+    return returnValue;
+  } else {
+    return loadModuleImplementation(moduleId, module);
+  }
+}
+```
+
+Every module gets its factory (top-level body) run exactly once, by
+`loadModuleImplementation`, the first time it is required. Metro wraps that
+*one* call — for whichever module is outermost in the current require chain —
+in its own `try`/`catch`. If the factory throws, Metro does not rethrow. It
+calls `global.ErrorUtils.reportFatalError(e)` — which logs the error (the
+`[Error: Cannot find native module 'ExpoWebBrowser']` line, printed before the
+crash) and then, because it is fatal, hands it to the native side, which is
+the `FATAL EXCEPTION` / `JavascriptException` that follows. There is no
+`__DEV__` gate on this path — it is the same in a release build.
+
+By the time control would have returned to `loadWebBrowser`'s own `require()`
+call, the exception is gone: Metro already consumed it. Our `catch` block runs
+zero times, because nothing was thrown *to it* — Metro's guard returns
+normally (with `returnValue` left `undefined`), and the app is already being
+killed on a separate path. A `try`/`catch` around `require()` only helps for
+an exception the *calling* code is the one to see — and the calling code is
+never the one that sees a first-time module-factory throw. That frame belongs
+to Metro.
+
+### 19b. Why this looks identical to a stale build
+
+The crash log's stack trace is the throwing `Error` object's `.stack` —
+captured at `new Error(...)` time, which is deep inside
+`requireNativeModule`, at the moment of construction, regardless of who
+(if anyone) catches it later. It legitimately lists `loadWebBrowser` and
+`openAuthSession` as frames, because they were on the call stack when the
+`Error` was built. That makes a version of this bug that Metro's guard
+*doesn't* fatal — say, a `require()` nested inside an already-guarded require
+chain, where `inGuard` is already `true` — produce the exact same-looking
+stack trace while being silently swallowed and harmless. The two cases are
+indistinguishable from the stack trace alone, which is why tonight's first
+hypothesis (§ "still crashes" thread) was a merge-artifact / stale-build check
+before it was this.
+
+The distinguishing fact, found only by reading Metro's own loader source, was
+that `loadWebBrowser`'s call is the **outermost, first-ever** require of
+`expo-web-browser` in the app's whole run — nothing requires it earlier — so
+`inGuard` is always `false` when it runs, and Metro's `try` branch always
+wins.
+
+### 19c. The fix
+
+`loadWebBrowser()` now checks `Platform.OS === "android"` and returns `null`
+**before** calling `require()` at all, so the module is never evaluated on
+Android and Metro's guard never has a throwing factory to catch:
+
+```ts
+export function loadWebBrowser(): typeof WebBrowserTypes | null {
+  if (Platform.OS === "android") {
+    return null;
+  }
+  try {
+    return require("expo-web-browser") as typeof WebBrowserTypes;
+  } catch {
+    return null;
+  }
+}
+```
+
+This gives up the property the file's original design wanted — Android
+picking up a correctly-linked `expo-web-browser` automatically, with no code
+change, if a future build ever links one — in exchange for actually working.
+That trade is correct: the `try`/`catch` never delivered the safety it looked
+like it delivered, on either platform's build. If Android's autolinking
+exclusion (§13) is ever lifted because a build has been confirmed to link the
+right version, remove this `Platform.OS` check in the same change.
+
+### 19d. The rule this adds
+
+**A `try`/`catch` around `require()` only protects code that requires a
+module for at least the second time.** The first `require()` of any module,
+anywhere in the app, runs that module's top-level body inside Metro's own
+guard, which reports a throw there as fatal and does not give calling code a
+chance to catch it — in dev and in release alike. The only reliable way to
+avoid a module-scope throw on a platform where a native module is known to be
+absent is to never call `require()` for it on that platform at all, checked
+*before* the call, not around it.
