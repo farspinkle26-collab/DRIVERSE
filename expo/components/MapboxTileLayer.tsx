@@ -26,6 +26,17 @@ const MapboxTileLayer: React.FC<MapboxTileLayerProps> = ({ dark = false }) => {
       flipY={false}
       tileSize={512}
       shouldReplaceMapContent
+      // Without this prop present at all, Android's native `MapUrlTile`
+      // (node_modules/react-native-maps/android/.../MapTileProvider.java)
+      // never enters "custom mode" and every tile request goes through
+      // Google Play Services' own built-in UrlTileProvider fetcher instead
+      // of react-native-maps' own. That built-in path logs nothing on
+      // failure — success or fail, logcat is silent — which is exactly why
+      // a blank map produced zero diagnostic signal anywhere. Setting this
+      // prop, to any value, unconditionally flips `customTileProviderNeeded`
+      // true in `MapUrlTile.setDoubleTileSize()`, routing every tile
+      // through react-native-maps' own fetch path instead, which does log.
+      doubleTileSize={false}
     />
   );
 };
