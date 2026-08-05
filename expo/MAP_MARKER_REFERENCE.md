@@ -117,9 +117,11 @@ device pass (§7).
 
 ## 4. Clustering
 
-`react-native-maps` has no clustering — the `ShapeSource cluster` property
-the brief specifies belongs to `@rnmapbox/maps`, which this app does not use
-(§6). Grouping happens in JS before anything reaches the map, which is the
+`react-native-maps` had no clustering — the `ShapeSource cluster` property the
+brief specifies belongs to `@rnmapbox/maps`, which this app did not use when
+this section was written (§6; the map has since migrated, §12, and that
+property is now available should this ever be revisited). Grouping happens in
+JS before anything reaches the map, which is the
 right place anyway: the cost being avoided is not "drawing 400 symbols" but
 "laying out and rasterising 400 view trees", because each marker is a React
 view Android snapshots into a bitmap.
@@ -199,6 +201,14 @@ native module to a Rork-managed Expo build. It was not attempted, and
 nothing here forecloses it: the glyphs are SVG (rasterisable for `addImage`),
 the filter rule is pure data, and the clustering module has the same
 input/output shape as a `ShapeSource` cluster.
+
+> **Superseded, 5 Aug 2026 — see §12.** The switch happened, forced by §11:
+> `react-native-maps` requires Google's Maps SDK on Android, and a rejected
+> Google API key left the map blank. Both objections above had expired —
+> builds no longer go through Rork's cloud builder, and the "~6,400 lines"
+> figure counted the file rather than its map surface, which turned out to be
+> about 35 call sites. The three properties this section called out as leaving
+> the door open are exactly the three that made it cheap.
 
 ---
 
@@ -427,3 +437,93 @@ The colour experiment is still unjudged — nothing was legible enough on
 screen to have an opinion about ten hues. Per-category vs global clustering
 and marker bitmap bounds with the two-line label are likewise still open. The
 device pass has to be re-run now that there is something to look at.
+
+---
+
+## 12. The renderer changed: `@rnmapbox/maps` (5 Aug 2026)
+
+§11 ended with a Google Maps API key being rejected and the map drawing
+nothing. The fix for *that* is a Cloud Console setting, but it exposed a
+structural problem worth removing instead of working around: **every visible
+tile in this app has always come from Mapbox, yet the map could not draw
+without Google.** `react-native-maps` has no renderer of its own on Android —
+it is a wrapper over Google's Maps SDK, which needs its own authorised key
+before it will start a map session at all, and until it does it asks *no* tile
+source for anything. That is why §11's blank screen produced no error: the
+Mapbox layer was never reached.
+
+This section records what changed. Stage 1 (`LAUNCH_SAFETY_REFERENCE.md` §20)
+added the dependency; this stage moved `app/(tabs)/map.tsx` onto it.
+
+### 12a. What the API change actually cost
+
+Less than §6 estimated. The file is ~6,200 lines, but the map surface inside it
+is about 35 call sites, and no `Callout` anywhere — the component with the
+worst migration story. The mapping:
+
+| `react-native-maps` | `@rnmapbox/maps` | Wrapped by |
+|---|---|---|
+| `<MapView provider={PROVIDER_GOOGLE} mapType="none">` + `<UrlTile>` | `<MapView styleURL>` — native vector tiles, no overlay | — |
+| `initialRegion` | `<Camera defaultSettings>` | — |
+| `mapRef.animateCamera({center,zoom,pitch,heading},{duration})` | `cameraRef.setCamera({centerCoordinate,zoomLevel,…,animationDuration})` | `hooks/useMapboxCamera.ts` |
+| `mapRef.fitToCoordinates(coords,{edgePadding})` | `cameraRef.fitBounds(ne,sw,padding,duration)` | same |
+| `<Marker coordinate={{lat,lng}} onPress>` | `<MarkerView coordinate={[lng,lat]}>` + a `Pressable` child | — |
+| `<Polyline coordinates strokeColor strokeWidth>` | `<ShapeSource><LineLayer style>` | `components/MapPolyline.tsx` |
+| `onRegionChangeComplete(region)` | `onMapIdle({properties:{center,zoom}})` | — |
+| `customMapStyle` (Google style JSON) | `styleURL` (`mapbox://styles/…`) | `constants/mapbox.ts` |
+
+`constants/mapStyles.ts`'s Google style JSON is dead weight now — Mapbox does
+not read it — and the drop-pin "pick" variants went with it.
+
+### 12b. Five things that bite, none of which throw
+
+- **Coordinates are `[longitude, latitude]`.** A transposed pair is two finite
+  numbers in valid ranges: no throw, no type error, and it puts Jakarta in the
+  Indian Ocean. Everything goes through `lib/mapboxCoords.ts`, which is pure
+  and tested for exactly this.
+- **`MarkerView`'s `allowOverlap` defaults to `false`**, which silently
+  collapses adjacent markers. This app does its own clustering
+  (`lib/mapClustering.ts`) and needs every marker it renders, so all seven
+  marker sites set it. Forgetting it looks like "some markers are missing" —
+  §10's symptom, from a new cause.
+- **`MarkerView` has no `onPress`.** Touches are handled by the children, so
+  every tappable marker body is a `Pressable`. A marker that silently stops
+  responding to taps is what a missed one looks like.
+- **Eight-digit hex is not a Mapbox colour.** The route lines were written as
+  `strokeColor={alpha(colors.racingRed, 0.22)}`, and `alpha()` returns
+  `#RRGGBBAA`. Mapbox's style-spec parser takes CSS colour forms but not that
+  one, and drops it rather than erroring — the faint casing would have come
+  back fully opaque and the driven/remaining distinction would have quietly
+  vanished. `MapPolyline` takes colour and opacity as separate props.
+- **A `<ShapeSource>` needs a unique `id`.** Two sources sharing one id means
+  the second silently does not render.
+
+### 12c. What this deletes
+
+`SettledMarker` and the entire `tracksViewChanges` problem (§10c) do not apply
+to `MarkerView`: it mounts the real React view on the map instead of
+rasterising it into a bitmap, so there is no snapshot to take too early and no
+freeze policy to get wrong. The avatar load-gating that existed to serve it is
+vestigial. Marker frames are still static, but now by choice rather than
+because an animation would freeze mid-lap.
+
+Also gone from the launch path's risk surface: nothing. Mapbox is *more*
+dangerous at import time than `react-native-maps` was — see
+`LAUNCH_SAFETY_REFERENCE.md` §20 — which is why `lib/mapboxNative.ts` exists
+and why no file outside it names the package.
+
+### 12d. Still unverified
+
+Everything visual. This stage typechecks, passes 392 tests, and bundles
+through `hermesc` with no new native module on the launch path — none of which
+says a marker is in the right place on a phone. Specifically open:
+
+- That the light/dark styles read the way the raster tiles did.
+- The driver's own car marker: `flat` + `rotation` had no `MarkerView`
+  equivalent, so it is rotated in screen space by `heading - bearing`
+  (`flatRotation`). It should point up while navigating and along the driver's
+  course otherwise, and it goes briefly stale mid-rotate-gesture by design.
+- Whether the Mapbox logo and attribution control — which stay enabled,
+  because Mapbox's terms require them — collide with the HUD chrome.
+- Marker tap targets, now that touches go through a `Pressable` child rather
+  than the marker itself.
