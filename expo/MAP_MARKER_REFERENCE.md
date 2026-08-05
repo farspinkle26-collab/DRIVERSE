@@ -393,6 +393,34 @@ markers — has always handled this: track until the content is `ready` and
 wrappers with two different freeze policies is precisely what left one layer
 blank while the other was fine.
 
+## 11. Base map tiles invisible under the New Architecture (5 Aug 2026, Android)
+
+A local Gradle build (see EAS_BUILD_REFERENCE.md for why local) came up with
+every other screen working — GPS fix, weather, chrome buttons, live feed —
+and the map itself a blank field the colour of Google Maps' own idle
+background. No crash, no error anywhere: not in `adb logcat`, not in
+`ReactNativeJS`. The Mapbox access token was confirmed present in the built
+bundle (`grep -o "pk\.eyJ"` on the extracted APK's `index.android.bundle`),
+so this was not a missing-env-var repeat of EAS_BUILD_REFERENCE.md's
+Secret-visibility issue.
+
+The map draws its visible tiles entirely from `MapboxTileLayer`'s `UrlTile`
+— `mapType="none"` turns Google's own base map off on purpose (file header,
+`components/MapboxTileLayer.tsx`), so a `UrlTile` that fails to paint leaves
+nothing behind it. `react-native-maps` (pinned `1.20.1`) does not yet fully
+support React Native's New Architecture, and `UrlTile` specifically is one of
+the components with open Fabric bugs — silent non-rendering among them,
+distinct from the crashing kind, which is why nothing showed up in any log.
+This app had `newArchEnabled: true` in `app.json` (Expo SDK 54's default) the
+whole time; nothing about the tile layer itself was wrong.
+
+**Fixed by setting `newArchEnabled: false`.** The native Google Maps surface
+`react-native-maps` sits on doesn't need Fabric to work correctly — it is
+`UrlTile` under Fabric specifically that is broken upstream. Re-enabling New
+Architecture in the future needs a check that base tiles still render on a
+real Android device, not just that the build succeeds — this failure mode
+produces no signal any automated check in this repo currently catches.
+
 ### What this changes about §7
 
 The colour experiment is still unjudged — nothing was legible enough on
