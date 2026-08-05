@@ -25,6 +25,35 @@
  *
  * Nothing about the routing, GPS or gesture behaviour changed in that
  * pass — the handlers, refs and effects below are the originals.
+ *
+ * ── THE RENDERER (5 Aug 2026) ───────────────────────────────────────────────
+ *
+ * This screen draws on `@rnmapbox/maps`, not `react-native-maps`.
+ * MAP_MARKER_REFERENCE.md §11 has the full account; the short version is that
+ * `react-native-maps` needs Google's Maps SDK on Android as a hard dependency
+ * even though every tile here has always come from Mapbox, and a rejected
+ * Google API key left the whole map blank with no error anywhere. Mapbox's own
+ * SDK removes Google from the stack.
+ *
+ * What that changes for anyone editing this file:
+ *
+ *   - **Coordinates are `[longitude, latitude]`.** Never write a coordinate
+ *     pair by hand; go through `lib/mapboxCoords.ts`, which is tested. A
+ *     transposed pair does not throw and does not fail a type check.
+ *   - **The camera is a separate ref**, wrapped by `hooks/useMapboxCamera.ts`
+ *     so the call sites still read `animateCamera({ center, zoom, pitch,
+ *     heading }, { duration })`.
+ *   - **Markers are `Mapbox.MarkerView`** and render live React views, so the
+ *     `tracksViewChanges` bitmap-freeze problem (§10c) is gone — but
+ *     `allowOverlap` defaults to FALSE, which silently hides adjacent markers.
+ *     Every marker here sets it. Mapbox also suggests keeping MarkerViews
+ *     under ~100 on screen, which is what `lib/mapClustering.ts` is for.
+ *   - **`MarkerView` has no `onPress`** — the child handles its own touches,
+ *     which is why the marker bodies are `Pressable`.
+ *   - **Lines are a source plus a style layer**, wrapped by
+ *     `components/MapPolyline.tsx`, which needs a unique `id` per line.
+ *   - **The package must not be imported statically** — see
+ *     LAUNCH_SAFETY_REFERENCE.md §20 and `lib/mapboxNative.ts`.
  */
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
@@ -34,7 +63,6 @@ import {
   Text,
   TouchableOpacity,
   Pressable,
-  Platform,
   Animated,
   ActivityIndicator,
   Dimensions,
@@ -45,10 +73,11 @@ import {
   ScrollView,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "@/components/MapboxTileLayer";
+import MapPolyline from "@/components/MapPolyline";
 import MapboxMapStatus from "@/components/MapboxMapStatus";
-import { SettledMarker } from "@/components/SettledMarker";
+import { loadMapbox, initMapbox } from "@/lib/mapboxNative";
+import { useMapboxCamera } from "@/hooks/useMapboxCamera";
+import { toPosition, zoomForLatitudeDelta, latitudeDeltaForZoom } from "@/lib/mapboxCoords";
 import { RankFrameRing } from "@/components/frames/AvatarFrame";
 import {
   PLACE_CATEGORY_ICONS,
@@ -156,8 +185,7 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { Alert } from "react-native";
-import { MAP_STYLE_LIGHT, MAP_STYLE_DARK, MAP_STYLE_LIGHT_PICK, MAP_STYLE_DARK_PICK } from "@/constants/mapStyles";
-import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
+import { MAPBOX_ACCESS_TOKEN, mapboxStyleUrl } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 
@@ -555,10 +583,13 @@ const CAT_GLYPHS = PLACE_CATEGORY_ICONS;
  */
 const PLAYER_RANK_RING_SIZE = 42;
 
-// `SettledMarker` moved to `components/SettledMarker.tsx` — the places layer
-// needs the same Android snapshot handling, and having two marker wrappers
-// with two different freeze policies is what left one of the layers blank.
-// See that file's header.
+// `SettledMarker` and its whole `tracksViewChanges` problem are gone from this
+// screen. It existed because Android rasterised a `react-native-maps` marker
+// into a bitmap and froze it, so a marker could end up present, tappable and
+// blank (MAP_MARKER_REFERENCE.md §10c). Mapbox's `MarkerView` renders the real
+// React view on the map, so there is no snapshot to mistime — markers update
+// like any other view. `components/SettledMarker.tsx` still serves the places
+// layer until stage 3 of the migration lands.
 
 /**
  * A list row in a bottom sheet: icon, Inter label, chevron. A utility
@@ -684,9 +715,32 @@ function NearbyRow({
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
   const router = useRouter();
   const { isDark } = useTheme();
+
+  /**
+   * The Mapbox module, and the camera in the shape this file already calls it
+   * (`hooks/useMapboxCamera.ts`). `loadMapbox()` rather than a static import:
+   * the package reaches a throwing native lookup at module scope, so the
+   * platform check has to come first — LAUNCH_SAFETY_REFERENCE.md §20.
+   */
+  const Mapbox = loadMapbox();
+  const {
+    ref: cameraRef,
+    animate: animateCamera,
+    fitTo: fitToCoordinates,
+    flatRotation,
+  } = useMapboxCamera();
+
+  /**
+   * `setAccessToken` is a native call, so it happens on mount rather than at
+   * import time (§1/§2). False means the map cannot draw and the screen says
+   * so, instead of showing an empty rectangle.
+   */
+  const [mapboxReady, setMapboxReady] = useState(false);
+  useEffect(() => {
+    setMapboxReady(initMapbox());
+  }, []);
 
   // Map tile/style preference — intentionally separate from the app-wide theme so that
   // switching the map's Light/Dark style doesn't flip the rest of the app's UI theme.
@@ -852,13 +906,12 @@ export default function MapScreen() {
   } | null>(null);
   const weatherFetchedRef = useRef(false);
 
-  // POI badges no longer load a bitmap — the category glyphs are drawn in
-  // code (components/MapGlyphs.tsx), which lays out synchronously, so the
-  // per-marker image load-gating that used to guard the Android marker
-  // snapshot is not needed for them any more. `SettledMarker`'s grace
-  // period still covers text layout and select/deselect size changes.
-
-  // Load-gating is still needed for online player avatars (network images) so their
+  // Avatar load-gating is vestigial now and kept only because the online-user
+  // sheet reads the same state. Markers are live views under Mapbox, so a
+  // network image that decodes late simply appears when it is ready rather
+  // than being frozen half-drawn into a bitmap. It costs one Set and no
+  // renders that were not happening anyway; removing it is a separate change
+  // from the migration.
   // markers don't freeze before the photo has decoded.
   const [loadedAvatarIds, setLoadedAvatarIds] = useState<Set<string>>(new Set());
   const handleAvatarLoaded = useCallback((id: string) => {
@@ -1003,9 +1056,9 @@ export default function MapScreen() {
         });
         setRouteSteps(steps);
 
-        mapRef.current?.fitToCoordinates(result.coordinates, {
+        fitToCoordinates(result.coordinates, {
           edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
-          animated: true,
+          duration: 600,
         });
       } else {
         setNavigating(false);
@@ -1023,7 +1076,7 @@ export default function MapScreen() {
     } finally {
       setLoadingRoute(false);
     }
-  }, []);
+  }, [fitToCoordinates]);
 
   // --- GPS detection (runs once, uses refs for recording state to avoid restarts) ---
   // Keep userLocationRef in sync
@@ -1065,7 +1118,7 @@ export default function MapScreen() {
         setLocating(false);
 
         setTimeout(() => {
-          mapRef.current?.animateCamera(
+          animateCamera(
             { center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 },
             { duration: 1200 }
           );
@@ -1167,7 +1220,7 @@ export default function MapScreen() {
                 (navHeadingRef.current + headingDelta(navHeadingRef.current, targetHeading) * 0.6 + 360) % 360;
               navHeadingRef.current = smoothedHeading;
               setHeading(smoothedHeading);
-              mapRef.current?.animateCamera(
+              animateCamera(
                 { center: newCoord, zoom: 18, pitch: 60, heading: smoothedHeading },
                 { duration: 900 }
               );
@@ -1450,22 +1503,22 @@ export default function MapScreen() {
 
   // --- Handlers ---
   const centerOnUser = useCallback(() => {
-    if (!userLocation || !mapRef.current) return;
-    mapRef.current.animateCamera(
+    if (!userLocation) return;
+    animateCamera(
       { center: userLocation, zoom: 17, pitch: 50, heading },
       { duration: 800 }
     );
-  }, [userLocation, heading]);
+  }, [userLocation, heading, animateCamera]);
 
   const handleCafePress = useCallback((cafe: CafePOI) => {
     setSelectedDestination({ type: "cafe", data: cafe });
     setLocationChosen(false);
     setRouteInfo(null);
-    mapRef.current?.animateCamera(
+    animateCamera(
       { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
       { duration: 500 }
     );
-  }, []);
+  }, [animateCamera]);
 
   const destCoords = useCallback((): { latitude: number; longitude: number } | null => {
     if (!selectedDestination) return null;
@@ -1594,9 +1647,14 @@ export default function MapScreen() {
   }, []);
 
   // --- Drop a destination pin wherever the driver taps the map, while drive mode is active ---
-  const handleMapPress = useCallback((event: any) => {
+  //
+  // Mapbox reports a tap as a GeoJSON Point feature rather than
+  // `nativeEvent.coordinate`, so the coordinate arrives as `[lng, lat]` — the
+  // one place in this file where the array order is read directly, and the
+  // reason it is destructured into named variables immediately.
+  const handleMapPress = useCallback((feature: GeoJSON.Feature<GeoJSON.Point>) => {
     if (!showDropPinHint) return;
-    const { latitude, longitude } = event.nativeEvent.coordinate;
+    const [longitude, latitude] = feature.geometry.coordinates;
     setSelectedDestination({ type: "location", lat: latitude, lng: longitude });
     setLocationChosen(true);
     setRouteInfo(null);
@@ -1604,20 +1662,26 @@ export default function MapScreen() {
     void resolveDroppedPinName(latitude, longitude);
   }, [showDropPinHint, resolveDroppedPinName]);
 
+  /**
+   * Mapbox reports camera state as `{ center: [lng, lat], zoom, bounds }`,
+   * where `react-native-maps` reported a region with a `latitudeDelta`.
+   *
+   * The delta is converted back rather than the thresholds being rewritten in
+   * zoom units: `lib/mapClustering.ts` disables clustering below a
+   * `latitudeDelta` that was tuned on a device, and the landmark refetch
+   * compares distances in metres. Both keep working untouched this way, and
+   * the conversion is one tested function.
+   */
   const handlePlacesRegionChange = useCallback(
-    (nextRegion: {
-      latitude: number;
-      longitude: number;
-      latitudeDelta: number;
-      longitudeDelta: number;
-    }) => {
-      // `latitudeDelta` is what decides whether markers cluster, and the
-      // landmark layer is on screen the whole time.
-      setMapRegion(nextRegion);
+    (state: { properties: { center: GeoJSON.Position; zoom: number } }) => {
+      const [longitude, latitude] = state.properties.center;
+      const latitudeDelta = latitudeDeltaForZoom(state.properties.zoom);
+
+      setMapRegion({ latitude, longitude, latitudeDelta, longitudeDelta: latitudeDelta });
       // Landmarks follow the map, not just the first GPS fix — panning to
       // another city has to bring that city's POIs with it. Guarded by
       // distance inside, so an idle nudge costs nothing.
-      maybeRefetchLandmarks(nextRegion.latitude, nextRegion.longitude);
+      maybeRefetchLandmarks(latitude, longitude);
     },
     [maybeRefetchLandmarks]
   );
@@ -1748,13 +1812,13 @@ export default function MapScreen() {
     }
     // Drop into the third-person navigation view: tight zoom, tilted horizon,
     // and rotated so the direction of travel points up the screen.
-    if (userLocation && mapRef.current) {
-      mapRef.current.animateCamera(
+    if (userLocation) {
+      animateCamera(
         { center: userLocation, zoom: 18, pitch: 60, heading },
         { duration: 600 }
       );
     }
-  }, [userLocation, heading, resolveOriginName]);
+  }, [userLocation, heading, resolveOriginName, animateCamera]);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -1865,9 +1929,21 @@ export default function MapScreen() {
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
   // --- Map region ---
-  const initialRegion = userLocation
-    ? { latitude: userLocation.latitude, longitude: userLocation.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : { latitude: -6.2088, longitude: 106.8456, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+  //
+  // `defaultSettings` is Mapbox's `initialRegion`: where the camera starts
+  // before anything moves it. It is read once on mount, so it must not be
+  // recomputed into a moving target — the GPS fix animates the camera through
+  // `animateCamera` instead of re-rendering a new starting point.
+  const initialCamera = useMemo(
+    () => ({
+      centerCoordinate: toPosition(
+        userLocation ?? { latitude: -6.2088, longitude: 106.8456 }
+      ),
+      zoomLevel: zoomForLatitudeDelta(userLocation ? 0.01 : 0.05),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   // A just-finished trip owns the bottom card slot — the stale POI/route
   // cards must yield to it instead of stacking on top and burying its
@@ -2081,7 +2157,7 @@ export default function MapScreen() {
       ),
       onPress: () => {
         setSelectedEventId(ev.id);
-        mapRef.current?.animateCamera(
+        animateCamera(
           { center: { latitude: ev.latitude, longitude: ev.longitude }, zoom: 15, pitch: 40 },
           { duration: 600 }
         );
@@ -2122,32 +2198,55 @@ export default function MapScreen() {
     Keyboard.dismiss();
   };
 
+  // The map surface is the whole screen's backdrop; every HUD panel below is
+  // absolutely positioned over it. When Mapbox cannot load there is nothing to
+  // put behind them but the void, which is what `styles.container` already is.
+  if (!Mapbox) {
+    return (
+      <View style={styles.container}>
+        <View style={[styles.loadingOverlay, { paddingTop: insets.top + spacing.spacingXl }]}>
+          <View style={styles.statusPill}>
+            <Text style={styles.statusPillText}>
+              The map isn&apos;t available in this build.
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* --- Map --- */}
-      <MapView
-        ref={mapRef}
+      {/* --- Map ---
+          Mapbox renders the style's own vector tiles natively, so there is no
+          tile-overlay child any more and no `mapType="none"` to hide a base
+          map underneath: this IS the base map. `styleURL` carries the
+          light/dark choice that `customMapStyle` used to.
+
+          The drop-pin "pick" styles are gone with it — they were Google
+          style-JSON, which Mapbox does not read. The dimming they provided is
+          now the drop-pin hint's own scrim, and the map stays legible while
+          the driver aims at it. */}
+      <Mapbox.MapView
         style={styles.map}
-        provider={Platform.OS === "web" ? undefined : PROVIDER_GOOGLE}
-        mapType={Platform.OS === "web" ? undefined : "none"}
-        initialRegion={initialRegion}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
+        styleURL={mapboxStyleUrl(mapStyleDark)}
         zoomEnabled
         scrollEnabled
         pitchEnabled
         rotateEnabled
-        customMapStyle={
-          showDropPinHint
-            ? (mapStyleDark ? MAP_STYLE_DARK_PICK : MAP_STYLE_LIGHT_PICK)
-            : (mapStyleDark ? MAP_STYLE_DARK : MAP_STYLE_LIGHT)
-        }
-        followsUserLocation={false}
+        compassEnabled={false}
+        scaleBarEnabled={false}
+        // The Mapbox logo and the attribution control stay ON. They are not a
+        // style choice: displaying them is a condition of Mapbox's terms for
+        // apps drawing their maps, and the attribution control is also what
+        // carries the OpenStreetMap credit the data itself requires. The
+        // compass and scale bar are ours to remove; these two are not.
+        logoEnabled
+        attributionEnabled
         onPress={handleMapPress}
-        onRegionChangeComplete={handlePlacesRegionChange}
+        onMapIdle={handlePlacesRegionChange}
       >
-        <MapboxTileLayer dark={mapStyleDark} />
+        <Mapbox.Camera ref={cameraRef} defaultSettings={initialCamera} />
 
         {/* Landmark markers — cut-corner badge + hand-drawn category glyph +
             name + distance. Always rendered, regardless of recording/online/
@@ -2166,17 +2265,23 @@ export default function MapScreen() {
             ? fmtMeters(Math.round(haversineMeters(userLocation, { latitude: poi.lat, longitude: poi.lng })))
             : null;
           return (
-            <SettledMarker
+            <Mapbox.MarkerView
               key={poi.id}
-              coordinate={{ latitude: poi.lat, longitude: poi.lng }}
-              onPress={() => handleCafePress(poi)}
-              settleKey={`${isSelected}-${isChosen}-${poi.name}-${distLabel ?? ""}`}
+              coordinate={toPosition({ latitude: poi.lat, longitude: poi.lng })}
               anchor={{ x: 0.5, y: 0.37 }}
+              allowOverlap
             >
-              <View style={styles.poiMarkerWrap} collapsable={false}>
-                {/* Fixed-size box: the marker's outer bounds stay constant across
-                    normal/selected/chosen states so the native snapshot never
-                    clips a badge that grew after capture. */}
+              <Pressable
+                onPress={() => handleCafePress(poi)}
+                accessibilityRole="button"
+                accessibilityLabel={poi.name}
+                style={styles.poiMarkerWrap}
+              >
+                {/* Fixed-size box, kept from the bitmap era: the marker's outer
+                    bounds stay constant across normal/selected/chosen states.
+                    Mapbox renders these as live views rather than snapshots, so
+                    it no longer prevents a clipped capture — but it still stops
+                    the badge shoving the name label around as it grows. */}
                 <View style={styles.poiBadgeBox}>
                   <CutCornerSurface
                     fill={isSelected ? colors.racingRed : CATEGORY_COLORS[poi.category]}
@@ -2199,8 +2304,8 @@ export default function MapScreen() {
                 </View>
                 <Text style={styles.poiMarkerName} numberOfLines={1}>{poi.name}</Text>
                 {distLabel && <Text style={styles.poiMarkerDist}>{distLabel}</Text>}
-              </View>
-            </SettledMarker>
+              </Pressable>
+            </Mapbox.MarkerView>
           );
         })}
 
@@ -2211,19 +2316,18 @@ export default function MapScreen() {
             per GPS fix is three times the geometry to redraw. */}
         {recordedPath.length > 1 && (
           <>
-            <Polyline
-              coordinates={recordedPath}
-              strokeWidth={ROUTE_CASING_WIDTH}
-              strokeColor={alpha(colors.racingRed, 0.22)}
-              lineCap="round"
-              lineJoin="round"
+            <MapPolyline
+              id="recorded-casing"
+              points={recordedPath}
+              width={ROUTE_CASING_WIDTH}
+              color={colors.racingRed}
+              opacity={0.22}
             />
-            <Polyline
-              coordinates={recordedPath}
-              strokeWidth={ROUTE_CORE_WIDTH}
-              strokeColor={colors.racingRed}
-              lineCap="round"
-              lineJoin="round"
+            <MapPolyline
+              id="recorded-core"
+              points={recordedPath}
+              width={ROUTE_CORE_WIDTH}
+              color={colors.racingRed}
             />
           </>
         )}
@@ -2247,22 +2351,21 @@ export default function MapScreen() {
                 {/* Remaining — the faint casing, drawn first so the solid
                     traversed line sits on top of it at the join. */}
                 {remaining.length > 1 && (
-                  <Polyline
-                    coordinates={remaining}
-                    strokeWidth={ROUTE_CASING_WIDTH}
-                    strokeColor={alpha(colors.racingRed, 0.28)}
-                    lineCap="round"
-                    lineJoin="round"
+                  <MapPolyline
+                    id="route-remaining"
+                    points={remaining}
+                    width={ROUTE_CASING_WIDTH}
+                    color={colors.racingRed}
+                    opacity={0.28}
                   />
                 )}
                 {/* Traversed — solid. */}
                 {traversed.length > 1 && (
-                  <Polyline
-                    coordinates={traversed}
-                    strokeWidth={ROUTE_CORE_WIDTH}
-                    strokeColor={colors.racingRed}
-                    lineCap="round"
-                    lineJoin="round"
+                  <MapPolyline
+                    id="route-traversed"
+                    points={traversed}
+                    width={ROUTE_CORE_WIDTH}
+                    color={colors.racingRed}
                   />
                 )}
               </>
@@ -2271,19 +2374,18 @@ export default function MapScreen() {
           // No split yet — the whole route as casing plus core.
           return (
             <>
-              <Polyline
-                coordinates={routeInfo.coordinates}
-                strokeWidth={ROUTE_CASING_WIDTH}
-                strokeColor={alpha(colors.racingRed, 0.28)}
-                lineCap="round"
-                lineJoin="round"
+              <MapPolyline
+                id="route-casing"
+                points={routeInfo.coordinates}
+                width={ROUTE_CASING_WIDTH}
+                color={colors.racingRed}
+                opacity={0.28}
               />
-              <Polyline
-                coordinates={routeInfo.coordinates}
-                strokeWidth={ROUTE_CORE_WIDTH}
-                strokeColor={colors.racingRed}
-                lineCap="round"
-                lineJoin="round"
+              <MapPolyline
+                id="route-core"
+                points={routeInfo.coordinates}
+                width={ROUTE_CORE_WIDTH}
+                color={colors.racingRed}
               />
             </>
           );
@@ -2293,30 +2395,34 @@ export default function MapScreen() {
             than a map pin, which is what every map provider's default looks
             like. Anchored on its centre because a reticle marks a point. */}
         {selectedDestination && routeInfo && destCoords() && (
-          <Marker
-            coordinate={destCoords()!}
+          <Mapbox.MarkerView
+            coordinate={toPosition(destCoords()!)}
             anchor={{ x: 0.5, y: 0.5 }}
+            allowOverlap
           >
-            <View style={styles.destPin} collapsable={false}>
+            <View style={styles.destPin}>
               <DestinationMark size={spacing.spacingXl + spacing.spacingXs} />
             </View>
-          </Marker>
+          </Mapbox.MarkerView>
         )}
 
         {/* Custom location marker (tapped, no route yet) */}
         {selectedDestination && selectedDestination.type === "location" && !routeInfo && (
-          <SettledMarker
-            coordinate={{ latitude: selectedDestination.lat, longitude: selectedDestination.lng }}
+          <Mapbox.MarkerView
+            coordinate={toPosition({
+              latitude: selectedDestination.lat,
+              longitude: selectedDestination.lng,
+            })}
             anchor={{ x: 0.5, y: 0.5 }}
-            settleKey={`chosen-${locationChosen}`}
+            allowOverlap
           >
-            <View style={styles.customPin} collapsable={false}>
+            <View style={styles.customPin}>
               <DestinationMark
                 size={locationChosen ? spacing.spacingXxl : spacing.spacingXl}
                 color={locationChosen ? colors.racingRed : colors.textPrimary}
               />
             </View>
-          </SettledMarker>
+          </Mapbox.MarkerView>
         )}
 
         {/* Online driver markers. The ring carries the driver's livery colour
@@ -2338,18 +2444,23 @@ export default function MapScreen() {
               ? party.color
               : playerColor(onlineUser.user_id);
           return (
-            <SettledMarker
+            <Mapbox.MarkerView
               key={`online-${onlineUser.user_id}`}
-              coordinate={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
+              coordinate={toPosition({ latitude: onlineUser.latitude, longitude: onlineUser.longitude })}
               anchor={{ x: 0.5, y: 0.36 }}
-              onPress={() => setSelectedOnlineUser(onlineUser)}
-              settleKey={`${onlineUser.name}-${onlineUser.level}-${ringColor}-${isPartyMate}-${problem?.type ?? ""}-${onlineUser.avatar ?? ""}-${Math.round(onlineUser.heading / 15)}`}
-              ready={!onlineUser.avatar || loadedAvatarIds.has(onlineUser.user_id)}
+              allowOverlap
             >
-              <View style={styles.playerMarkerWrap} collapsable={false}>
-                {/* Ring box gives the badges room inside the marker bounds —
-                    absolutely-positioned children with negative offsets get
-                    clipped out of the native marker snapshot. */}
+              <Pressable
+                onPress={() => setSelectedOnlineUser(onlineUser)}
+                accessibilityRole="button"
+                accessibilityLabel={`${onlineUser.name}, level ${onlineUser.level}`}
+                style={styles.playerMarkerWrap}
+              >
+                {/* Ring box gives the badges room inside the marker bounds.
+                    Under `react-native-maps` this was load-bearing — absolutely
+                    positioned children with negative offsets were clipped out
+                    of the marker's bitmap snapshot. Mapbox renders the view
+                    live, so it is now only layout. */}
                 <View style={styles.playerRingBox}>
                   {/* Outer slot precedence: distress → convoy → rank frame.
                       The first two are live operational state and have to
@@ -2357,9 +2468,12 @@ export default function MapScreen() {
                       keeps carrying the livery colour either way, so adding
                       rank never costs the marker its identity hue.
 
-                      Marker frames are always static — see `RankFrameRing`.
-                      Android snapshots markers to a bitmap, so an animated
-                      frame would freeze mid-lap rather than animate. */}
+                      Marker frames are still static — see `RankFrameRing`.
+                      The original reason (Android froze the marker bitmap
+                      mid-lap) no longer applies now that Mapbox renders these
+                      live, but an animated frame on every driver on screen is
+                      a cost the map does not need to pay. Revisit deliberately
+                      rather than by accident. */}
                   {problem ? (
                     <View style={styles.problemOuterRing} />
                   ) : isPartyMate ? (
@@ -2432,8 +2546,8 @@ export default function MapScreen() {
                     {problemMeta(problem.type).label}
                   </Text>
                 )}
-              </View>
-            </SettledMarker>
+              </Pressable>
+            </Mapbox.MarkerView>
           );
         })}
 
@@ -2457,14 +2571,18 @@ export default function MapScreen() {
             : alpha(colors.voidBlack, 0.55);
           const glyphColor = isSelected ? onRacingRed : ON_CATEGORY;
           return (
-            <SettledMarker
+            <Mapbox.MarkerView
               key={`event-${ev.id}`}
-              coordinate={{ latitude: ev.latitude, longitude: ev.longitude }}
+              coordinate={toPosition({ latitude: ev.latitude, longitude: ev.longitude })}
               anchor={{ x: 0.5, y: 0.22 }}
-              onPress={() => setSelectedEventId(ev.id)}
-              settleKey={`${isSelected}-${ev.is_live}-${ev.participant_count}-${ev.title}-${timeLabel}-${ev.location_name ?? ""}`}
+              allowOverlap
             >
-              <View style={styles.eventMarkerColumn} collapsable={false}>
+              <Pressable
+                onPress={() => setSelectedEventId(ev.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`${ev.title}, ${timeLabel}`}
+                style={styles.eventMarkerColumn}
+              >
                 <View style={styles.eventMarkerWrap}>
                   {ev.is_live && (
                     <View
@@ -2512,41 +2630,56 @@ export default function MapScreen() {
                     {ev.location_name ? ` · ${ev.location_name}` : ""}
                   </Text>
                 </View>
-              </View>
-            </SettledMarker>
+              </Pressable>
+            </Mapbox.MarkerView>
           );
         })}
 
-        {/* The driver's own marker — coded SVG, no bitmap asset */}
+        {/* The driver's own marker — coded SVG, no bitmap asset.
+            `react-native-maps` drew this `flat` on the map surface with an
+            absolute `rotation={heading}`. A `MarkerView` always faces the
+            viewer, so the rotation is applied here in screen space, relative
+            to the map's own bearing — see `flatRotation`. While navigating the
+            camera bearing tracks the driver's heading, so this resolves to
+            ~0° and the car points up the screen exactly as it did. */}
         {userLocation && (
-          <Marker
-            coordinate={userLocation}
+          <Mapbox.MarkerView
+            coordinate={toPosition(userLocation)}
             anchor={{ x: 0.5, y: 0.5 }}
-            rotation={heading}
-            flat
+            allowOverlap
           >
-            <View style={styles.carMarkerBox} collapsable={false}>
-              <Animated.View style={[styles.carMarker, { transform: [{ translateY: carFloat }] }]}>
+            <View style={styles.carMarkerBox}>
+              <Animated.View
+                style={[
+                  styles.carMarker,
+                  {
+                    transform: [
+                      { translateY: carFloat },
+                      { rotate: `${flatRotation(heading)}deg` },
+                    ],
+                  },
+                ]}
+              >
                 <DriverMark />
               </Animated.View>
             </View>
-          </Marker>
+          </Mapbox.MarkerView>
         )}
 
-        {/* "You · Lv." label rides in a separate non-rotating marker so it stays upright */}
+        {/* "You · Lv." label rides in a separate marker so it stays upright */}
         {userLocation && !isRecording && (
-          <SettledMarker
-            coordinate={userLocation}
+          <Mapbox.MarkerView
+            coordinate={toPosition(userLocation)}
             anchor={{ x: 0.5, y: -0.35 }}
-            settleKey={`you-${level}`}
+            allowOverlap
           >
-            <View style={styles.youLabelWrap} collapsable={false}>
+            <View style={styles.youLabelWrap}>
               <Text style={styles.youLabelName}>You</Text>
               <Text style={styles.youLabelLevel}>Lv. {level}</Text>
             </View>
-          </SettledMarker>
+          </Mapbox.MarkerView>
         )}
-      </MapView>
+      </Mapbox.MapView>
       <MapboxMapStatus style={[styles.mapboxStatus, { bottom: insets.bottom + spacing.spacingXl }]} />
 
       {/* --- Locating --- */}
@@ -2673,7 +2806,7 @@ export default function MapScreen() {
               accessibilityLabel="Point the map north"
               onPress={() => {
                 if (userLocation) {
-                  mapRef.current?.animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
+                  animateCamera({ center: userLocation, heading: 0 }, { duration: 500 });
                 }
               }}
             >
@@ -3146,7 +3279,7 @@ export default function MapScreen() {
                 style={styles.featuredCardHit}
                 onPress={() => {
                   setSelectedEventId(fe.id);
-                  mapRef.current?.animateCamera(
+                  animateCamera(
                     { center: { latitude: fe.latitude, longitude: fe.longitude }, zoom: 15, pitch: 40 },
                     { duration: 600 }
                   );
@@ -3413,9 +3546,9 @@ export default function MapScreen() {
                 accessibilityLabel="Fit every event on the map"
                 onPress={() => {
                   if (events.length > 0) {
-                    mapRef.current?.fitToCoordinates(
+                    fitToCoordinates(
                       events.map((e) => ({ latitude: e.latitude, longitude: e.longitude })),
-                      { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, animated: true }
+                      { edgePadding: { top: 140, right: 100, bottom: 320, left: 60 }, duration: 600 }
                     );
                   }
                 }}
