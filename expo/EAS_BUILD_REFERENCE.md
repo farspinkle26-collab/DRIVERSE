@@ -272,3 +272,37 @@ requests `ACCESS_BACKGROUND_LOCATION` — a **background location permission
 declaration with a video demonstrating the in-app feature that needs it**.
 That last one is the usual reason a first submission sits in review for weeks,
 and it is worth starting before the binary is ready rather than after.
+
+### 7.5 `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` were declared but never used (6 Aug 2026)
+
+The first internal-testing upload was flagged for two undeclared-use
+permissions. Neither is called anywhere in this app's code — every
+`expo-image-picker` call site is `launchImageLibraryAsync` /
+`launchCameraAsync` (the system picker, run out-of-process), and the only
+`expo-media-library` call is `saveToLibraryAsync` (write-only, for the
+generated trip share card — see `SHARE_CARD_REFERENCE.md`). Nothing reads or
+browses the user's existing photo or video library.
+
+The permissions were present anyway because `expo-media-library`'s config
+plugin (`withMediaLibrary` in its `plugin/build/`) declares
+`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` and `READ_MEDIA_AUDIO` **by default**
+via a `granularPermissions` option that defaults to
+`['photo', 'video', 'audio']` — regardless of which of those the app actually
+touches. `expo-image-picker` itself does not declare either permission (its
+own native manifest only carries `CAMERA` and the legacy
+`READ_EXTERNAL_STORAGE`/`WRITE_EXTERNAL_STORAGE`).
+
+Fixed by setting `granularPermissions: []` in `app.json`'s `expo-media-library`
+plugin config. `saveToLibraryAsync` writes a newly created file to the
+gallery via `MediaStore`'s scoped-storage insert path, which does not need
+read access to existing media — the write-only permission this app already
+requests (`MediaLibrary.requestPermissionsAsync(true)`) is unaffected.
+
+The build already uploaded before this fix still carries both permissions and
+needed the Play Console declaration form filled in — see the conversation
+for the justification text used. Once a build with this fix is uploaded, the
+declaration should no longer be required, since the permissions will not be
+in the manifest at all. If a future feature genuinely needs to browse the
+photo library (not just write to it), add back only the specific type
+(`['photo']`, not the full default list) and expect Play to ask for the
+declaration again — legitimately, at that point.
