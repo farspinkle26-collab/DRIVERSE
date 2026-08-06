@@ -30,12 +30,11 @@
  *
  * PAYWALL
  *   `openPaywall(trigger)` is how every friction point in the app raises the
- *   upgrade screen, passing the benefit that was blocked. It prefers
- *   RevenueCat's dashboard-configured paywall and falls back to the
- *   hand-built `app/platinum.tsx` — see `openPaywall` below. Keeping it on
- *   this hook means a screen needs one import to both check the gate and offer
- *   the way past it, and the two paywall implementations stay an
- *   implementation detail of this file.
+ *   upgrade screen, passing the benefit that was blocked. It routes to
+ *   `app/platinum.tsx`, the paywall this app owns and styles — see
+ *   `openPaywall` below for why RevenueCat's dashboard-configured one is no
+ *   longer raised, and what that costs. Keeping it on this hook means a
+ *   screen needs one import to both check the gate and offer the way past it.
  */
 
 import createContextHook from "@nkzw/create-context-hook";
@@ -43,7 +42,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  benefitById,
   FEATURE_BENEFIT,
   isAtLimit,
   limitFor,
@@ -55,7 +53,6 @@ import {
   forgetUser,
   getCustomerSummary,
   getEntitlement,
-  getPlatinumOffering,
   getPlatinumPackages,
   identify,
   isPurchasesAvailable,
@@ -73,7 +70,6 @@ import {
 import {
   isPurchasesUiAvailable,
   presentCustomerCenter,
-  presentPaywall,
 } from "@/lib/purchasesUi";
 import { supabase } from "@/lib/supabase";
 
@@ -131,17 +127,6 @@ export type PlatinumStatus =
   | "ready"
   /** No store on this runtime (Expo Go, web, missing SDK key). */
   | "unavailable";
-
-/**
- * Whether RevenueCat's hosted paywall has been shown to work this session.
- *
- * `null` until first tried. Once a presentation comes back as "no paywall
- * configured", every later `openPaywall` goes straight to the app's own screen
- * instead of paying for an offerings round trip and a failed present each
- * time. Module scope rather than state because it describes the RevenueCat
- * project, not this component tree.
- */
-let hostedPaywallWorks: boolean | null = null;
 
 export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
   const [userId, setUserId] = useState<string | null>(null);
@@ -306,61 +291,38 @@ export const [PlatinumProvider, usePlatinum] = createContextHook(() => {
   /* ─── Paywall ───────────────────────────────────────────── */
 
   /**
-   * Raises the paywall on whichever implementation is actually available.
+   * Raises `app/platinum.tsx` — the paywall this app owns and styles.
    *
-   * 1. RevenueCat's dashboard-configured paywall, when the UI module is linked
-   *    and the offering has one attached. Pricing, copy and layout are then
-   *    editable without an app release, and the blocked benefit's headline is
-   *    handed over as a custom variable so the contextual trigger survives.
-   * 2. `app/platinum.tsx` otherwise — Expo Go, web, or a RevenueCat project
-   *    with no paywall configured yet. It is never removed: a dashboard that
-   *    isn't finished must not leave a driver with no way to subscribe.
+   * WHAT CHANGED, AND WHAT IT COSTS
+   *   This used to prefer RevenueCat's dashboard-configured paywall and fall
+   *   back to `app/platinum.tsx` only when the UI module was missing or no
+   *   paywall was attached to the offering. That ordering is reversed — in
+   *   fact the hosted paywall is no longer raised at all — because the hosted
+   *   one is a RevenueCat template: it does not carry the cut corners, the
+   *   palette, the Rajdhani/JetBrains Mono split or any of the rest of the
+   *   design system, so the one screen asking a driver for money was the one
+   *   screen that did not look like Driveverse.
    *
-   * Stays synchronous for its ~15 call sites; the presentation happens in the
-   * background and either resolves in RevenueCat's own modal or navigates.
+   *   The cost is real and worth stating: **pricing, copy and layout are now
+   *   app-release changes, not dashboard edits**, and RevenueCat's paywall
+   *   A/B testing is off the table. If that trade stops being worth it, the
+   *   better answer is to rebuild the *dashboard* paywall in Driveverse's
+   *   style rather than to reintroduce a second, differently-styled one:
+   *   `presentPaywall` in `lib/purchasesUi.tsx` is untouched and still works.
+   *
+   *   Purchasing itself is unaffected. `app/platinum.tsx` buys through
+   *   `lib/purchases.ts` (the SDK, not the UI package), and entitlements still
+   *   arrive through `onEntitlementChange` exactly as before. The Customer
+   *   Center — which Apple and Google effectively require for managing and
+   *   cancelling a subscription — is still RevenueCat's and is still used.
    */
   const openPaywall = useCallback(
     (trigger?: PlatinumBenefitId) => {
-      const openFallbackScreen = () =>
-        router.push(
-          (trigger ? `/platinum?trigger=${trigger}` : "/platinum") as never
-        );
-
-      if (
-        hostedPaywallWorks === false ||
-        !isPurchasesUiAvailable() ||
-        !isPurchasesAvailable()
-      ) {
-        openFallbackScreen();
-        return;
-      }
-
-      void (async () => {
-        const outcome = await presentPaywall({
-          offering: await getPlatinumOffering(),
-          triggerHeadline: trigger
-            ? benefitById(trigger)?.triggerHeadline
-            : undefined,
-        });
-
-        if (outcome === "purchased" || outcome === "restored") {
-          hostedPaywallWorks = true;
-          // The listener will deliver this too; refreshing makes the caller's
-          // next render correct without waiting on the round trip.
-          await refresh();
-          return;
-        }
-        if (outcome === "cancelled" || outcome === "not_presented") {
-          hostedPaywallWorks = true;
-          return;
-        }
-        // "error" or "unavailable": no paywall attached to the offering, or the
-        // view failed. Remember it, and show the screen the app owns.
-        hostedPaywallWorks = false;
-        openFallbackScreen();
-      })();
+      router.push(
+        (trigger ? `/platinum?trigger=${trigger}` : "/platinum") as never
+      );
     },
-    [refresh]
+    []
   );
 
   /* ─── Customer Center ───────────────────────────────────── */

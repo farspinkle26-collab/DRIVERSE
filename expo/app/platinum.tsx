@@ -419,27 +419,37 @@ export default function PlatinumPaywallScreen() {
           </View>
         ) : (
           <View style={styles.block}>
-            <View style={styles.periodRow}>
+            {/* Stacked full-width rows, not three narrow columns.
+                The plans are named "Platinum Monthly" / "Platinum Yearly" now,
+                and a two-word label does not fit a third of the screen without
+                wrapping mid-name. `PeriodOption`'s `wide` variant was built for
+                this and had never been used: label and note on the left, price
+                right-aligned, one plan per row. It also reads better as a
+                price list, which is what this is. */}
+            <View style={styles.periodColumn}>
               <PeriodOption
-                label="Monthly"
+                label="Platinum Monthly"
                 price={priceFor("monthly")}
                 note="per month"
+                wide
                 active={period === "monthly"}
                 onPress={() => setPeriod("monthly")}
               />
               <PeriodOption
-                label="Yearly"
+                label="Platinum Yearly"
                 price={priceFor("yearly")}
                 note="per year"
                 badge={yearlySavingPercent ? `SAVE ${yearlySavingPercent}%` : undefined}
+                wide
                 active={period === "yearly"}
                 onPress={() => setPeriod("yearly")}
               />
               {lifetime ? (
                 <PeriodOption
-                  label="Lifetime"
+                  label="Platinum Lifetime"
                   price={priceFor("lifetime")}
                   note="one-time"
+                  wide
                   active={period === "lifetime"}
                   onPress={() => setPeriod("lifetime")}
                 />
@@ -729,6 +739,10 @@ const styles = StyleSheet.create({
   },
   periodRow: {
     flexDirection: "row",
+    gap: spacing.spacingMd,
+  },
+  /** One plan per row, stacked — see the note at the call site. */
+  periodColumn: {
     gap: spacing.spacingMd,
   },
   periodPressable: {
