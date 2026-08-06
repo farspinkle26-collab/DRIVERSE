@@ -56,6 +56,7 @@ import {
   Flame,
   Globe2,
   HelpCircle,
+  LogOut,
   Info,
   Lock,
   MailOpen,
@@ -359,7 +360,7 @@ function Sheet({
 export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, updateProfilePicture, updateCountry } = useAuth();
+  const { user, isAuthenticated, updateProfilePicture, updateCountry, logout } = useAuth();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -800,6 +801,40 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     setShowAddCar(false);
     loadCars();
   }, [user, newCarName, newCarMake, newCarYear, newCarHP, cars.length, loadCars, atGarageLimit, openPaywall]);
+
+  /**
+   * Sign out.
+   *
+   * Confirmed first, because until now this app had no way out of an account
+   * at all and the row sits in a list where every other entry is navigation —
+   * a mistap should not end the session.
+   *
+   * Routes to `/login` explicitly rather than letting the auth gate in
+   * `app/index.tsx` catch it. Both work, but leaving the driver on a profile
+   * screen for an account that no longer exists, waiting for a redirect, is a
+   * frame of the wrong thing; replacing the route removes it from the history
+   * so Back cannot return to a signed-out profile either.
+   */
+  const handleLogout = useCallback(() => {
+    Alert.alert("Sign Out", "Sign out of Driveverse? You'll need to sign in again to drive.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          const ok = await logout();
+          if (ok) {
+            router.replace("/login" as any);
+          } else {
+            Alert.alert(
+              "Couldn't sign out",
+              "Something went wrong ending your session. Check your connection and try again."
+            );
+          }
+        },
+      },
+    ]);
+  }, [logout, router]);
 
   const handleDeleteCar = useCallback((carId: string) => {
     Alert.alert("Remove Car", "Are you sure you want to remove this car?", [
@@ -1959,6 +1994,15 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               icon={<HelpCircle size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Help & Support"
             />
+            {/* Last in the list on purpose: it is the one row here that ends
+                something rather than opening something, and it should not sit
+                next to a tap the driver makes often. */}
+            <SettingRow
+              icon={<LogOut size={ICON_MD} color={colors.racingRed} strokeWidth={ICON_STROKE} />}
+              label="Sign Out"
+              destructive
+              onPress={handleLogout}
+            />
           </View>
         )}
       </ScrollView>
@@ -2204,17 +2248,26 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
  * `onPress` is optional because Help & Support has no destination yet —
  * the row was already inert before this pass and inventing a route it
  * would 404 on is worse than leaving it as it was.
+ *
+ * `destructive` drops the chevron and takes the accent. The chevron means
+ * "this goes somewhere"; Sign Out does not go anywhere, it *does* something,
+ * and a row that looks like navigation but ends your session is the kind of
+ * mis-signal that gets tapped by accident. Red here is within the budget
+ * MAP_SCREEN_REFERENCE §3 sets — it is one row, and it is the only
+ * irreversible action in the list.
  */
 function SettingRow({
   icon,
   label,
   count,
   onPress,
+  destructive = false,
 }: {
   icon: React.ReactNode;
   label: string;
   count?: number;
   onPress?: () => void;
+  destructive?: boolean;
 }) {
   return (
     <Pressable
@@ -2225,11 +2278,15 @@ function SettingRow({
     >
       <View style={styles.settingLeft}>
         {icon}
-        <Text style={styles.settingLabel}>{label}</Text>
+        <Text style={[styles.settingLabel, destructive && styles.settingLabelDestructive]}>
+          {label}
+        </Text>
       </View>
       <View style={styles.settingRight}>
         {count ? <Text style={styles.settingCount}>{count}</Text> : null}
-        <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+        {!destructive && (
+          <ChevronRight size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+        )}
       </View>
     </Pressable>
   );
@@ -3142,6 +3199,9 @@ const styles = StyleSheet.create({
   settingLabel: {
     ...textStyle("body"),
     color: colors.textPrimary,
+  },
+  settingLabelDestructive: {
+    color: colors.racingRed,
   },
   settingCount: {
     ...CAPTION_MONO,
