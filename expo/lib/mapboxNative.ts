@@ -40,17 +40,46 @@
  * exists, inside `AppErrorBoundary`, after the crash reporter has armed.
  */
 
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import { MAPBOX_ACCESS_TOKEN } from "@/constants/mapbox";
 
 /**
  * The `@rnmapbox/maps` module, or `null` where its native half cannot exist.
  *
- * MUST keep the `Platform.OS` check BEFORE the `require`, and must not be
- * "simplified" into a static import — see this file's header, and §19.
+ * MUST keep both checks BEFORE the `require`, and must not be "simplified"
+ * into a static import — see this file's header, and §19.
+ *
+ * THE SECOND CHECK IS NOT BELT-AND-BRACES. `Mapbox.native.js`'s very first
+ * line is `export * from "./RNMBXModule.js"`, and that module's body is:
+ *
+ *     const RNMBXModule = NativeModules.RNMBXModule;
+ *     if (NativeModules.RNMBXModule == null) {
+ *       throw new Error('@rnmapbox/maps native code not available. …');
+ *     }
+ *
+ * So an unlinked native half does not produce a missing export or an
+ * undefined component — it produces a **throw at module scope**, on the first
+ * `require`, which §19 established nothing downstream can catch. That is the
+ * difference between "the map screen says it is unavailable" and "the app
+ * dies when the driver taps the map tab".
+ *
+ * `NativeModules.RNMBXModule` is safe to read: the `NativeModules` proxy
+ * returns `undefined` for a module that is not registered rather than
+ * throwing, so asking the question costs nothing. It is the same question
+ * `RNMBXModule.js` asks — asked one moment earlier, where the answer can
+ * still be acted on.
+ *
+ * When this returns null on a native platform, the build is wrong: the
+ * package is in `package.json` but its native half was not linked, which
+ * means `npx expo prebuild` has not been re-run since it was added, or the
+ * APK predates it. The map screen renders its unavailable state and the rest
+ * of the app keeps working.
  */
 export function loadMapbox(): typeof import("@rnmapbox/maps").default | null {
   if (Platform.OS === "web") {
+    return null;
+  }
+  if (NativeModules.RNMBXModule == null) {
     return null;
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
