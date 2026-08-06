@@ -23,6 +23,11 @@ module.exports = {
     "<rootDir>/hooks/**/__tests__/**/*.test.ts",
     "<rootDir>/hooks/**/__tests__/**/*.test.tsx",
     "<rootDir>/constants/**/__tests__/**/*.test.ts",
+    // Config plugins are plain CommonJS, not TypeScript — they run in Expo's
+    // prebuild, not in the app. The release-signing one edits generated Gradle
+    // by pattern-matching it, and its failure mode is a build that succeeds
+    // and produces a debug-signed bundle, so it is tested like anything else.
+    "<rootDir>/plugins/**/__tests__/**/*.test.js",
   ],
   testPathIgnorePatterns: ["/node_modules/", "/supabase/functions/"],
   // jest-expo transforms RN/Expo packages but ships ESM-only deps untouched.
