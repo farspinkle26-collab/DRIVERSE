@@ -116,7 +116,8 @@
         }
       ],
       "expo-apple-authentication",
-      "@rnmapbox/maps"
+      "@rnmapbox/maps",
+      "./plugins/withReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": true
