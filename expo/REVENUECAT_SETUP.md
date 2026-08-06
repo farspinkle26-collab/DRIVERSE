@@ -158,29 +158,50 @@ and it is what the Customer Center's "change plan" flow operates on.
 
 ## 4. Paywall
 
-`openPaywall()` prefers the paywall configured in the RevenueCat dashboard and
-falls back to `app/platinum.tsx`. Both are real; neither is dead code.
+`openPaywall()` routes to **`app/platinum.tsx`**, the paywall this app owns
+and styles. RevenueCat's dashboard-configured paywall is **not** raised.
 
-### 4.1 Configure the hosted paywall
+### 4.1 Why the hosted paywall is not used (6 Aug 2026)
 
-**Dashboard → Paywalls → the `platinum` offering → New paywall.** Pick a v2
-template and set copy, images and the package order there.
+It used to be preferred, with `app/platinum.tsx` as the fallback. That is
+reversed, because the hosted paywall is a RevenueCat template: it carries none
+of the design system — no cut corners, no palette tokens, no
+Rajdhani/JetBrains Mono split — so the one screen asking a driver for money
+was the one screen that did not look like Driveverse.
 
-Two Driveverse-specific notes:
+**What this costs, stated plainly:** pricing, copy, layout and package order
+are now **app-release changes, not dashboard edits**, and RevenueCat's paywall
+A/B testing is unavailable. That is the trade. If it stops being worth it, the
+better answer is to rebuild the *dashboard* paywall in Driveverse's style
+rather than reintroduce a second, differently-styled one —
+`presentPaywall` in `lib/purchasesUi.tsx` is untouched and still works, and
+`hasPurchasesUi` still reports whether it could render.
 
-- **Colour.** Platinum is chrome (`#E8EAED`), never `racingRed`. The primary
-  button is the one exception — "the button you press" is red everywhere in
-  the app. The ramp is in `constants/platinum.ts` §Colour.
-- **The contextual trigger.** Friction points pass the blocked benefit's
-  headline through as a custom variable. Reference it in paywall copy as:
+**What is unaffected:**
 
-  ```
-  {{ custom.trigger_headline }}
-  ```
+- **Purchasing.** `app/platinum.tsx` buys through `lib/purchases.ts` (the SDK,
+  not the UI package). Entitlements still arrive via `onEntitlementChange`.
+- **The Customer Center.** Still RevenueCat's, still used — Apple and Google
+  effectively require it for managing and cancelling a subscription.
+- **Offerings and products.** Still configured in the dashboard exactly as
+  §2 and §3 describe; the app reads packages from the `platinum` offering.
 
-  It carries strings like *"Your garage is full at 2 cars"*. It is empty when
-  the paywall was opened from Settings rather than a cap, so any text using it
-  must still read correctly when it resolves to nothing.
+The contextual trigger still works, but it is now an app-side lookup rather
+than a `{{ custom.trigger_headline }}` template variable: `openPaywall("garage")`
+passes `?trigger=garage`, and `app/platinum.tsx` resolves the headline through
+`benefitById`. Nothing to configure in the dashboard for it.
+
+### 4.1b Plan names
+
+The plan rows read **Platinum Monthly**, **Platinum Yearly** and (when the
+package exists) **Platinum Lifetime**. These are the app's own labels in
+`app/platinum.tsx`, not the store's product names.
+
+**The store's product display name is separate and is not set from this
+repo.** It is what the OS purchase sheet shows when the driver confirms, and
+it comes from App Store Connect (the subscription's *Display Name*) and Google
+Play Console (the base plan / product *Name*). If those still read something
+like the raw product id, change them there — no app release is needed for it.
 
 ### 4.2 How the app calls it
 
@@ -197,20 +218,20 @@ openPaywall("garage");
 if (blockAtLimit("garageCars", cars.length)) return;
 ```
 
-`openPaywall` stays synchronous for its ~15 call sites. Internally it:
+`openPaywall` is synchronous for its ~15 call sites and now does one thing:
+pushes `/platinum?trigger=<benefit>`. The branch that presented RevenueCat's
+paywall — and the session flag that remembered whether it worked — are gone
+(§4.1).
 
-1. presents RevenueCat's paywall when `react-native-purchases-ui` is linked;
-2. remembers, for the session, if the offering has no paywall attached; and
-3. pushes `/platinum?trigger=<benefit>` in every other case.
-
-A purchase made inside the hosted paywall does **not** return through
-`openPaywall`. It arrives on the customer-info listener in
-`hooks/usePlatinumStore.ts`, the same path that carries renewals, refunds and
-purchases made on another device.
+A purchase still does **not** return through `openPaywall`. It arrives on the
+customer-info listener in `hooks/usePlatinumStore.ts`, the same path that
+carries renewals, refunds and purchases made on another device.
 
 ### 4.3 Presenting one directly
 
-For a screen that wants the paywall inline rather than through the hook:
+For a screen that wants RevenueCat's own paywall inline rather than through
+the hook. **Nothing in the app does this today** (§4.1) — the API is kept
+working so the decision stays reversible:
 
 ```tsx
 import { presentPaywall } from "@/lib/purchasesUi";
