@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -10,19 +10,26 @@ import {
   ActivityIndicator,
   ScrollView,
   Animated,
+  Alert,
+  Image,
 } from "react-native";
+import * as ImagePickerExpo from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
 import {
   ArrowLeft,
+  Camera as CameraIcon,
   Car,
   ChevronRight,
   CheckCircle2,
   Search,
   Navigation,
+  Sparkles,
+  User as UserIcon,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { supabase } from "@/lib/supabase";
 import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countries";
@@ -37,8 +44,41 @@ import {
   textStyle,
 } from "@/constants/theme";
 
-const STEPS = ["nation", "profile", "car"] as const;
+/**
+ * Four steps, and the first one is skippable on purpose.
+ *
+ * `photo` leads because a driver's face is what every other driver sees on
+ * the map, in a convoy and in chat — an account that reaches the map with the
+ * default avatar is one the rest of the app cannot tell apart. It is still
+ * skippable: a signup that hard-blocks on "find a photo of yourself right
+ * now" loses the people who do not have one to hand, and the profile screen
+ * can set it later just as well.
+ *
+ * `car` gained a **model** field. `car_collections.model` has existed since
+ * the garage migration and nothing has ever written to it — the make alone
+ * turns every Toyota in the app into the same car.
+ */
+const STEPS = ["photo", "nation", "car", "identity"] as const;
 type Step = (typeof STEPS)[number];
+
+const STEP_COPY: Record<Step, { title: string; subtitle: string }> = {
+  photo: {
+    title: "Your Face",
+    subtitle: "This is what other drivers see on the map. You can add it later.",
+  },
+  nation: {
+    title: "Your Nation",
+    subtitle: "Pick your nation or detect it automatically",
+  },
+  car: {
+    title: "Your Drive",
+    subtitle: "Make, model and colour — what you actually drive",
+  },
+  identity: {
+    title: "Name Your Ride",
+    subtitle: "Give your ride an identity",
+  },
+};
 
 const CAR_COLORS = [
   { name: "Racing Red", hex: "#EF4444" },
@@ -59,6 +99,36 @@ const CAR_MAKES = [
 ];
 
 /**
+ * One recognisable model per make, used only as the model field's placeholder.
+ *
+ * This is a hint, not a vocabulary — the field is free text and accepts
+ * anything. The point is that "e.g. Supra" under Toyota tells the driver what
+ * kind of answer the box wants far faster than the word "Model" does.
+ */
+const MODEL_HINTS: Record<string, string> = {
+  Toyota: "Supra",
+  Honda: "Civic",
+  BMW: "M3",
+  "Mercedes-Benz": "C-Class",
+  Audi: "RS6",
+  Porsche: "911",
+  Nissan: "Skyline",
+  Mitsubishi: "Lancer",
+  Suzuki: "Swift",
+  Daihatsu: "Ayla",
+  Hyundai: "Ioniq",
+  Kia: "Stinger",
+  Mazda: "RX-7",
+  Subaru: "WRX",
+  Volkswagen: "Golf",
+  Ford: "Mustang",
+  Chevrolet: "Camaro",
+  Lexus: "IS",
+  Ferrari: "488",
+  Lamborghini: "Huracán",
+};
+
+/**
  * The customization step every signup path funnels through exactly once —
  * email, Google and Apple alike — before the garage gate. `app/index.tsx`
  * routes here whenever `needsProfileCustomization` is true (a profile with
@@ -68,30 +138,115 @@ const CAR_MAKES = [
 export default function CustomizeProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, completeProfileCustomization, error, logout } = useAuth();
+  const { user, completeProfileCustomization, updateProfilePicture, error, logout } = useAuth();
   const { cars, loadingCars, refreshCars } = useActiveCar();
   const scrollRef = useRef<ScrollView>(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const [step, setStep] = useState<Step>("nation");
+  const [step, setStep] = useState<Step>("photo");
   const stepIndex = STEPS.indexOf(step);
   const progress = useRef(new Animated.Value((stepIndex + 1) / STEPS.length)).current;
 
-  // Step 1: Nation
+  // Step 1: Profile photo. Local URI only — the upload happens on finish, so
+  // a driver who backs out of signup has not written anything to storage.
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
+
+  // Step 2: Nation
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [countryQuery, setCountryQuery] = useState("");
   const [detectingCountry, setDetectingCountry] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
 
-  // Step 2: Car make & color
+  // Step 3: Car make, model & color
   const [selectedMake, setSelectedMake] = useState("");
+  const [carModel, setCarModel] = useState("");
   const [selectedColor, setSelectedColor] = useState(CAR_COLORS[4]);
 
-  // Step 3: Car identity
+  // Step 4: Car identity, and the optional photo of the real car
   const [carName, setCarName] = useState("");
   const [carYear, setCarYear] = useState("2024");
   const [licensePlate, setLicensePlate] = useState("");
+  const [carPhotoUri, setCarPhotoUri] = useState<string | null>(null);
+  const [pickingCarPhoto, setPickingCarPhoto] = useState(false);
+
+  /**
+   * Picks an image, from the camera or the library.
+   *
+   * `expo-image-picker` is already a static import on this screen and has been
+   * since before the migration, so there is no new module-scope native reach
+   * here (LAUNCH_SAFETY_REFERENCE.md §10) — but the permission request and the
+   * picker call both happen inside this handler, never at module scope.
+   *
+   * A denied permission is not an error state: the driver is told once and the
+   * step stays skippable, because neither photo is required to finish signup.
+   */
+  const pickImage = useCallback(
+    async (useCamera: boolean, aspect: [number, number]): Promise<string | null> => {
+      const perm = useCamera
+        ? await ImagePickerExpo.requestCameraPermissionsAsync()
+        : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+
+      if (perm.status !== "granted") {
+        Alert.alert(
+          useCamera ? "Camera access is off" : "Photo access is off",
+          "Driveverse can't open it without permission. Turn it on in Settings, or skip this step — you can add a photo later from your profile."
+        );
+        return null;
+      }
+
+      const result = useCamera
+        ? await ImagePickerExpo.launchCameraAsync({ allowsEditing: true, aspect, quality: 0.8 })
+        : await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect, quality: 0.8 });
+
+      if (result.canceled || !result.assets?.[0]) return null;
+      return result.assets[0].uri;
+    },
+    []
+  );
+
+  const chooseAvatar = useCallback(() => {
+    const run = async (useCamera: boolean) => {
+      setPickingAvatar(true);
+      try {
+        const uri = await pickImage(useCamera, [1, 1]);
+        if (uri) setAvatarUri(uri);
+      } catch {
+        Alert.alert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
+      } finally {
+        setPickingAvatar(false);
+      }
+    };
+
+    Alert.alert("Profile photo", "Where should we get it from?", [
+      { text: "Take a photo", onPress: () => void run(true) },
+      { text: "Choose from library", onPress: () => void run(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [pickImage]);
+
+  const chooseCarPhoto = useCallback(() => {
+    const run = async (useCamera: boolean) => {
+      setPickingCarPhoto(true);
+      try {
+        // 4:3 rather than square — a car is wider than it is tall, and a
+        // square crop of one is mostly bodywork with the ends cut off.
+        const uri = await pickImage(useCamera, [4, 3]);
+        if (uri) setCarPhotoUri(uri);
+      } catch {
+        Alert.alert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
+      } finally {
+        setPickingCarPhoto(false);
+      }
+    };
+
+    Alert.alert("Photo of your car", "Where should we get it from?", [
+      { text: "Take a photo", onPress: () => void run(true) },
+      { text: "Choose from library", onPress: () => void run(false) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [pickImage]);
 
   const animateProgress = (to: number) => {
     Animated.timing(progress, {
@@ -165,11 +320,16 @@ export default function CustomizeProfileScreen() {
 
   const canGoNext = (): boolean => {
     switch (step) {
+      // Deliberately always true: the photo is optional, and the button
+      // reads "Skip for now" until one is picked rather than sitting there
+      // disabled with nothing explaining why.
+      case "photo":
+        return true;
       case "nation":
         return selectedCountry != null;
-      case "profile":
-        return selectedMake.length > 0 && selectedColor != null;
       case "car":
+        return selectedMake.length > 0 && selectedColor != null;
+      case "identity":
         return true; // car name can be auto-set
       default:
         return false;
@@ -181,22 +341,51 @@ export default function CustomizeProfileScreen() {
     setSubmitting(true);
     setLocalError(null);
     try {
-      const fullCarName = carName.trim() || `${selectedMake} ${carYear}`;
+      // The nickname falls back to make + model + year, which is a better
+      // default than make + year now that the model is collected: "Toyota
+      // Supra 2024" rather than "Toyota 2024".
+      const fullCarName =
+        carName.trim() ||
+        [selectedMake, carModel.trim(), carYear].filter(Boolean).join(" ");
+
+      // The profile photo is uploaded here rather than when it was picked, so
+      // abandoning signup leaves nothing behind in storage. A failed upload is
+      // not a failed signup: `updateProfilePicture` already falls back to the
+      // local URI, and the driver can set it again from their profile.
+      if (avatarUri) {
+        try {
+          await updateProfilePicture(avatarUri);
+        } catch {
+          // Non-fatal on purpose — see above.
+        }
+      }
 
       // The DB trigger already created a starter car on account creation
       // (email, Google or Apple alike) — this fills it in with what the
       // driver actually picked instead of leaving "Starter Ride" behind.
       const primaryCar = cars.find((c) => c.is_primary) ?? cars[0];
       if (primaryCar) {
+        let photoUrl: string | null = null;
+        if (carPhotoUri) {
+          try {
+            photoUrl = await uploadCarPhoto(user.id, primaryCar.id, carPhotoUri);
+          } catch {
+            // Same rule as the avatar: a photo that would not upload does not
+            // cost the driver their car details or block them from the garage.
+          }
+        }
+
         await supabase
           .from("car_collections")
           .update({
             name: fullCarName,
             make: selectedMake,
+            model: carModel.trim(),
             year: carYear,
             color: selectedColor.hex,
             color_name: selectedColor.name,
             license_plate: licensePlate.trim() || null,
+            ...(photoUrl ? { photo_url: photoUrl } : {}),
           })
           .eq("id", primaryCar.id);
         await refreshCars();
@@ -271,20 +460,63 @@ export default function CustomizeProfileScreen() {
 
           {/* Step titles */}
           <View style={styles.stepTitleSection}>
-            <Text style={styles.stepTitle}>
-              {step === "nation" ? "Your Nation" : step === "profile" ? "Your Drive" : "Name Your Ride"}
-            </Text>
-            <Text style={styles.stepSubtitle}>
-              {step === "nation"
-                ? "Pick your nation or detect it automatically"
-                : step === "profile"
-                ? "Choose your car's make and color"
-                : "Give your ride an identity"}
-            </Text>
+            <Text style={styles.stepTitle}>{STEP_COPY[step].title}</Text>
+            <Text style={styles.stepSubtitle}>{STEP_COPY[step].subtitle}</Text>
           </View>
 
           <View style={styles.formContent}>
-            {/* ============ STEP 1: NATION ============ */}
+            {/* ============ STEP 1: PROFILE PHOTO ============
+                Optional, and the screen says so rather than implying it with
+                a greyed-out button. The preview is the same circle the map
+                marker and the profile header use, so what the driver picks
+                here is what they will actually see. */}
+            {step === "photo" && (
+              <View style={styles.stepForm}>
+                <View style={styles.avatarStage}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={avatarUri ? "Change your profile photo" : "Add a profile photo"}
+                    onPress={chooseAvatar}
+                    disabled={pickingAvatar}
+                    activeOpacity={0.8}
+                    style={styles.avatarRing}
+                  >
+                    {avatarUri ? (
+                      <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+                    ) : (
+                      <UserIcon size={44} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    )}
+
+                    <View style={styles.avatarCameraBadge}>
+                      {pickingAvatar ? (
+                        <ActivityIndicator size="small" color={colors.voidBlack} />
+                      ) : (
+                        <CameraIcon size={16} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  <Text style={styles.avatarHint}>
+                    {avatarUri
+                      ? "Looking good. Tap the photo to change it."
+                      : "Tap to add a photo — or skip and add one later from your profile."}
+                  </Text>
+
+                  {avatarUri && (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove the photo"
+                      onPress={() => setAvatarUri(null)}
+                      hitSlop={spacing.spacingSm}
+                    >
+                      <Text style={styles.avatarRemove}>Remove photo</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* ============ STEP 2: NATION ============ */}
             {step === "nation" && (
               <View style={styles.stepForm}>
                 <CutCornerButton
@@ -348,7 +580,7 @@ export default function CustomizeProfileScreen() {
             )}
 
             {/* ============ STEP 2: CAR MAKE & COLOR ============ */}
-            {step === "profile" && (
+            {step === "car" && (
               <View style={styles.stepForm}>
                 <Text style={styles.sectionLabel}>Car Make</Text>
                 <View style={styles.makeGrid}>
@@ -360,6 +592,27 @@ export default function CustomizeProfileScreen() {
                       onPress={() => setSelectedMake(make)}
                     />
                   ))}
+                </View>
+
+                {/* Model is free text, not a picker: the make list is twenty
+                    entries and closed, but every make has dozens of models and
+                    a closed list would be wrong for somebody on day one. It is
+                    optional — a driver who does not know or care still gets a
+                    car, they just get "Toyota" instead of "Toyota Supra". */}
+                <Text style={[styles.sectionLabel, { marginTop: spacing.spacingXl }]}>
+                  Model <Text style={styles.sectionLabelOptional}>· optional</Text>
+                </Text>
+                <View style={styles.inputWrapper}>
+                  <Car size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder={selectedMake ? `e.g. ${MODEL_HINTS[selectedMake] ?? "Model"}` : "e.g. Supra"}
+                    placeholderTextColor={colors.textSecondary}
+                    value={carModel}
+                    onChangeText={setCarModel}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                  />
                 </View>
 
                 <Text style={[styles.sectionLabel, { marginTop: spacing.spacingXl }]}>Year</Text>
@@ -397,7 +650,7 @@ export default function CustomizeProfileScreen() {
             )}
 
             {/* ============ STEP 3: CAR NAME ============ */}
-            {step === "car" && (
+            {step === "identity" && (
               <View style={styles.stepForm}>
                 <View style={styles.carPreview}>
                   <CutCornerSurface
@@ -434,17 +687,89 @@ export default function CustomizeProfileScreen() {
                     autoCapitalize="characters"
                   />
                 </View>
+
+                {/* ---- Optional photo of the real car ----
+                    Offered, never required, and deliberately not gated behind
+                    anything: the photo is useful on its own (it is what the
+                    garage and the share card show) and it is also the input
+                    the AI showcase needs later. The showcase itself is NOT
+                    generated here — see the note below. */}
+                <Text style={[styles.sectionLabel, { marginTop: spacing.spacingXl }]}>
+                  Photo of your car <Text style={styles.sectionLabelOptional}>· optional</Text>
+                </Text>
+
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={carPhotoUri ? "Change the photo of your car" : "Add a photo of your car"}
+                  onPress={chooseCarPhoto}
+                  disabled={pickingCarPhoto}
+                  activeOpacity={0.8}
+                  style={styles.carPhotoDrop}
+                >
+                  {carPhotoUri ? (
+                    <Image source={{ uri: carPhotoUri }} style={styles.carPhotoImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.carPhotoEmpty}>
+                      {pickingCarPhoto ? (
+                        <ActivityIndicator size="small" color={colors.racingRed} />
+                      ) : (
+                        <CameraIcon size={26} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      )}
+                      <Text style={styles.carPhotoEmptyText}>Add a photo of your car</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {carPhotoUri && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove the car photo"
+                    onPress={() => setCarPhotoUri(null)}
+                    hitSlop={spacing.spacingSm}
+                  >
+                    <Text style={styles.avatarRemove}>Remove photo</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* ---- The AI showcase, mentioned but not run ----
+                    WHY IT IS A NOTE AND NOT A BUTTON HERE. Generating a
+                    showcase costs money per call and is Platinum-only —
+                    `lib/aiShowcase.ts`, gated server-side in the
+                    `generate-showcase` edge function, with a monthly quota
+                    that `ai_showcases` ledgers. Putting that call on the
+                    signup path would mean either spending on accounts that
+                    have not driven anywhere yet, or showing a paywall to
+                    someone who has not seen the app work. Neither is a good
+                    first impression, and the request was explicitly that this
+                    not be a must.
+
+                    So signup collects the input the feature needs and tells
+                    the driver the feature exists. The garage runs it, once
+                    they have a reason to want it. */}
+                <View style={styles.showcaseNote}>
+                  <Sparkles size={16} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                  <Text style={styles.showcaseNoteText}>
+                    Added a photo? You can turn it into an AI studio shot of your car from
+                    your garage later — no need to do it now.
+                  </Text>
+                </View>
               </View>
             )}
 
             {/* Action button */}
             <CutCornerButton
-              title={step === "car" ? "Enter the Garage" : "Next"}
-              onPress={step === "car" ? handleFinish : nextStep}
+              title={
+                step === "identity"
+                  ? "Enter the Garage"
+                  : step === "photo" && !avatarUri
+                    ? "Skip for now"
+                    : "Next"
+              }
+              onPress={step === "identity" ? handleFinish : nextStep}
               disabled={submitting || loadingCars || !canGoNext()}
               style={styles.actionBtn}
               trailingIcon={
-                !submitting && step !== "car" ? (
+                !submitting && step !== "identity" ? (
                   <ChevronRight size={18} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
                 ) : undefined
               }
@@ -563,6 +888,104 @@ const styles = StyleSheet.create({
     ...textStyle("caption", { fontFamily: fontFamily.displaySemiBold }),
     color: colors.textSecondary,
     letterSpacing: 1,
+  },
+  /** "· optional" beside a label — same size, less weight, so it reads as an
+   *  aside rather than part of the field name. */
+  sectionLabelOptional: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    letterSpacing: 0,
+  },
+
+  /* ---------------- Step 1: profile photo ---------------- */
+  avatarStage: {
+    alignItems: "center",
+    gap: spacing.spacingLg,
+    paddingVertical: spacing.spacingXl,
+  },
+  avatarRing: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+    // The badge hangs off the bottom-right of the circle.
+    position: "relative",
+  },
+  avatarImage: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+  },
+  avatarCameraBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: spacing.spacingXs,
+    width: spacing.spacingXxl,
+    height: spacing.spacingXxl,
+    borderRadius: spacing.spacingXl,
+    backgroundColor: colors.racingRed,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: borderWidth.emphasis,
+    borderColor: colors.voidBlack,
+  },
+  avatarHint: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
+    textAlign: "center",
+    paddingHorizontal: spacing.spacingLg,
+  },
+  avatarRemove: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
+    textAlign: "center",
+    marginTop: spacing.spacingSm,
+  },
+
+  /* ---------------- Step 4: car photo ---------------- */
+  carPhotoDrop: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: radius.sharp,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carPhotoImage: {
+    width: "100%",
+    height: "100%",
+  },
+  carPhotoEmpty: {
+    alignItems: "center",
+    gap: spacing.spacingSm,
+  },
+  carPhotoEmptyText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  showcaseNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.spacingSm,
+    marginTop: spacing.spacingLg,
+    padding: spacing.spacingMd,
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    borderRadius: radius.sharp,
+  },
+  showcaseNoteText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    flex: 1,
+    lineHeight: 17,
   },
   detectError: {
     ...textStyle("caption"),
