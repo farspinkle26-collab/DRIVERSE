@@ -193,11 +193,15 @@ separate reasons, all of which have to be fixed:
    debug key — fine for `adb install`, rejected by Play. §7.2.
 3. **`versionCode` must be higher than anything already uploaded.** It was
    unset in `app.json`, which means Expo generates `1`, and Play rejects a
-   `versionCode` it has seen before. The Rork builds reported `15` (§5), so it
-   is now pinned at `16`. **Check Play Console → Release → App bundle explorer
-   before every upload and raise it past the highest one there** — `1` would have
-   been rejected on sight, and a duplicate is the single most common failed
-   first upload.
+   `versionCode` it has seen before. First pinned at `16` on the assumption
+   that the Rork builds' reported `15` (§5) was the highest — wrong: Play
+   Console's App bundle explorer showed `19` already uploaded (evidently more
+   Rork builds than were visible from the logs at hand), and the `16` upload
+   was rejected outright. Now pinned at `20`. **This number goes stale the
+   moment it is set — check Play Console → Release → App bundle explorer
+   before every upload and raise it past the highest one there,** rather than
+   trusting whatever is committed here. A duplicate is the single most common
+   failed upload, and this file cannot see uploads that happened outside it.
 
 `eas.json`'s `production` profile already sets `buildType: "app-bundle"` and
 `autoIncrement`, so an EAS cloud build gets 1 and 3 for free. This section is
