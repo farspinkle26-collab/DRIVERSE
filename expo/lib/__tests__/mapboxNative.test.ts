@@ -1,4 +1,13 @@
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
+
+/** The native module rnmapbox itself checks for before it throws. */
+function withNativeModule(present: boolean) {
+  if (present) {
+    (NativeModules as Record<string, unknown>).RNMBXModule = { setAccessToken: jest.fn() };
+  } else {
+    delete (NativeModules as Record<string, unknown>).RNMBXModule;
+  }
+}
 
 /**
  * These guard LAUNCH_SAFETY_REFERENCE.md §10/§19 for `@rnmapbox/maps`.
@@ -21,10 +30,12 @@ describe("loadMapbox", () => {
 
   beforeEach(() => {
     jest.resetModules();
+    withNativeModule(true);
   });
 
   afterEach(() => {
     Object.defineProperty(Platform, "OS", { value: originalOS, configurable: true });
+    withNativeModule(false);
   });
 
   it("returns null on web without ever requiring @rnmapbox/maps", () => {
@@ -38,7 +49,24 @@ describe("loadMapbox", () => {
     expect(loadMapbox()).toBeNull();
   });
 
-  it("requires the package on a native platform", () => {
+  it("returns null when the native half is not linked, without requiring the package", () => {
+    // THE CRASH THIS GUARDS: rnmapbox's own entry throws at module scope when
+    // NativeModules.RNMBXModule is absent ("native code not available…"), and
+    // §19 means nothing downstream can catch it — the app dies the moment the
+    // driver opens the map tab. The mock below throws exactly that way, so a
+    // regression that drops the NativeModules check fails here instead.
+    withNativeModule(false);
+    jest.doMock("@rnmapbox/maps", () => {
+      throw new Error("@rnmapbox/maps native code not available.");
+    });
+    Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { loadMapbox } = require("@/lib/mapboxNative");
+    expect(loadMapbox()).toBeNull();
+  });
+
+  it("requires the package on a native platform once the native half is linked", () => {
     const fakeModule = { setAccessToken: jest.fn() };
     jest.doMock("@rnmapbox/maps", () => ({ __esModule: true, default: fakeModule }));
     Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
@@ -54,11 +82,13 @@ describe("initMapbox", () => {
 
   beforeEach(() => {
     jest.resetModules();
+    withNativeModule(true);
     Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
   });
 
   afterEach(() => {
     Object.defineProperty(Platform, "OS", { value: originalOS, configurable: true });
+    withNativeModule(false);
   });
 
   function mockToken(token: string | null) {

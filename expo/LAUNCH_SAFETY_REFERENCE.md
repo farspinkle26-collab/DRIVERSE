@@ -1375,23 +1375,53 @@ says the obvious defence does not work: the first `require()` of a module runs
 its body inside Metro's own guard, which reports a throw there as fatal
 without rethrowing, so no `try`/`catch` at the call site ever sees it.
 
-### 20b. How it is loaded here
+### 20b. There is a second, earlier throw — and it is the one that fired
+
+The `getEnforcing` calls above are real, but they are not what crashed the
+first device build. `Mapbox.native.js`'s **first** line is
+`export * from "./RNMBXModule.js"`, and that module's body is:
+
+```js
+const RNMBXModule = NativeModules.RNMBXModule;
+if (NativeModules.RNMBXModule == null) {
+  throw new Error('@rnmapbox/maps native code not available. …');
+}
+```
+
+So an unlinked native half does not surface as a missing export or an
+undefined component that React complains about. It is a **throw at module
+scope on the first require**, which §19 says nothing downstream can catch —
+the app dies the moment the driver opens the map tab.
+
+This is worth separating from 20a because the two have different triggers.
+`getEnforcing` needs a *specific* TurboModule to be missing;
+`RNMBXModule == null` fires whenever autolinking has not run at all — which
+is the ordinary state of a working checkout that has not been `prebuild`-ed
+since the package was added. Every developer hits it once.
+
+### 20c. How it is loaded here
 
 `lib/mapboxNative.ts` is the only file that names the package, and it follows
-§19's rule — the platform check comes **before** the `require`, not around it:
+§19's rule — **both** checks come before the `require`, not around it:
 
 ```ts
 export function loadMapbox() {
   if (Platform.OS === "web") return null;
+  if (NativeModules.RNMBXModule == null) return null;
   return require("@rnmapbox/maps").default;
 }
 ```
 
-Web is the platform where the native half cannot exist, so web never calls
-`require`. On native the module is linked by the config plugin in `app.json`,
-so the require resolves; if a broken build ever means it does not, that fails
-on the map screen rather than at launch, which is the trade this shape is
-chosen to make.
+The second line is the interesting one. It asks exactly the question
+`RNMBXModule.js` asks, one moment earlier, where the answer can still be
+acted on: `NativeModules.X` returns `undefined` for an unregistered module
+rather than throwing, so the question is free. Getting the answer *after* the
+require means getting it as a fatal error.
+
+When this returns null on a native platform the build is wrong — the package
+is in `package.json` but its native half was never linked. The map screen
+renders its unavailable state, and the rest of the app keeps working, instead
+of the process ending.
 
 `Mapbox.setAccessToken()` is a native call, and every example in the wild puts
 it at module scope beside the import. That is §1/§2. It lives in
@@ -1404,7 +1434,7 @@ cannot start renders a message instead of killing the screen.
 throws the way the real package does, so a regression to a static import — or
 to a `require` above the platform check — fails there instead of on a phone.
 
-### 20c. What this does NOT protect
+### 20d. What this does NOT protect
 
 `check:launch-path` will not catch a mistake here on its own. It walks eager
 edges from the bundle entries and the root layout, and the map screens are
