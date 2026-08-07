@@ -272,12 +272,18 @@ CREATE POLICY "User badges are viewable" ON public.user_badges
 -- =====================================================================
 -- 8. REWARD MODEL  (mirrored in expo/lib/questEngine.ts)
 -- =====================================================================
+-- Base XP sits in the 10k-20k band, not the hundreds — a driver clearing a
+-- handful of quests should feel it move the level bar, not read as a
+-- rounding error next to the 1.6×-per-level curve in useXPStore.ts
+-- (L10 alone costs ~6.9k XP, L20 ~1.2M). Coins are unchanged; only XP
+-- was asked to jump. Mirrored in DIFFICULTY_TIERS in questEngine.ts —
+-- keep both in sync.
 CREATE OR REPLACE FUNCTION public.quest_base_reward(p_difficulty TEXT)
 RETURNS TABLE (base_xp INTEGER, base_coins INTEGER) AS $$
   SELECT CASE p_difficulty
-           WHEN 'easy'   THEN 120
-           WHEN 'medium' THEN 280
-           WHEN 'hard'   THEN 550
+           WHEN 'easy'   THEN 10000
+           WHEN 'medium' THEN 15000
+           WHEN 'hard'   THEN 20000
            ELSE 100
          END,
          CASE p_difficulty

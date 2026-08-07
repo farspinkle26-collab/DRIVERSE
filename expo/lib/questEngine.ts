@@ -154,10 +154,17 @@ export interface DifficultyTier {
   baseCoins: number;
 }
 
+// Base XP sits in the 10k-20k band, not the hundreds — a driver clearing a
+// handful of quests should feel it move the level bar, not read as a
+// rounding error next to `xpForLevel`'s 1.6×-per-level curve
+// (`lib/xpMath.ts`; L10 alone costs ~6.9k, L20 ~1.2M). Coins stay on their
+// original, smaller scale — only XP was asked to jump. Mirrored in
+// `quest_base_reward()` in `database_migration_daily_quests.sql`; keep both
+// in sync.
 export const DIFFICULTY_TIERS: Record<QuestDifficulty, DifficultyTier> = {
-  easy: { id: "easy", label: "Easy", color: "#22C55E", order: 1, baseXp: 120, baseCoins: 25 },
-  medium: { id: "medium", label: "Medium", color: "#F59E0B", order: 2, baseXp: 280, baseCoins: 60 },
-  hard: { id: "hard", label: "Hard", color: "#EF4444", order: 3, baseXp: 550, baseCoins: 130 },
+  easy: { id: "easy", label: "Easy", color: "#22C55E", order: 1, baseXp: 10000, baseCoins: 25 },
+  medium: { id: "medium", label: "Medium", color: "#F59E0B", order: 2, baseXp: 15000, baseCoins: 60 },
+  hard: { id: "hard", label: "Hard", color: "#EF4444", order: 3, baseXp: 20000, baseCoins: 130 },
 };
 
 export const DIFFICULTY_ORDER: QuestDifficulty[] = ["easy", "medium", "hard"];
