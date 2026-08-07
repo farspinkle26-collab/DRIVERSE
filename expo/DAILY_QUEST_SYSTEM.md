@@ -88,7 +88,12 @@ Objectives (`objective_type`) and the real indicator that drives each
 | `night_drive` | Distance, night-flavoured | `drive_distance` (km) | "Long Haul — 60 km" |
 | `reach_speed` | Reach a top speed of N km/h | `reach_speed` (km/h — tracks the best speed seen, not a sum) | "Reach 80 km/h today" |
 | `make_friend` | Make N new friends | `make_friend` (+1) | "Make a new friend" |
-| `photo_capture` | Take N photos | `photo_capture` (+N) | "Snap 2 photos" |
+
+These three are the *only* objectives the catalogue seeds or the generator
+will select — see §10. `photo_capture` still exists in `questEngine.ts`'s
+type union and `useQuestStore.ts`'s `recordPhoto()` (neither is wired to any
+UI flow — nothing calls `recordPhoto`), but no template produces one, so it
+is dead capability, not a live objective.
 
 There are deliberately **no place-based objectives** ("visit a café", "visit a
 mall") — the app has no reliable places API to verify a visit against.
@@ -141,8 +146,13 @@ legacy `complete_quest` / `update_quest_progress` functions are dropped.
   `top_speed_kmh` from the same row. Fully automatic.
 - **Friends** — a DB trigger on `friends` fires `make_friend` for both users when
   a friendship becomes `accepted`. Fully automatic.
-- **Photos** — the client calls `record_quest_event` (via
-  `useQuests().recordPhoto(n)`) from a genuine capture action.
+
+All three of the catalogue's objectives are now trigger-driven — nothing calls
+`record_quest_event` from the client for any live objective. `recordDrive` /
+`recordSpeed` remain on the hook as manual escape hatches (harmless, since the
+triggers already cover the real path); `recordPhoto` still exists too, but
+`photo_capture` is retired from the catalogue (§10) — calling it advances
+nothing, because no quest is ever generated for it to advance.
 
 ```ts
 const {
@@ -150,9 +160,8 @@ const {
   coins, streak, badges, earnedBadgeIds,
   generateQuests,     // force (re)generate today's set
   recordEvent,        // recordEvent(eventType, amount?)
-  recordDrive,        // recordDrive(km)      → drive_distance
-  recordSpeed,        // recordSpeed(kmh)     → reach_speed
-  recordPhoto,        // recordPhoto(count)   → photo_capture
+  recordDrive,        // recordDrive(km)      → drive_distance (manual; the trigger already covers this)
+  recordSpeed,        // recordSpeed(kmh)     → reach_speed (manual; the trigger already covers this)
 } = useQuests();
 ```
 
@@ -207,5 +216,45 @@ Adding a new quest type is **additive**:
 2. *(Optional)* enable `pg_cron` for the scheduled sweep.
 3. The client is already wired: `QuestsProvider` is mounted in `app/_layout.tsx`
    (inside `XPProvider`), and the **Drive → Quests** tab shows live, auto-tracking
-   quests. Call `recordPlaceVisit` / `recordPhoto` from your check-in and camera
-   flows; distance and friends progress automatically via triggers.
+   quests. All three remaining objectives — distance, top speed, friends — progress
+   automatically via DB triggers; no client call is needed for any of them (see §5).
+
+---
+
+## 10. Legacy place-category quests reached some databases outside this file (7 Aug 2026)
+
+Reported as: the Quests tab showing "Grab a Bite — Stop by a restaurant and
+refuel" and "Mall Run — Visit a shopping mall today", neither of which
+appears anywhere in this repository — `grep` for either string turns up
+nothing, in this file or any other.
+
+Driveverse was bootstrapped from a template project ("Created by Rork" in
+the repo description), and quest rows like these reached some databases as
+seed data from that scaffold, under ids this migration's own cleanup
+sections (16b, 17) had no way to name — those sections delete by a
+*guessed* list of ids from this file's own history, which can only ever
+cover templates this file itself introduced. A row neither section knows
+about survives every re-run indefinitely, and `ensure_daily_quests()`'s
+template selection had nothing checking `poi_category` or `objective_type`
+before picking — any `is_active` row matching difficulty/level/time/weather
+was fair game, template scaffold or not.
+
+Two changes, both in `database_migration_daily_quests.sql`:
+
+- **`ensure_daily_quests()`'s `eligible` CTE** now filters
+  `poi_category IS NULL AND objective_type IN ('drive_distance',
+  'night_drive', 'reach_speed', 'make_friend')` directly, rather than
+  trusting every `is_active` row. This is what actually closes the hole —
+  it cannot select a place-category (or photo) row again regardless of
+  what is sitting in the table, named however, seeded by whoever.
+- **Section 20**, new, deletes any `quest_templates` row by that same
+  characteristic rather than by id — catching the untracked scaffold rows
+  section 16b/17 couldn't — and expires (not deletes, matching the status
+  transition `ensure_daily_quests()` already uses for a quest past its
+  `expires_at`) any already-generated `daily_quests` row with the same
+  trait, so a quest board showing one of these right now clears the moment
+  this file is re-run and the Quests tab is next opened.
+
+`u_easy_photo` (`photo_capture`) is retired in the same pass — not a
+place-category quest, but outside the three objectives (distance, speed,
+friend) this app is meant to measure without a places API.
