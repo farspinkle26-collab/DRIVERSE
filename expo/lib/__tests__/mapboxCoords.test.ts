@@ -7,6 +7,7 @@ import {
   lineFeature,
   MAX_ZOOM,
   MIN_ZOOM,
+  pointFeature,
   toPosition,
   toPositions,
   zoomForLatitudeDelta,
@@ -64,6 +65,24 @@ describe("lineFeature", () => {
     // A null `properties` is legal GeoJSON but crashes style expressions that
     // read a key off it.
     expect(lineFeature([JAKARTA]).properties).toEqual({});
+  });
+});
+
+describe("pointFeature", () => {
+  it("builds a Point whose coordinates are [lng, lat]", () => {
+    const feature = pointFeature(JAKARTA);
+    expect(feature.type).toBe("Feature");
+    expect(feature.geometry.type).toBe("Point");
+    expect(feature.geometry.coordinates).toEqual([106.8456, -6.2088]);
+  });
+
+  it("carries properties through", () => {
+    const feature = pointFeature(JAKARTA, { role: "start" });
+    expect(feature.properties).toEqual({ role: "start" });
+  });
+
+  it("defaults properties to an object, never null", () => {
+    expect(pointFeature(JAKARTA).properties).toEqual({});
   });
 });
 

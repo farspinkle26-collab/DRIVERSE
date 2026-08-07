@@ -3,13 +3,11 @@
  *
  * WHY THIS EXISTS RATHER THAN A MAPVIEW INSIDE THE CARD
  *   The card is exported by `react-native-view-shot`, which walks the React
- *   Native view tree and rasterises it. A Google `MapView` is a native
- *   SurfaceView/GLSurfaceView — its pixels live outside that tree, so on
- *   Android it captures as a black rectangle, and on iOS it is unreliable
- *   depending on when the tiles settled. `react-native-maps` has its own
- *   answer, `MapView.takeSnapshot`, which asks the map to render *itself* to
- *   an image. So the card never contains a map: it contains an `<Image>` of
- *   one, produced here.
+ *   Native view tree and rasterises it. A native map surface's pixels live
+ *   outside that tree, so a `MapView` mounted directly inside the card would
+ *   capture as a black rectangle. `@rnmapbox/maps`' `MapView.takeSnap()` asks
+ *   the map to render *itself* to an image instead. So the card never
+ *   contains a map: it contains an `<Image>` of one, produced here.
  *
  * WHY IT IS ON SCREEN AND NOT AT left: -9999
  *   A map parked far offscreen is free to not render: React Native still lays
@@ -21,12 +19,28 @@
  *   purpose: a fully transparent subtree is the thing a compositor is most
  *   likely to skip, which is the failure this placement exists to avoid.
  *
- * THE ROUTE IT DRAWS is the speed heatmap: one native `<Polyline>` per run of
- * `lib/speedTrace.ts` segments (which is why that module quantises — 400
- * polylines is a stutter and a snapshot that takes seconds), under a single
- * dark casing polyline that keeps the coloured line legible over pale tiles.
+ * WHY THE ROUTE AND ENDPOINTS ARE `ShapeSource`/`CircleLayer`, NOT `MarkerView`
+ *   `takeSnap()` captures the map's own native rendering — the Mapbox Maps
+ *   SDK's GL surface on Android, the whole view hierarchy on iOS. A
+ *   `MarkerView` is a React Native view composited *outside* that GL surface
+ *   on Android, so an endpoint drawn as one would be invisible in the
+ *   exported PNG there even though it shows fine on iOS and on screen. A
+ *   `ShapeSource` + `CircleLayer` point is part of the map's native rendering
+ *   on both platforms — the same reason the route itself is a `ShapeSource` +
+ *   `LineLayer` (`components/MapPolyline.tsx`) rather than a drawn overlay.
  *
- * FAILURE IS EXPECTED, not exceptional: no Play services, no network, a
+ * THE ROUTE IT DRAWS is the speed heatmap: one `LineLayer` per run of
+ * `lib/speedTrace.ts` segments (which is why that module quantises — 400
+ * segments is a stutter and a snapshot that takes seconds), under a single
+ * dark casing line that keeps the coloured line legible over pale tiles.
+ *
+ * WHY SCALE IS THE VIEW SIZE, NOT A SNAPSHOT PARAMETER
+ *   `takeSnap()` has no width/height/scale arguments — it captures the map at
+ *   whatever size it is actually laid out at. So getting a sharper-than-1×
+ *   image means rendering the `MapView` itself larger, not asking the
+ *   snapshot call to upscale after the fact.
+ *
+ * FAILURE IS EXPECTED, not exceptional: no Mapbox token, no network, a
  * simulator with no tile cache, a user who dismisses the sheet mid-capture.
  * Every one of those resolves to `onSnapshot(null)` and the card keeps its SVG
  * trace. Nothing here throws into the modal.
@@ -34,15 +48,19 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
-import MapView, { Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import MapboxTileLayer from "@/components/MapboxTileLayer";
-import SettledMarker from "@/components/SettledMarker";
+// Type-only import, erased at compile time — see `hooks/useMapboxCamera.ts`'s
+// header for why this does not reach the native lookup `@rnmapbox/maps`
+// performs at module scope (LAUNCH_SAFETY_REFERENCE.md §20).
+import type { MapView as MapboxMapViewRef } from "@rnmapbox/maps";
+import { loadMapbox, initMapbox } from "@/lib/mapboxNative";
+import { useMapboxCamera } from "@/hooks/useMapboxCamera";
+import { pointFeature, toPosition } from "@/lib/mapboxCoords";
+import { mapboxStyleUrl } from "@/constants/mapbox";
+import MapPolyline from "@/components/MapPolyline";
 import type { LatLng } from "@/lib/polyline";
-import { regionForPath } from "@/lib/polyline";
 import { heatSegments, SPEED_HEAT_FLAT, type SpeedDomain } from "@/lib/speedTrace";
-import { MAP_STYLE_DARK } from "@/constants/mapStyles";
 import { MAPBOX_CONFIGURED } from "@/constants/mapbox";
-import { alpha, colors } from "@/constants/theme";
+import { colors } from "@/constants/theme";
 
 /**
  * Whether a map image can be produced at all on this runtime.
@@ -68,7 +86,8 @@ export interface TripMapSnapshotProps {
   height: number;
   /**
    * Multiplier for the exported image over the on-card size. The card is
-   * rescaled to 1080×1920 on capture, so a 1× snapshot arrives soft.
+   * rescaled to 1080×1920 on capture, so a 1× snapshot arrives soft. Applied
+   * to the `MapView`'s own layout size — see the header.
    */
   scale?: number;
   /** `null` means "no map image is coming" — the caller keeps its fallback. */
@@ -76,15 +95,20 @@ export interface TripMapSnapshotProps {
 }
 
 /**
- * How long to let the tiles settle after `onMapReady` before snapshotting.
- * `onMapReady` fires when the map is *usable*, not when it has drawn — snapshot
- * at that instant and you get the grey grid. 1.2 s is what a cold tile fetch on
- * a mid-range Android took in testing; the retry below covers the rest.
+ * How long to let the tiles settle after the style finishes loading before
+ * snapshotting. Loading the style is not the same as having drawn every
+ * tile — snapshot at that instant and some tiles are still grey. 1.2 s is
+ * what a cold tile fetch on a mid-range Android took in testing; the retry
+ * below covers the rest.
  */
 const SETTLE_MS = 1200;
 
 /** One retry, because the first snapshot after a cold start can come back empty. */
 const RETRY_MS = 1400;
+
+/** Casing under the heat/flat line, and the two circle radii for the endpoints. */
+const CASING_WIDTH = 9;
+const ROUTE_WIDTH = 5;
 
 export default function TripMapSnapshot({
   points,
@@ -96,10 +120,16 @@ export default function TripMapSnapshot({
   scale = 2,
   onSnapshot,
 }: TripMapSnapshotProps) {
-  const mapRef = useRef<MapView>(null);
+  const Mapbox = loadMapbox();
+  const { ref: cameraRef, fitTo: fitToCoordinates } = useMapboxCamera();
+  const mapRef = useRef<MapboxMapViewRef>(null);
   const [ready, setReady] = useState(false);
   const doneRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    initMapbox();
+  }, []);
 
   // Kept in a ref so the capture effect does not restart every time the parent
   // re-renders with a new inline callback — restarting it re-arms the timers
@@ -117,54 +147,53 @@ export default function TripMapSnapshot({
     [points, speeds, domain, flat]
   );
 
-  const region = React.useMemo(() => regionForPath(points, 1.25), [points]);
+  const startFeature = React.useMemo(
+    () => (points.length > 0 ? pointFeature(points[0], { role: "start" }) : null),
+    [points]
+  );
+  const endFeature = React.useMemo(
+    () => (points.length > 1 ? pointFeature(points[points.length - 1], { role: "end" }) : null),
+    [points]
+  );
 
-  const fit = useCallback(() => {
+  const handleReady = useCallback(() => {
     if (points.length > 1) {
-      mapRef.current?.fitToCoordinates(points, {
+      fitToCoordinates(points, {
         // Generous padding: a route that touches the frame edge reads as
         // cropped, which is the single clearest "screenshot" tell on a card.
         edgePadding: { top: 36, right: 32, bottom: 36, left: 32 },
-        animated: false,
+        duration: 0,
       });
     }
-  }, [points]);
+    setReady(true);
+  }, [points, fitToCoordinates]);
 
   const capture = useCallback(async () => {
     if (doneRef.current || !mapRef.current) return;
     try {
-      const uri = await mapRef.current.takeSnapshot({
-        width: Math.round(width * scale),
-        height: Math.round(height * scale),
-        format: "png",
-        quality: 1,
-        result: "file",
-      });
+      const uri = await mapRef.current.takeSnap(true);
       if (doneRef.current) return;
       if (typeof uri === "string" && uri.length > 0) {
         doneRef.current = true;
-        onSnapshotRef.current(
-          uri.startsWith("file://") || uri.startsWith("content://")
-            ? uri
-            : `file://${uri}`
-        );
+        onSnapshotRef.current(uri);
       }
     } catch {
       // Swallowed on purpose — see the header. The retry, then the give-up
       // timer below, decide what the card ends up showing.
     }
-  }, [width, height, scale]);
+  }, []);
 
   // Nothing to snapshot on web, or in a build with no Mapbox token. Report it
   // immediately so the card settles on its SVG trace instead of waiting out
   // three timers for an image that was never coming.
   useEffect(() => {
-    if (canSnapshotMap()) return;
+    if (canSnapshotMap() && Mapbox) return;
     onSnapshotRef.current(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!canSnapshotMap() || !ready || points.length < 2) return;
+    if (!canSnapshotMap() || !Mapbox || !ready || points.length < 2) return;
     doneRef.current = false;
     const timers = timersRef.current;
     timers.push(setTimeout(capture, SETTLE_MS));
@@ -181,82 +210,86 @@ export default function TripMapSnapshot({
     return () => {
       timers.splice(0).forEach(clearTimeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, capture, points.length]);
 
-  if (!canSnapshotMap() || points.length < 2) return null;
+  if (!canSnapshotMap() || !Mapbox || points.length < 2) return null;
+
+  const stageWidth = Math.round(width * scale);
+  const stageHeight = Math.round(height * scale);
 
   return (
-    <View style={[styles.stage, { width, height }]} pointerEvents="none">
-      <MapView
+    <View style={[styles.stage, { width: stageWidth, height: stageHeight }]} pointerEvents="none">
+      <Mapbox.MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={region}
         // The card is always dark, so the map is too — regardless of the
         // driver's in-app theme. A light map inside a voidBlack card is the
         // composition falling apart, not a preference.
-        mapType="none"
-        customMapStyle={MAP_STYLE_DARK}
-        onMapReady={() => {
-          fit();
-          setReady(true);
-        }}
+        styleURL={mapboxStyleUrl(true)}
         scrollEnabled={false}
         zoomEnabled={false}
         rotateEnabled={false}
         pitchEnabled={false}
-        toolbarEnabled={false}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsScale={false}
-        showsBuildings={false}
-        showsIndoors={false}
-        showsTraffic={false}
-        showsPointsOfInterest={false}
+        compassEnabled={false}
+        scaleBarEnabled={false}
+        // Stays ON even though this map is never seen live — the export ends
+        // up posted to Instagram/TikTok, which is exactly the kind of
+        // end-user-facing map render Mapbox's terms require attribution on.
+        // Same rule `app/(tabs)/map.tsx` follows; see that file's header.
+        logoEnabled
+        attributionEnabled
+        onDidFinishLoadingMap={handleReady}
       >
-        <MapboxTileLayer dark />
+        <Mapbox.Camera ref={cameraRef} defaultSettings={{ centerCoordinate: toPosition(points[0]), zoomLevel: 12 }} />
 
         {/* Casing first, then the coloured runs on top of it. */}
-        <Polyline
-          coordinates={points}
-          strokeWidth={9}
-          strokeColor={alpha(colors.voidBlack, 0.55)}
-          lineCap="round"
-          lineJoin="round"
-        />
+        <MapPolyline id="snapshot-casing" points={points} width={CASING_WIDTH} color={colors.voidBlack} opacity={0.55} />
         {segments.map((seg, i) => (
-          <Polyline
-            key={`heat${i}`}
-            coordinates={seg.points}
-            strokeWidth={5}
-            strokeColor={seg.color}
-            lineCap="round"
-            lineJoin="round"
-          />
+          <MapPolyline key={`snapshot-heat-${i}`} id={`snapshot-heat-${i}`} points={seg.points} width={ROUTE_WIDTH} color={seg.color} />
         ))}
 
-        {/* Endpoints go through SettledMarker like every other custom marker in
-            the app — a constant `tracksViewChanges={false}` freezes Android's
-            bitmap before the dot has drawn, and here that would bake an empty
-            marker into the exported PNG. See MAP_MARKER_REFERENCE §10. */}
-        <SettledMarker
-          coordinate={points[0]}
-          anchor={{ x: 0.5, y: 0.5 }}
-          settleKey="trip-start"
-        >
-          <View style={styles.startDot} />
-        </SettledMarker>
-        <SettledMarker
-          coordinate={points[points.length - 1]}
-          anchor={{ x: 0.5, y: 0.5 }}
-          settleKey="trip-end"
-        >
-          <View style={styles.endHalo}>
-            <View style={styles.endDot} />
-          </View>
-        </SettledMarker>
-      </MapView>
+        {/* Endpoints — see the header for why these are native circle layers
+            and not `MarkerView`s. */}
+        {startFeature && (
+          <Mapbox.ShapeSource id="snapshot-start" shape={startFeature}>
+            <Mapbox.CircleLayer
+              id="snapshot-start-fill"
+              style={{
+                circleRadius: 7,
+                circleColor: colors.voidBlack,
+                circleStrokeWidth: 3,
+                circleStrokeColor: colors.textPrimary,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+        {endFeature && (
+          <Mapbox.ShapeSource id="snapshot-end" shape={endFeature}>
+            <Mapbox.CircleLayer
+              id="snapshot-end-halo"
+              style={{
+                circleRadius: 11,
+                // Six-digit hex + a separate opacity, not `alpha()`'s
+                // eight-digit hex — Mapbox's style-spec colour parser drops
+                // the alpha channel from #RRGGBBAA silently (MapPolyline.tsx
+                // hit this first; same parser, same trap).
+                circleColor: colors.racingRed,
+                circleOpacity: 0.25,
+              }}
+            />
+            <Mapbox.CircleLayer
+              id="snapshot-end-fill"
+              style={{
+                circleRadius: 6,
+                circleColor: colors.racingRed,
+                circleStrokeWidth: 2,
+                circleStrokeColor: colors.voidBlack,
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
+      </Mapbox.MapView>
     </View>
   );
 }
@@ -271,32 +304,5 @@ const styles = StyleSheet.create({
     zIndex: -1,
     overflow: "hidden",
     backgroundColor: colors.voidBlack,
-  },
-  // Fixed marker geometry, deliberately not from the spacing scale: these are
-  // rasterised into the snapshot at whatever size they are, and the endpoints
-  // have to stay readable next to a 5pt route line.
-  startDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.voidBlack,
-    borderWidth: 3,
-    borderColor: colors.textPrimary,
-  },
-  endHalo: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: alpha(colors.racingRed, 0.25),
-  },
-  endDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.racingRed,
-    borderWidth: 2,
-    borderColor: colors.voidBlack,
   },
 });
