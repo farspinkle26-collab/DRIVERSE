@@ -9,6 +9,7 @@ import { AuthContext } from "@/hooks/useAuthStore";
 import { ThemeContext } from "@/hooks/useThemeStore";
 import { ChatContext } from "@/hooks/useChatStore";
 import { NotificationContext } from "@/hooks/useNotificationStore";
+import { FriendRequestsListener } from "@/hooks/useFriendRequestsStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { QuestsProvider } from "@/hooks/useQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
@@ -238,6 +239,7 @@ function RootLayoutContent() {
                                       <CosmeticsProvider>
                                         <RootLayoutNav />
                                         <NotificationBanner />
+                                        <FriendRequestsListener />
                                         <LastActivePing />
                                         <LaunchComplete />
                                       </CosmeticsProvider>

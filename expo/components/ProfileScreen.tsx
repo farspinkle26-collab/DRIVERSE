@@ -80,7 +80,6 @@ import {
   X,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useNotifications } from "@/hooks/useNotificationStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
@@ -362,7 +361,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated, updateProfilePicture, updateCountry, logout } = useAuth();
-  const { showRequestNotification } = useNotifications();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -521,22 +519,38 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
   const loadFriends = useCallback(async () => {
     if (!targetId) return;
+    // `friends.user_id`/`friend_id` reference `auth.users`, not
+    // `public.profiles` — there is no FK PostgREST can embed through, so
+    // profiles are fetched separately and joined client-side instead of
+    // relying on a `profiles!friends_..._fkey` embed hint (which silently
+    // fails and drops the row).
     const { data: sent } = await supabase
       .from("friends")
-      .select("*, profiles!friends_friend_id_fkey(name, avatar)")
+      .select("*")
       .eq("user_id", targetId);
     const { data: received } = await supabase
       .from("friends")
-      .select("*, profiles!friends_user_id_fkey(name, avatar)")
+      .select("*")
       .eq("friend_id", targetId);
-    const normalize = (rows: any[]): FriendItem[] =>
+    const otherIds = [
+      ...new Set([
+        ...(sent ?? []).map((r) => r.friend_id),
+        ...(received ?? []).map((r) => r.user_id),
+      ]),
+    ];
+    const { data: profs } = otherIds.length
+      ? await supabase.from("profiles").select("id, name, avatar").in("id", otherIds)
+      : { data: [] as { id: string; name: string; avatar: string | null }[] };
+    const profMap = new Map((profs ?? []).map((p) => [p.id, p]));
+    const normalize = (rows: any[], otherIdField: "friend_id" | "user_id"): FriendItem[] =>
       (rows ?? []).map((row) => {
-        const p = row.profiles ?? {};
-        return { ...row, friend_profile: { name: p.name, avatar: p.avatar } } as FriendItem;
+        const p = profMap.get(row[otherIdField]) as { name?: string; avatar?: string } | undefined;
+        return { ...row, friend_profile: { name: p?.name, avatar: p?.avatar } } as FriendItem;
       });
-    const all = [...normalize(sent ?? []), ...normalize(received ?? [])].filter(
-      (f, i, arr) => arr.findIndex((x) => x.id === f.id) === i
-    );
+    const all = [
+      ...normalize(sent ?? [], "friend_id"),
+      ...normalize(received ?? [], "user_id"),
+    ].filter((f, i, arr) => arr.findIndex((x) => x.id === f.id) === i);
     setFriends(all);
   }, [targetId]);
 
@@ -551,16 +565,23 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       .limit(50);
     if (dms) setMessages(dms as MessageItem[]);
 
-    // Incoming friend requests → the notifications bell.
-    const { data: reqs } = await supabase
+    // Incoming friend requests → the notifications bell. See the comment in
+    // `loadFriends` — profiles are joined client-side, not via embed hint.
+    const { data: reqs, error } = await supabase
       .from("friends")
-      .select("*, profiles!friends_user_id_fkey(name, avatar)")
+      .select("*")
       .eq("friend_id", user.id)
       .eq("status", "pending");
-    const normalized = (reqs ?? []).map((row: any) => ({
-      ...row,
-      friend_profile: { name: row.profiles?.name, avatar: row.profiles?.avatar },
-    })) as FriendItem[];
+    if (error) console.log("loadInboxes: friends query failed", error);
+    const senderIds = [...new Set((reqs ?? []).map((r) => r.user_id))];
+    const { data: profs } = senderIds.length
+      ? await supabase.from("profiles").select("id, name, avatar").in("id", senderIds)
+      : { data: [] as { id: string; name: string; avatar: string | null }[] };
+    const profMap = new Map((profs ?? []).map((p) => [p.id, p]));
+    const normalized = (reqs ?? []).map((row: any) => {
+      const p = profMap.get(row.user_id) as { name?: string; avatar?: string } | undefined;
+      return { ...row, friend_profile: { name: p?.name, avatar: p?.avatar } };
+    }) as FriendItem[];
     setPendingRequests(normalized);
   }, [isAuthenticated, user]);
 
@@ -638,43 +659,20 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             | { user_id?: string; friend_id?: string; status?: string }
             | null;
           if (row?.user_id !== user.id && row?.friend_id !== user.id) return;
+          // The toast/banner itself is fired app-wide by
+          // `useFriendRequestsStore` (mounted in `app/_layout.tsx`), so it
+          // still pops on this screen too — this subscription only needs to
+          // keep the bell/list data in this screen fresh.
           loadInboxes();
           loadFriends();
           loadFriendState();
-
-          // A new incoming friend request → pop the banner/push notification
-          // too, not just the bell (the bell itself reads `friends` directly
-          // and doesn't need this call to update).
-          if (
-            payload.eventType === "INSERT" &&
-            row?.friend_id === user.id &&
-            row?.status === "pending"
-          ) {
-            const senderId = (payload.new as { user_id?: string })?.user_id;
-            const requestId = (payload.new as { id?: string })?.id ?? "";
-            if (senderId) {
-              supabase
-                .from("profiles")
-                .select("name")
-                .eq("id", senderId)
-                .single()
-                .then(({ data }) => {
-                  const senderName = data?.name ?? "Someone";
-                  showRequestNotification(
-                    "New friend request",
-                    `${senderName} sent you a friend request`,
-                    requestId
-                  );
-                });
-            }
-          }
         }
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState, showRequestNotification]);
+  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
