@@ -888,6 +888,7 @@ export default function MapScreen() {
   const { activeCar } = useActiveCar();
   const {
     party,
+    members: convoyMembers,
     partyMemberIds,
     inviteDriver,
     isLeader: isConvoyLeader,
@@ -895,7 +896,9 @@ export default function MapScreen() {
     destination: convoyDestination,
     setDestination: shareConvoyDestination,
     clearDestination: clearConvoyDestination,
+    leaveParty,
   } = useParty();
+  const [convoyMenuOpen, setConvoyMenuOpen] = useState(false);
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
   // The raise-a-signal chooser sheet, and a tick that re-renders the age
@@ -1462,6 +1465,31 @@ export default function MapScreen() {
       setInvitingToParty(false);
     }
   }, [party, inviteDriver, router]);
+
+  // --- Leave/disband convoy from the map's quick menu ---
+  // Same confirm copy as `app/convoy.tsx`'s `handleLeave` — a driver should
+  // read the same warning whichever screen they act from.
+  const handleLeaveConvoyFromMap = useCallback(() => {
+    if (!party) return;
+    const isSolo = convoyMembers.length <= 1;
+    appAlert(
+      isConvoyLeader ? "Disband Convoy?" : "Leave Convoy?",
+      isConvoyLeader && !isSolo
+        ? "You're the leader — leaving disbands the convoy for everyone."
+        : "You can rejoin later if someone invites you again.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: isConvoyLeader ? "Disband" : "Leave",
+          style: "destructive",
+          onPress: () => {
+            setConvoyMenuOpen(false);
+            void leaveParty();
+          },
+        },
+      ]
+    );
+  }, [party, convoyMembers.length, isConvoyLeader, leaveParty]);
 
   // --- Ask a meetup from map marker ---
   const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -3768,12 +3796,32 @@ export default function MapScreen() {
             <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
           </View>
 
+          {/* Same slot, two different menus. Not in a convoy: the button is
+              a shortcut to browsing/creating one, same as it always was.
+              In a convoy: it opens a quick menu right here instead of
+              leaving the map, because "who's in my convoy" and "leave it"
+              are questions a driver mid-drive shouldn't have to navigate
+              away to ask. `active` borrows the same on-state
+              `MapChromeButton` already uses for Filters. */}
           <MapChromeButton
             label="Convoy"
-            accessibilityLabel="Open convoys"
-            onPress={() => router.push({ pathname: "/community", params: { tab: "convoy" } } as any)}
+            active={!!party}
+            accessibilityLabel={party ? `${party.name} — open convoy menu` : "Open convoys"}
+            onPress={() =>
+              party
+                ? setConvoyMenuOpen(true)
+                : router.push({ pathname: "/community", params: { tab: "convoy" } } as any)
+            }
           >
-            <Users size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+            {party && isConvoyLeader ? (
+              <Crown size={spacing.spacingLg} color={party.color} strokeWidth={CHROME_ICON_STROKE} />
+            ) : (
+              <Users
+                size={spacing.spacingLg}
+                color={party ? party.color : colors.textPrimary}
+                strokeWidth={CHROME_ICON_STROKE}
+              />
+            )}
           </MapChromeButton>
 
           <MapChromeButton
@@ -3946,6 +3994,90 @@ export default function MapScreen() {
           </CutCornerSurface>
         </View>
       )}
+
+      {/* ===================================================== */}
+      {/*   CONVOY QUICK MENU — opened from the map's Convoy button */}
+      {/* ===================================================== */}
+      {/* Only reachable through the button above, which only opens this
+          while `party` is set — the guard on `visible` stays anyway, since
+          the leader could disband from another device while this is open. */}
+      <Modal
+        visible={convoyMenuOpen && !!party}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setConvoyMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.privacyOverlay}
+          accessibilityRole="button"
+          accessibilityLabel="Close convoy menu"
+          onPress={() => setConvoyMenuOpen(false)}
+        >
+          <Pressable style={styles.privacySheetWrap} onPress={() => {}}>
+            <CutCornerSurface
+              fill={colors.carbonSurface}
+              borderColor={colors.hairline}
+              borderWidth={borderWidth.hairline}
+              cutSize={cut.lg}
+              corners="topRight"
+              contentStyle={styles.privacySheet}
+            >
+              <View style={styles.privacyHeader}>
+                <View style={styles.convoyMenuTitleRow}>
+                  <View style={[styles.convoyMenuDot, { backgroundColor: party?.color ?? colors.racingRed }]} />
+                  <Text style={styles.privacyTitle} numberOfLines={1}>{party?.name ?? "Convoy"}</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  hitSlop={spacing.spacingSm}
+                  onPress={() => setConvoyMenuOpen(false)}
+                >
+                  <X size={spacing.spacingXl} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
+                </Pressable>
+              </View>
+
+              <Text style={styles.privacyRowSub}>
+                {convoyMembers.length} driver{convoyMembers.length !== 1 ? "s" : ""} ·{" "}
+                {isConvoyLeader ? "You're leading" : `Led by ${convoyLeaderName ?? "a driver"}`}
+              </Text>
+
+              <View style={styles.convoyMenuRoster}>
+                {convoyMembers.slice(0, 6).map((m) => (
+                  <View key={m.id} style={styles.convoyMenuRosterRow}>
+                    {m.user_id === party?.leader_id ? (
+                      <Crown size={spacing.spacingMd} color={party?.color ?? colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
+                    ) : (
+                      <View style={[styles.convoyMenuRosterDot, { backgroundColor: party?.color ?? colors.racingRed }]} />
+                    )}
+                    <Text style={styles.convoyMenuRosterName} numberOfLines={1}>{m.name}</Text>
+                  </View>
+                ))}
+                {convoyMembers.length > 6 && (
+                  <Text style={styles.convoyMenuRosterMore}>+{convoyMembers.length - 6} more</Text>
+                )}
+              </View>
+
+              <ActionRow
+                label="View & Manage Convoy"
+                icon={<Users size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+                onPress={() => {
+                  setConvoyMenuOpen(false);
+                  router.push("/convoy" as any);
+                }}
+              />
+
+              <CutCornerButton
+                title={isConvoyLeader ? "Disband Convoy" : "Leave Convoy"}
+                variant="outline"
+                corners="topRight"
+                onPress={handleLeaveConvoyFromMap}
+                style={styles.convoyMenuLeaveBtn}
+              />
+            </CutCornerSurface>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ===================================================== */}
       {/*   MAP PRIVACY SHEET                                    */}
@@ -5187,6 +5319,43 @@ const styles = StyleSheet.create({
     borderTopWidth: borderWidth.hairline,
     borderTopColor: colors.hairline,
     paddingTop: spacing.spacingMd,
+  },
+  // ---- Convoy quick menu ----
+  convoyMenuTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    flexShrink: 1,
+  },
+  convoyMenuDot: {
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    borderRadius: radius.circle,
+  },
+  convoyMenuRoster: {
+    gap: spacing.spacingSm,
+  },
+  convoyMenuRosterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+  },
+  convoyMenuRosterDot: {
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    borderRadius: radius.circle,
+  },
+  convoyMenuRosterName: {
+    ...textStyle("body"),
+    color: colors.textPrimary,
+    flexShrink: 1,
+  },
+  convoyMenuRosterMore: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  convoyMenuLeaveBtn: {
+    marginTop: spacing.spacingXs,
   },
 
   /* ---------------- Filters popover ---------------- */
