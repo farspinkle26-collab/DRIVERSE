@@ -12,6 +12,7 @@ import {
   STALE_AFTER_MS,
   isFresh,
   mergeOnlineUsers,
+  pruneRecentlyOffline,
   type OnlineUser,
 } from "@/hooks/onlineUsersMerge";
 
@@ -110,5 +111,36 @@ describe("mergeOnlineUsers", () => {
       NOW
     );
     expect(merged.map((u) => u.user_id).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("pruneRecentlyOffline", () => {
+  // This is the bug report the function exists for: user A turns visibility
+  // off, `untrack()` on their device times out (the same failure category
+  // `publishPosition`'s `track()` already guards), and A's last-tracked
+  // presence entry is still "fresh" by timestamp — so `mergeOnlineUsers`
+  // alone would keep showing A on every other driver's map with no error
+  // anywhere. `user_locations.is_online: false` is the one signal that
+  // survives that failure, and this is what makes it override presence.
+  it("drops a driver whose user_locations row just said is_online: false", () => {
+    const presence = [driver({ user_id: "a" }), driver({ user_id: "b" })];
+    const pruned = pruneRecentlyOffline(presence, ["a"]);
+    expect(pruned.map((u) => u.user_id)).toEqual(["b"]);
+  });
+
+  it("is a no-op when nobody recently went offline", () => {
+    const presence = [driver({ user_id: "a" }), driver({ user_id: "b" })];
+    expect(pruneRecentlyOffline(presence, [])).toEqual(presence);
+  });
+
+  it("accepts a Set as well as an array of ids", () => {
+    const presence = [driver({ user_id: "a" }), driver({ user_id: "b" })];
+    const pruned = pruneRecentlyOffline(presence, new Set(["b"]));
+    expect(pruned.map((u) => u.user_id)).toEqual(["a"]);
+  });
+
+  it("does not touch presence when the offline id isn't in it", () => {
+    const presence = [driver({ user_id: "a" })];
+    expect(pruneRecentlyOffline(presence, ["someone-else"])).toEqual(presence);
   });
 });

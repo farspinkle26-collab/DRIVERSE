@@ -110,8 +110,10 @@ re-publish position.
 
 Every failure now logs under a `[onlineUsers]` prefix: channel status,
 `track` status, the `user_locations` upsert, the sweep, the profile lookup,
-and a denied location permission. In the dev overlay these read the same way
-`[placesApi]` does. Silence in that log is now meaningful.
+a denied location permission, and — since §6 — `untrack` status and the
+`is_online: false` update on going offline, which were the one pair of calls
+in this file still failing silently. In the dev overlay these read the same
+way `[placesApi]` does. Silence in that log is now meaningful.
 
 Two schema-tolerance notes:
 
@@ -138,3 +140,57 @@ Two schema-tolerance notes:
    updated_at desc;` — both devices must have rows ticking every few seconds.
    A device missing from that table is failing to publish, which no amount of
    fixing on the *reading* side will show.
+
+---
+
+## 6. Going offline was not symmetric with going online (7 Aug 2026)
+
+Reported as: A turns visibility off; A correctly sees nobody, but B still
+sees A on the map.
+
+**The fallback sweep only ever added drivers, never removed one.**
+`fetchDirectory` has always filtered `is_online: true` when *populating* the
+map — the fix for "presence is dead, show them anyway" from §1. But nothing
+symmetric existed for the opposite direction: if `goOffline`'s
+`channel.untrack()` timed out or errored — the exact failure category
+`publishPosition`'s `track()` already has to guard against and rejoin on —
+the leave broadcast never reached other devices, and their `presenceUsers`
+kept A's last-tracked entry exactly as it was. `mergeOnlineUsers` has no
+opinion on *why* a presence entry exists, only whether its timestamp is
+still fresh (`STALE_AFTER_MS`, 90 s) — so a lost `untrack()` left A visible
+to everyone else for up to 90 seconds at minimum, and indefinitely if the
+server-side presence state never independently noticed the socket was gone.
+
+Two things made this invisible rather than merely present:
+
+- `goOffline`'s `untrack()` and the `is_online: false` update were both
+  wrapped in `catch { /* Silent */ }` — the one pair of calls in this file
+  that didn't follow its own "every failure logs" rule (§4). A failure here
+  produced no error anywhere, on either device.
+- `mergeOnlineUsers`'s own tests (`hooks/__tests__/onlineUsersMerge.test.ts`)
+  pin "no ghosts" only for the *time-based* staleness case — a driver whose
+  presence entry has aged past `STALE_AFTER_MS`. Nothing pinned "a driver who
+  explicitly went offline, with a presence entry that is still fresh by the
+  clock" — which is exactly the case a lost `untrack()` produces, and exactly
+  the case the existing test suite had no way to catch.
+
+**The fix has two parts, in `hooks/useOnlineUsers.ts` and
+`hooks/onlineUsersMerge.ts`:**
+
+1. `goOffline`'s `untrack()` and `is_online: false` update both log on
+   failure now, matching every other call in the file.
+2. `fetchDirectory` runs a second query alongside the existing one — rows
+   that just flipped to `is_online: false` (the `updated_at` trigger means a
+   just-flipped row is the *newest* one, not a stale one, so this always
+   catches a go-offline within one ~10 s poll interval on every other
+   device) — and calls the new pure `pruneRecentlyOffline` to drop those ids
+   out of `presenceUsers` directly. This is the fallback path doing for
+   *disappearing* what it already did for *appearing*: `user_locations` is
+   the one signal unaffected by presence's own failure mode, so it gets to
+   override a stale presence entry instead of only ever supplementing an
+   absent one.
+
+Net effect: even in the worst case — `untrack()` silently lost, presence
+never independently notices — a driver who turns visibility off is gone from
+every other device within one poll interval, not "eventually, maybe." Tested
+in `hooks/__tests__/onlineUsersMerge.test.ts`.
