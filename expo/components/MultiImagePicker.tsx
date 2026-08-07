@@ -5,7 +5,6 @@ import {
   View, 
   TouchableOpacity, 
   Image, 
-  Alert,
   ViewStyle,
   TextStyle,
   Platform,
@@ -15,6 +14,7 @@ import { Camera, ImageIcon, X, Plus } from "lucide-react-native";
 import * as ImagePickerExpo from "expo-image-picker";
 import { useTheme } from "@/hooks/useThemeStore";
 import Card from "./Card";
+import { appAlert } from "@/lib/appAlert";
 
 interface MultiImagePickerProps {
   label?: string;
@@ -54,7 +54,7 @@ const MultiImagePicker: React.FC<MultiImagePickerProps> = ({
       const { status: mediaStatus } = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
       
       if (cameraStatus !== 'granted' || mediaStatus !== 'granted') {
-        Alert.alert(
+        appAlert(
           'Permissions Required',
           'We need camera and photo library permissions to take or select photos.',
           [{ text: 'OK' }]
@@ -72,7 +72,7 @@ const MultiImagePicker: React.FC<MultiImagePickerProps> = ({
     console.log('showImagePicker called, current photos:', value.length, '/', maxImages);
     
     if (value.length >= maxImages) {
-      Alert.alert("Maximum Photos", `You can only upload up to ${maxImages} photos.`);
+      appAlert("Maximum Photos", `You can only upload up to ${maxImages} photos.`);
       return;
     }
 
@@ -81,7 +81,7 @@ const MultiImagePicker: React.FC<MultiImagePickerProps> = ({
       pickImage();
     } else {
       // On mobile, show options
-      Alert.alert(
+      appAlert(
         "Add Photo",
         "Choose how you want to add a photo",
         [
@@ -128,7 +128,7 @@ const MultiImagePicker: React.FC<MultiImagePickerProps> = ({
       }
     } catch (error) {
       console.error("Error taking photo:", error);
-      Alert.alert("Error", "Failed to take photo. Please try again.");
+      appAlert("Error", "Failed to take photo. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -165,7 +165,7 @@ const MultiImagePicker: React.FC<MultiImagePickerProps> = ({
       }
     } catch (error) {
       console.error("Error picking image:", error);
-      Alert.alert("Error", "Failed to select image. Please try again.");
+      appAlert("Error", "Failed to select image. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -7,7 +7,6 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
@@ -18,6 +17,7 @@ import { supabase } from "@/lib/supabase";
 import { CutCornerButton } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
 import { alpha, borderWidth, colors, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
+import { appAlert } from "@/lib/appAlert";
 
 interface Attendee {
   user_id: string;
@@ -91,7 +91,7 @@ export default function EventManageScreen() {
 
   const handleCancel = useCallback(() => {
     if (!id) return;
-    Alert.alert("Cancel Event?", "Everyone who joined will be notified this event is cancelled.", [
+    appAlert("Cancel Event?", "Everyone who joined will be notified this event is cancelled.", [
       { text: "Never mind", style: "cancel" },
       {
         text: "Cancel Event",
@@ -100,7 +100,7 @@ export default function EventManageScreen() {
           setCancelling(true);
           const result = await cancelEvent(id);
           setCancelling(false);
-          if (result.error) Alert.alert("Couldn't cancel", result.error);
+          if (result.error) appAlert("Couldn't cancel", result.error);
           else load();
         },
       },

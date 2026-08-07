@@ -35,7 +35,6 @@ import {
   ActivityIndicator,
   TextInput,
   Image,
-  Alert,
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -70,6 +69,7 @@ import {
   chipContentColor,
 } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
+import { appAlert } from "@/lib/appAlert";
 import {
   borderWidth,
   colors,
@@ -364,7 +364,7 @@ export default function SelectCarScreen() {
       }
       options.push({ text: "Manage in Garage", onPress: () => router.push("/(tabs)/profile" as any) });
       options.push({ text: "Cancel", style: "cancel" });
-      Alert.alert(car.name, [car.make, car.year].filter(Boolean).join(" · "), options);
+      appAlert(car.name, [car.make, car.year].filter(Boolean).join(" · "), options);
     },
     [selectCar, router]
   );

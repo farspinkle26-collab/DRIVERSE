@@ -5,7 +5,6 @@ import {
   View, 
   TouchableOpacity, 
   Image, 
-  Alert,
   ViewStyle,
   TextStyle,
   Platform,
@@ -14,6 +13,7 @@ import { Camera, ImageIcon, X } from "lucide-react-native";
 import * as ImagePickerExpo from "expo-image-picker";
 import Colors from "@/constants/colors";
 import Card from "./Card";
+import { appAlert } from "@/lib/appAlert";
 
 interface ImagePickerProps {
   label?: string;
@@ -44,7 +44,7 @@ const ImagePicker: React.FC<ImagePickerProps> = ({
       const { status: mediaStatus } = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
       
       if (cameraStatus !== 'granted' || mediaStatus !== 'granted') {
-        Alert.alert(
+        appAlert(
           'Permissions Required',
           'We need camera and photo library permissions to take or select photos.',
           [{ text: 'OK' }]
@@ -56,7 +56,7 @@ const ImagePicker: React.FC<ImagePickerProps> = ({
   };
 
   const showImagePicker = () => {
-    Alert.alert(
+    appAlert(
       "Select Photo",
       "Choose how you want to add a photo",
       [
@@ -95,7 +95,7 @@ const ImagePicker: React.FC<ImagePickerProps> = ({
       }
     } catch (error) {
       console.error("Error taking photo:", error);
-      Alert.alert("Error", "Failed to take photo. Please try again.");
+      appAlert("Error", "Failed to take photo. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -120,7 +120,7 @@ const ImagePicker: React.FC<ImagePickerProps> = ({
       }
     } catch (error) {
       console.error("Error picking image:", error);
-      Alert.alert("Error", "Failed to select image. Please try again.");
+      appAlert("Error", "Failed to select image. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -29,7 +29,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
   Linking,
   Platform,
   Pressable,
@@ -55,6 +54,7 @@ import {
 import { usePlatinum } from "@/hooks/usePlatinumStore";
 import { manageSubscriptionUrl, type CustomerSummary } from "@/lib/purchases";
 import { CustomerCenterView, isPurchasesUiAvailable } from "@/lib/purchasesUi";
+import { appAlert } from "@/lib/appAlert";
 
 const ICON_STROKE = 1.75;
 
@@ -177,21 +177,21 @@ function ManageFallback({
     const result = await restore();
     setBusy(false);
     if (result.status === "restored") {
-      Alert.alert("Platinum restored", "Your subscription is active again.");
+      appAlert("Platinum restored", "Your subscription is active again.");
       return;
     }
     if (result.status === "nothing_to_restore") {
-      Alert.alert(
+      appAlert(
         "Nothing to restore",
         `No previous Platinum purchase was found on this ${STORE_NAME} account.`
       );
       return;
     }
     if (result.status === "unavailable") {
-      Alert.alert("Not available", "The store isn't reachable on this build.");
+      appAlert("Not available", "The store isn't reachable on this build.");
       return;
     }
-    Alert.alert("Restore failed", result.message);
+    appAlert("Restore failed", result.message);
   }, [restore]);
 
   const renewsOn = formatDate(entitlement.expiresAt);

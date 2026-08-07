@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Animated,
-  Alert,
   Image,
 } from "react-native";
 import * as ImagePickerExpo from "expo-image-picker";
@@ -35,6 +34,7 @@ import { supabase } from "@/lib/supabase";
 import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countries";
 import { CutCornerButton, CutCornerChip, CutCornerSurface } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
+import { appAlert } from "@/lib/appAlert";
 import {
   borderWidth,
   colors,
@@ -189,7 +189,7 @@ export default function CustomizeProfileScreen() {
         : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
 
       if (perm.status !== "granted") {
-        Alert.alert(
+        appAlert(
           useCamera ? "Camera access is off" : "Photo access is off",
           "Driveverse can't open it without permission. Turn it on in Settings, or skip this step — you can add a photo later from your profile."
         );
@@ -213,13 +213,13 @@ export default function CustomizeProfileScreen() {
         const uri = await pickImage(useCamera, [1, 1]);
         if (uri) setAvatarUri(uri);
       } catch {
-        Alert.alert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
+        appAlert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
       } finally {
         setPickingAvatar(false);
       }
     };
 
-    Alert.alert("Profile photo", "Where should we get it from?", [
+    appAlert("Profile photo", "Where should we get it from?", [
       { text: "Take a photo", onPress: () => void run(true) },
       { text: "Choose from library", onPress: () => void run(false) },
       { text: "Cancel", style: "cancel" },
@@ -235,13 +235,13 @@ export default function CustomizeProfileScreen() {
         const uri = await pickImage(useCamera, [4, 3]);
         if (uri) setCarPhotoUri(uri);
       } catch {
-        Alert.alert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
+        appAlert("That didn't work", "Something went wrong opening your photos. Try again, or skip for now.");
       } finally {
         setPickingCarPhoto(false);
       }
     };
 
-    Alert.alert("Photo of your car", "Where should we get it from?", [
+    appAlert("Photo of your car", "Where should we get it from?", [
       { text: "Take a photo", onPress: () => void run(true) },
       { text: "Choose from library", onPress: () => void run(false) },
       { text: "Cancel", style: "cancel" },

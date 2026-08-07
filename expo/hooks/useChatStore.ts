@@ -1,11 +1,11 @@
 import createContextHook from "@nkzw/create-context-hook";
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from "@/lib/supabase";
 import { ChatMessage, ChatConversation, SupabaseTowRequest, Location as LocationType } from "@/types";
 import { useAuth } from "./useAuthStore";
 import { useNotifications } from "./useNotificationStore";
+import { appAlert } from "@/lib/appAlert";
 
 interface ChatState {
   messages: ChatMessage[];
@@ -196,7 +196,7 @@ export const [ChatContext, useChat] = createContextHook(() => {
       // Request location permission
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to share your location.');
+        appAlert('Permission Denied', 'Location permission is required to share your location.');
         return false;
       }
 
@@ -214,7 +214,7 @@ export const [ChatContext, useChat] = createContextHook(() => {
       return await sendMessage(towRequestId, receiverId, locationMessage, 'location', metadata);
     } catch (error) {
       console.error('Error sending location:', error);
-      Alert.alert('Error', 'Failed to get your location. Please try again.');
+      appAlert('Error', 'Failed to get your location. Please try again.');
       return false;
     }
   }, [user, sendMessage]);

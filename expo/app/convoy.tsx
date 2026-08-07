@@ -9,7 +9,6 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, Stack } from "expo-router";
@@ -23,6 +22,7 @@ import PlatinumAura from "@/components/platinum/PlatinumAura";
 import TierLimitNotice from "@/components/platinum/TierLimitNotice";
 import { usePlatinumDirectory } from "@/hooks/usePlatinumDirectory";
 import { ICON_STROKE } from "@/components/TripCard";
+import { appAlert } from "@/lib/appAlert";
 import {
   borderWidth,
   colors,
@@ -215,7 +215,7 @@ export default function ConvoyScreen() {
     // wrong about every failure this can have — none of them are transient.
     const info = result.error;
     setCreateError(info ? `${info.title} — ${info.message}` : "The database rejected the write.");
-    Alert.alert(info?.title ?? "Couldn't create convoy", info?.message ?? "The database rejected the write.");
+    appAlert(info?.title ?? "Couldn't create convoy", info?.message ?? "The database rejected the write.");
   }, [nameDraft, creating, createParty]);
 
   const handleInvite = useCallback(async (driverId: string, driverName: string) => {
@@ -223,15 +223,15 @@ export default function ConvoyScreen() {
     const result = await inviteDriver(driverId);
     setInvitingId(null);
     if (!result.ok) {
-      Alert.alert(result.error?.title ?? "Couldn't invite", result.error?.message ?? "Something went wrong.");
+      appAlert(result.error?.title ?? "Couldn't invite", result.error?.message ?? "Something went wrong.");
       return;
     }
     setInvitedIds((prev) => (prev.includes(driverId) ? prev : [...prev, driverId]));
-    Alert.alert("Invite sent", `${driverName} was invited to join your convoy.`);
+    appAlert("Invite sent", `${driverName} was invited to join your convoy.`);
   }, [inviteDriver]);
 
   const handleClearDestination = useCallback(() => {
-    Alert.alert("Clear the convoy's destination?", "Everyone's map stops showing it.", [
+    appAlert("Clear the convoy's destination?", "Everyone's map stops showing it.", [
       { text: "Cancel", style: "cancel" },
       { text: "Clear", style: "destructive", onPress: () => clearDestination() },
     ]);
@@ -240,7 +240,7 @@ export default function ConvoyScreen() {
   const handleLeave = useCallback(() => {
     if (!party) return;
     const isSolo = members.length <= 1;
-    Alert.alert(
+    appAlert(
       isLeader ? "Disband Convoy?" : "Leave Convoy?",
       isLeader && !isSolo
         ? "You're the leader — leaving disbands the convoy for everyone."
@@ -253,7 +253,7 @@ export default function ConvoyScreen() {
   }, [party, isLeader, members.length, leaveParty]);
 
   const handleKick = useCallback((memberId: string, name: string) => {
-    Alert.alert("Remove from Convoy?", `${name} will be removed from the convoy.`, [
+    appAlert("Remove from Convoy?", `${name} will be removed from the convoy.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: () => kickMember(memberId) },
     ]);
