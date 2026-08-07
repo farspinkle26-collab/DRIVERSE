@@ -619,15 +619,85 @@ Two things to take from that, both about method rather than about Fabric:
 
 ### 13b. What re-enabling it costs, until stages 3–5 land
 
-`react-native-maps` is still a dependency, used by `app/trip/[id].tsx`,
-`app/route/[id].tsx`, `components/InteractiveMapView.tsx` and
-`components/TripMapSnapshot.tsx`. Those screens now run their Paper components
-through Fabric's interop layer, where that library's known bugs live —
-including the `UrlTile` non-rendering that §11 mistakenly blamed for
-everything.
+`react-native-maps` is still a dependency, used by `app/route/[id].tsx` and
+`components/InteractiveMapView.tsx` (§14 moved `app/trip/[id].tsx` and
+`components/TripMapSnapshot.tsx` off it). The remaining two screens run their
+Paper components through Fabric's interop layer, where that library's known
+bugs live — including the `UrlTile` non-rendering that §11 mistakenly blamed
+for everything.
 
 This is accepted rather than solved, because **those screens are already
 broken**: they draw through `react-native-maps`, which needs the Google Maps
 API key that is being rejected. They cannot regress from blank to blank. The
-fix for them is stages 3 and 4 of the migration, which removes the library
-they depend on — not a config flag that would take the main map down with it.
+fix for them is the rest of stage 3, which removes the library they depend on
+— not a config flag that would take the main map down with it.
+
+---
+
+## 14. Trip detail and the share-card snapshot move to `@rnmapbox/maps` (7 Aug 2026)
+
+Two more consumers of the old renderer, migrated together because the second
+depends on a fact established while fixing the first.
+
+**`app/trip/[id].tsx`** followed §12's mapping exactly — `MapView`/`Marker`/
+`Polyline`/`PROVIDER_GOOGLE` out, `Mapbox.MapView`/`Camera`/`MarkerView`/
+`MapPolyline` in, coordinates through `lib/mapboxCoords.ts`. It also gained
+what §12 explicitly left off the main map: the route now draws as the same
+speed heatmap the share card does (`lib/speedTrace.ts`), with a `SpeedLegend`
+and a `driveScore` badge under it — the trip detail screen and the share card
+now agree on what a drive's "features" are, where before the detail screen
+showed a flat two-tone line and neither a score nor a legend. The screen was
+also restyled onto `constants/theme.ts` — every literal hex/px in it predated
+the Phase 1/2 token pass and was never migrated, which is why the map block
+carried a stray `MapboxMapStatus` badge stacked on top of Google's own forced
+attribution: two attribution overlays from two different providers on one
+screen, neither of them this app's UI.
+
+**`components/TripMapSnapshot.tsx`** is the harder half, because it is not an
+interactive screen — it produces the still image the share card's "Map" route
+style shows, via `MapView.takeSnap()` in place of `react-native-maps`'
+`MapView.takeSnapshot()`. Three differences from the interactive migration:
+
+- **No width/height/scale arguments.** `takeSnapshot({width, height, scale})`
+  told react-native-maps what size to render *for the snapshot*.
+  `takeSnap(writeToDisk)` takes none of that — it captures the `MapView` at
+  whatever size it is actually laid out at. The 2× oversampling this file
+  relied on is now done by rendering the hidden stage's `MapView` itself at
+  `width * scale` × `height * scale`, not by asking the snapshot call to
+  upscale afterwards.
+- **`MarkerView` does not survive `takeSnap()` on Android.** `takeSnap()`
+  calls the Mapbox Maps SDK's own `mapView.snapshot()`, which captures the
+  GL surface the map renders into — and a `MarkerView` is a React Native view
+  composited *outside* that surface on Android (the same layering that made
+  §12c's `tracksViewChanges` problem disappear for the interactive map is
+  exactly what makes a `MarkerView` invisible to a GL-surface snapshot here).
+  iOS's `takeSnap()` calls `drawHierarchy`, which would have caught a
+  `MarkerView` fine — so this bug is Android-only and easy to miss testing
+  on one platform. The fix: the start/end dots are a `ShapeSource` +
+  `CircleLayer` pair, the same category of native-rendered primitive the
+  route line already was (`ShapeSource` + `LineLayer`, `MapPolyline.tsx`).
+  `SettledMarker`'s `tracksViewChanges` dance is gone from this file for the
+  same reason §12c removed it from the main map — there is no RN view being
+  rasterised into a bitmap at all now, marker or otherwise.
+- **The halo circle needed `circleOpacity`, not `alpha()`.** Same eight-digit-
+  hex trap §12b documents for `lineColor` — Mapbox's colour parser drops the
+  alpha channel from `#RRGGBBAA` silently, and it applies to every
+  `Value<string>` colour property, not just `LineLayer`'s. The end marker's
+  translucent halo is `circleColor` (six-digit) plus a separate
+  `circleOpacity`, not `alpha(colors.racingRed, 0.25)`.
+
+`lib/mapboxCoords.ts` gained `pointFeature`, mirroring `lineFeature`, for the
+two files above and tested the same way (`lib/__tests__/mapboxCoords.test.ts`).
+
+Mapbox's logo and attribution stay enabled on the snapshot's hidden `MapView`,
+even though nobody ever sees it live — the export is the thing that ends up
+posted to Instagram or TikTok, which is the end-user-facing map render
+Mapbox's terms require attribution on. Disabling it because the source view is
+invisible would be optimising the wrong thing.
+
+**Still unverified, same caveat as §12d:** this typechecks and the whole test
+suite (404 tests, 26 suites) passes, but nothing here proves a marker lands in
+the right place or that `takeSnap()` actually returns a usable image on a
+real device — the settle/retry timers in `TripMapSnapshot.tsx` were tuned
+against `react-native-maps`' timing and have not been re-validated against
+Mapbox's.

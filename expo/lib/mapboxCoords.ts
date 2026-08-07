@@ -71,6 +71,27 @@ export function lineFeature(
   };
 }
 
+/**
+ * A GeoJSON Point feature for one location — what a `Marker`/`MarkerView`
+ * takes where the drawing has to stay inside Mapbox's native render surface
+ * instead of an RN overlay view. `TripMapSnapshot` is the reason this exists:
+ * `MapView.takeSnap()` captures the map's own rendering (GL surface on
+ * Android, the view hierarchy on iOS) but a `MarkerView` is composited
+ * outside that surface on Android, so an endpoint drawn as one would be
+ * invisible in the exported PNG there. A `ShapeSource`+`CircleLayer` point is
+ * part of the map's native rendering on both platforms.
+ */
+export function pointFeature(
+  point: LatLng,
+  properties: Record<string, unknown> = {}
+): GeoJSON.Feature<GeoJSON.Point> {
+  return {
+    type: "Feature",
+    properties,
+    geometry: { type: "Point", coordinates: toPosition(point) },
+  };
+}
+
 /** Wraps features into the FeatureCollection a `ShapeSource` expects. */
 export function featureCollection<T extends GeoJSON.Geometry>(
   features: GeoJSON.Feature<T>[]
