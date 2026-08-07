@@ -2,6 +2,16 @@ import createContextHook from "@nkzw/create-context-hook";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { parseLimitRejection } from "@/lib/platinumLimits";
+import {
+  type ConvoyErrorInfo,
+  describeConvoyError,
+  isMissingDatabaseObject,
+} from "@/lib/convoyErrors";
+import {
+  type ConvoyDestination,
+  convoyDestinationFromRow,
+  sameConvoyDestination,
+} from "@/lib/convoyNav";
 import { useAuth } from "./useAuthStore";
 import { usePlatinum } from "./usePlatinumStore";
 import { useNotifications } from "./useNotificationStore";
@@ -26,6 +36,31 @@ export interface Party {
   visibility: "public" | "invite_only";
   description: string;
   max_members: number; // 0 = unlimited
+  /**
+   * Where the leader has pointed the convoy, or `null`. Read off the same
+   * `parties` row every member is already subscribed to — see
+   * `lib/convoyNav.ts` for why it lives there rather than in its own table.
+   */
+  destination: ConvoyDestination | null;
+}
+
+/** A driver who could be invited. `inConvoy` drivers can still be invited —
+ *  they just have to leave theirs before they can accept. */
+export interface InviteCandidate {
+  id: string;
+  name: string;
+  avatar?: string;
+  inConvoy: boolean;
+  isFriend: boolean;
+}
+
+/** Every convoy write answers in this shape: it either worked, or it says
+ *  exactly what went wrong, in words meant for a driver. */
+export interface ConvoyResult {
+  ok: boolean;
+  error?: ConvoyErrorInfo;
+  /** True when the failure was a tier cap and the paywall was raised. */
+  limitReached?: boolean;
 }
 
 export interface PublicPartySummary {
@@ -63,6 +98,29 @@ interface PartyState {
 // Distinct from the generic online-player ring palette so a party ring
 // always reads as "special" against regular player markers.
 export const PARTY_COLORS = ["#FFD700", "#FF3B6F", "#22D3EE", "#A78BFA", "#34D399"];
+
+/**
+ * One place that turns a `parties` row into a `Party`.
+ *
+ * Every field except the primary key is defaulted, because this has to keep
+ * working against a database that is one migration behind: `visibility`,
+ * `description` and `max_members` arrive with community v2, the `dest_*`
+ * columns with `database_migration_convoy_shared_nav.sql`, and a row missing
+ * either set is a convoy that simply has no destination and is invite-only —
+ * not a crash.
+ */
+function mapPartyRow(row: any): Party {
+  return {
+    id: row.id,
+    leader_id: row.leader_id,
+    name: row.name,
+    color: row.color,
+    visibility: row.visibility ?? "invite_only",
+    description: row.description ?? "",
+    max_members: row.max_members ?? 0,
+    destination: convoyDestinationFromRow(row),
+  };
+}
 
 export const [PartyProvider, useParty] = createContextHook(() => {
   const { user } = useAuth();
@@ -158,15 +216,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
 
       setState((prev) => ({
         ...prev,
-        party: partyRow ? {
-          id: partyRow.id,
-          leader_id: partyRow.leader_id,
-          name: partyRow.name,
-          color: partyRow.color,
-          visibility: partyRow.visibility ?? "invite_only",
-          description: partyRow.description ?? "",
-          max_members: partyRow.max_members ?? 0,
-        } : null,
+        party: partyRow ? mapPartyRow(partyRow) : null,
         members,
         invites,
         loading: false,
@@ -194,43 +244,114 @@ export const [PartyProvider, useParty] = createContextHook(() => {
   const seatsTaken = useMemo(() => state.members.length, [state.members]);
 
   // ─── Create a party (I become leader) ────────────────────
-  const createParty = useCallback(async (name: string, options?: CreatePartyOptions): Promise<boolean> => {
-    if (!user) return false;
-    try {
-      const color = PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)];
-      // A requested capacity above the organiser's tier cap is clamped rather
-      // than rejected: the driver picked "25" from a menu that predates
-      // Platinum, and silently honouring the real ceiling beats failing the
-      // create. The upgrade prompt comes when they try to fill those seats.
-      const requested = options?.maxMembers ?? 0;
-      const maxMembers =
-        convoyMemberLimit === null
-          ? requested
-          : requested === 0
-            ? convoyMemberLimit
-            : Math.min(requested, convoyMemberLimit);
+  //
+  // Two paths, deliberately:
+  //
+  //   1. `create_convoy()` — one SECURITY DEFINER statement that inserts the
+  //      party and seats the leader without RLS in the way. This is the path
+  //      that fixes "Couldn't create convoy": the leader's own seat was going
+  //      through a `party_members` policy that queried `party_members`, and
+  //      Postgres aborts that with 42P17 rather than answering it.
+  //   2. The original direct INSERT — used only when the function isn't
+  //      deployed yet, so a database that hasn't had
+  //      `database_migration_convoy_shared_nav.sql` run against it keeps
+  //      working exactly as it did.
+  //
+  // Whichever path fails, the caller gets the real reason. The old contract
+  // was a bare `false`, which is how a permanent schema error spent this long
+  // being reported to drivers as "Please try again."
+  const createParty = useCallback(async (name: string, options?: CreatePartyOptions): Promise<ConvoyResult> => {
+    if (!user) {
+      return {
+        ok: false,
+        error: {
+          title: "Sign in to start a convoy",
+          message: "A convoy is led by a driver account, so it can't be created while signed out.",
+          needsMigration: false,
+          rpcMissing: false,
+        },
+      };
+    }
 
+    // A requested capacity above the organiser's tier cap is clamped rather
+    // than rejected: the driver picked "25" from a menu that predates
+    // Platinum, and silently honouring the real ceiling beats failing the
+    // create. The upgrade prompt comes when they try to fill those seats.
+    const requested = options?.maxMembers ?? 0;
+    const maxMembers =
+      convoyMemberLimit === null
+        ? requested
+        : requested === 0
+          ? convoyMemberLimit
+          : Math.min(requested, convoyMemberLimit);
+
+    const trimmedName = name.trim() || "Convoy";
+    const visibility = options?.visibility ?? "invite_only";
+    const description = options?.description?.trim() ?? "";
+
+    try {
+      const { error: rpcError } = await supabase.rpc("create_convoy", {
+        p_name: trimmedName,
+        p_visibility: visibility,
+        p_description: description,
+        p_max_members: maxMembers,
+        p_color: PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)],
+      });
+
+      if (!rpcError) {
+        await loadParty();
+        return { ok: true };
+      }
+
+      const rpcInfo = describeConvoyError(rpcError, "create a convoy");
+      if (!rpcInfo.rpcMissing) {
+        // The function ran and refused. That answer is authoritative — do not
+        // retry through the legacy path, which would only fail differently.
+        console.error("create_convoy rejected:", rpcError);
+        return { ok: false, error: rpcInfo };
+      }
+
+      // ── Fallback: the pre-migration path ──────────────────
       const { error } = await supabase
         .from("parties")
         .insert({
           leader_id: user.id,
-          name: name.trim() || "Convoy",
-          color,
-          visibility: options?.visibility ?? "invite_only",
-          description: options?.description?.trim() ?? "",
+          name: trimmedName,
+          color: PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)],
+          visibility,
+          description,
           max_members: maxMembers,
         })
         .select()
         .single();
+
       if (error) {
+        // A database old enough to lack the RPC may also lack the columns the
+        // insert above sends. One more attempt with the columns that have
+        // existed since database_migration_parties.sql, so a convoy can still
+        // be created on the oldest schema this app has ever shipped against.
+        if (isMissingDatabaseObject(error)) {
+          const { error: baseError } = await supabase
+            .from("parties")
+            .insert({ leader_id: user.id, name: trimmedName, color: PARTY_COLORS[0] })
+            .select()
+            .single();
+          if (!baseError) {
+            await loadParty();
+            return { ok: true };
+          }
+          console.error("Error creating party (base columns):", baseError);
+          return { ok: false, error: describeConvoyError(baseError, "create a convoy") };
+        }
         console.error("Error creating party:", error);
-        return false;
+        return { ok: false, error: describeConvoyError(error, "create a convoy") };
       }
+
       await loadParty();
-      return true;
+      return { ok: true };
     } catch (error) {
       console.error("Error creating party:", error);
-      return false;
+      return { ok: false, error: describeConvoyError(error, "create a convoy") };
     }
   }, [user, loadParty, convoyMemberLimit]);
 
@@ -296,18 +417,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       .eq("party_id", partyId)
       .eq("status", "accepted");
     const members = await hydrateMembers(rosterRows ?? []);
-    return {
-      party: {
-        id: partyRow.id,
-        leader_id: partyRow.leader_id,
-        name: partyRow.name,
-        color: partyRow.color,
-        visibility: partyRow.visibility ?? "invite_only",
-        description: partyRow.description ?? "",
-        max_members: partyRow.max_members ?? 0,
-      },
-      members,
-    };
+    return { party: mapPartyRow(partyRow), members };
   }, [hydrateMembers]);
 
   // ─── Join a public convoy directly (no invite needed) ────
@@ -336,9 +446,26 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     }
   }, [user, loadParty]);
 
-  // ─── Invite an accepted friend into my current party ─────
-  const inviteFriend = useCallback(async (friendId: string): Promise<{ ok: boolean; message?: string; limitReached?: boolean }> => {
-    if (!user || !state.party) return { ok: false, message: "You need a convoy first." };
+  // ─── Invite any driver into my current party ─────────────
+  //
+  // "Any driver" is the change: an invite used to require an accepted
+  // `friends` row on both the client and in RLS, which made the most natural
+  // invite in the product — the driver you can see two streets away on the
+  // map — the one that always failed. The friends check is gone from both
+  // halves; what remains is that only someone already in the convoy can
+  // invite, and the invitee still has to accept.
+  const inviteDriver = useCallback(async (driverId: string): Promise<ConvoyResult> => {
+    if (!user || !state.party) {
+      return {
+        ok: false,
+        error: {
+          title: "You're not in a convoy yet",
+          message: "An invite has to point at a convoy. Start one, then invite drivers.",
+          needsMigration: false,
+          rpcMissing: false,
+        },
+      };
+    }
 
     // The organiser IS the one who can lift this cap, so this is the friction
     // point that earns a paywall. Outstanding invites count as taken seats —
@@ -353,33 +480,102 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       return {
         ok: false,
         limitReached: true,
-        message: `Regular convoys cap at ${convoyMemberLimit} drivers. Go Platinum to roll deeper.`,
+        error: {
+          title: "Your convoy is full",
+          message: `Regular convoys cap at ${convoyMemberLimit} drivers. Go Platinum to roll deeper.`,
+          needsMigration: false,
+          rpcMissing: false,
+        },
       };
     }
 
+    const handleFailure = (error: unknown): ConvoyResult => {
+      const rejection = parseLimitRejection(error);
+      if (rejection) {
+        // Only the organiser can lift the cap, so only the organiser is shown
+        // the way past it.
+        if (state.party?.leader_id === user.id) openPaywall(rejection.benefit);
+        return {
+          ok: false,
+          limitReached: true,
+          error: describeConvoyError(error, "send that invite"),
+        };
+      }
+      return { ok: false, error: describeConvoyError(error, "send that invite") };
+    };
+
     try {
+      const { error: rpcError } = await supabase.rpc("invite_to_convoy", { p_user_id: driverId });
+      if (!rpcError) {
+        await loadParty();
+        return { ok: true };
+      }
+      if (!describeConvoyError(rpcError, "send that invite").rpcMissing) {
+        return handleFailure(rpcError);
+      }
+
+      // ── Fallback: direct insert, pre-migration ────────────
       const { error } = await supabase.from("party_members").insert({
         party_id: state.party.id,
-        user_id: friendId,
+        user_id: driverId,
         role: "member",
         status: "invited",
       });
-      if (error) {
-        if (error.code === "23505") return { ok: false, message: "Already invited or in a convoy." };
-        const rejection = parseLimitRejection(error);
-        if (rejection) {
-          openPaywall(rejection.benefit);
-          return { ok: false, limitReached: true, message: rejection.message };
-        }
-        return { ok: false, message: error.message };
-      }
+      if (error) return handleFailure(error);
       await loadParty();
       return { ok: true };
     } catch (error) {
       console.error("Error inviting to party:", error);
-      return { ok: false, message: "Something went wrong." };
+      return handleFailure(error);
     }
   }, [user, state.party, loadParty, convoyMemberLimit, seatsTaken, openPaywall]);
+
+  // ─── Find drivers to invite ──────────────────────────────
+  //
+  // Goes through `search_convoy_invitees` because one field it returns cannot
+  // be computed on the client: whether a driver is already in someone else's
+  // convoy. Those `party_members` rows aren't visible to me, so without the
+  // RPC the picker would happily offer a driver who cannot accept. On an
+  // un-migrated database it falls back to a plain `profiles` search and
+  // simply doesn't know — the invite still works, it just may sit pending.
+  const searchDrivers = useCallback(async (query: string, limit = 20): Promise<InviteCandidate[]> => {
+    const trimmed = query.trim();
+    try {
+      const { data, error } = await supabase.rpc("search_convoy_invitees", {
+        p_query: trimmed,
+        p_limit: limit,
+      });
+      if (!error) {
+        return ((data ?? []) as any[]).map((r) => ({
+          id: r.id,
+          name: r.name ?? "Driver",
+          avatar: r.avatar ?? undefined,
+          inConvoy: Boolean(r.in_convoy),
+          isFriend: false,
+        }));
+      }
+      if (!isMissingDatabaseObject(error)) {
+        console.error("Error searching drivers:", error);
+        return [];
+      }
+
+      let request = supabase.from("profiles").select("id, name, avatar").limit(limit);
+      if (trimmed) request = request.ilike("name", `%${trimmed}%`);
+      const { data: rows } = await request;
+      return ((rows ?? []) as any[])
+        .filter((r) => r.id !== user?.id)
+        .map((r) => ({
+          id: r.id,
+          name: r.name ?? "Driver",
+          avatar: r.avatar ?? undefined,
+          inConvoy: false,
+          isFriend: false,
+        }));
+    } catch (error) {
+      console.error("Error searching drivers:", error);
+      return [];
+    }
+  }, [user?.id]);
 
   // ─── Accept / decline an invite ──────────────────────────
   const acceptInvite = useCallback(async (partyId: string): Promise<{ ok: boolean; message?: string }> => {
@@ -434,6 +630,65 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     if (!user || !state.party || state.party.leader_id !== user.id) return;
     await supabase.from("party_members").delete().eq("party_id", state.party.id).eq("user_id", userId);
     await loadParty();
+  }, [user, state.party, loadParty]);
+
+  // ─── Shared navigation: the leader's destination ─────────
+  //
+  // Optimistic on purpose. The leader taps Route and the banner has to be up
+  // before the round trip finishes, or the feature reads as laggy on the one
+  // device whose action it is. The realtime event that follows carries the
+  // same values, so a failed write self-corrects on the next `loadParty`.
+  const setDestination = useCallback(async (
+    destination: { lat: number; lng: number; name?: string }
+  ): Promise<ConvoyResult> => {
+    if (!user || !state.party) return { ok: false };
+    if (state.party.leader_id !== user.id) {
+      return {
+        ok: false,
+        error: {
+          title: "Only the leader sets the route",
+          message: "The convoy follows its leader's destination. Ask them to set it.",
+          needsMigration: false,
+          rpcMissing: false,
+        },
+      };
+    }
+    // Rule 2 in lib/convoyNav.ts: the map re-runs its navigation effect on
+    // every GPS tick, and without this the leader would republish about once
+    // a second and every member would take a realtime event for it.
+    if (sameConvoyDestination(state.party.destination, destination)) return { ok: true };
+
+    const optimistic: ConvoyDestination = {
+      lat: destination.lat,
+      lng: destination.lng,
+      name: destination.name?.trim() || `${destination.lat.toFixed(4)}, ${destination.lng.toFixed(4)}`,
+      setBy: user.id,
+      setAt: Date.now(),
+    };
+    setState((prev) => (prev.party ? { ...prev, party: { ...prev.party, destination: optimistic } } : prev));
+
+    const { error } = await supabase.rpc("set_convoy_destination", {
+      p_lat: destination.lat,
+      p_lng: destination.lng,
+      p_name: destination.name ?? null,
+    });
+    if (error) {
+      console.error("Error sharing convoy destination:", error);
+      await loadParty();
+      return { ok: false, error: describeConvoyError(error, "share that destination") };
+    }
+    return { ok: true };
+  }, [user, state.party, loadParty]);
+
+  const clearDestination = useCallback(async (): Promise<void> => {
+    if (!user || !state.party || state.party.leader_id !== user.id) return;
+    if (!state.party.destination) return;
+    setState((prev) => (prev.party ? { ...prev, party: { ...prev.party, destination: null } } : prev));
+    const { error } = await supabase.rpc("clear_convoy_destination");
+    if (error) {
+      console.error("Error clearing convoy destination:", error);
+      await loadParty();
+    }
   }, [user, state.party, loadParty]);
 
   // ─── Realtime: refresh whenever my roster row changes ────
@@ -495,16 +750,31 @@ export const [PartyProvider, useParty] = createContextHook(() => {
 
   const isLeader = state.party?.leader_id === user?.id;
 
+  /** Every accepted member's id, mine included — what the map needs to know
+   *  which drivers on screen get the convoy pin. */
+  const partyMemberIdsWithMe = useMemo(
+    () => new Set(state.members.filter((m) => m.status === "accepted").map((m) => m.user_id)),
+    [state.members]
+  );
+
+  const leaderName = useMemo(
+    () => state.members.find((m) => m.role === "leader")?.name ?? "The leader",
+    [state.members]
+  );
+
   return useMemo(() => ({
     party: state.party,
     members: state.members,
     invites: state.invites,
     loading: state.loading,
     partyMemberIds,
+    partyMemberIdsWithMe,
+    leaderName,
     isLeader,
     loadParty,
     createParty,
-    inviteFriend,
+    inviteDriver,
+    searchDrivers,
     acceptInvite,
     declineInvite,
     leaveParty,
@@ -514,10 +784,14 @@ export const [PartyProvider, useParty] = createContextHook(() => {
     browsePublicParties,
     joinParty,
     getPartyDetail,
+    /** The convoy's shared destination, or `null`. Leader-written. */
+    destination: state.party?.destination ?? null,
+    setDestination,
+    clearDestination,
     /** My cap as an organiser. `null` would mean unlimited; Platinum is 8. */
     convoyMemberLimit,
     seatsTaken,
     /** True when inviting another driver would raise the paywall. */
     atConvoyLimit: convoyMemberLimit !== null && seatsTaken >= convoyMemberLimit,
-  }), [state, partyMemberIds, isLeader, loadParty, createParty, inviteFriend, acceptInvite, declineInvite, leaveParty, kickMember, publicParties, loadingPublicParties, browsePublicParties, joinParty, getPartyDetail, convoyMemberLimit, seatsTaken]);
+  }), [state, partyMemberIds, partyMemberIdsWithMe, leaderName, isLeader, loadParty, createParty, inviteDriver, searchDrivers, acceptInvite, declineInvite, leaveParty, kickMember, publicParties, loadingPublicParties, browsePublicParties, joinParty, getPartyDetail, setDestination, clearDestination, convoyMemberLimit, seatsTaken]);
 });
