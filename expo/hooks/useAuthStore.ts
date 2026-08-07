@@ -458,8 +458,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         return false;
       }
 
-      const updatedUser = { ...user, profilePicture: finalUrl };
-      setUser(updatedUser);
+      setUser((prev) => (prev ? { ...prev, profilePicture: finalUrl } : prev));
       return true;
     } catch (err) {
       console.error("Profile picture update error:", err);
@@ -482,7 +481,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         setError(updErr.message);
         return false;
       }
-      setUser({ ...user, country: next });
+      setUser((prev) => (prev ? { ...prev, country: next } : prev));
       return true;
     } catch (err) {
       console.error("Country update error:", err);
@@ -514,11 +513,15 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         return false;
       }
 
-      setUser({
-        ...user,
-        registrationCompletedAt: updates.registration_completed_at as unknown as number,
-        country: trimmedCountry || user.country,
-      });
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              registrationCompletedAt: updates.registration_completed_at as unknown as number,
+              country: trimmedCountry || prev.country,
+            }
+          : prev
+      );
       setNeedsProfileCustomization(false);
       return true;
     } catch (err) {
