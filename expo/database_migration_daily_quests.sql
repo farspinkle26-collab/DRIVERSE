@@ -272,18 +272,22 @@ CREATE POLICY "User badges are viewable" ON public.user_badges
 -- =====================================================================
 -- 8. REWARD MODEL  (mirrored in expo/lib/questEngine.ts)
 -- =====================================================================
--- Base XP sits in the 10k-20k band, not the hundreds — a driver clearing a
--- handful of quests should feel it move the level bar, not read as a
--- rounding error next to the 1.6×-per-level curve in useXPStore.ts
--- (L10 alone costs ~6.9k XP, L20 ~1.2M). Coins are unchanged; only XP
--- was asked to jump. Mirrored in DIFFICULTY_TIERS in questEngine.ts —
--- keep both in sync.
+-- Base XP sits in the 10k-25k band per difficulty, not the hundreds — a
+-- driver clearing a handful of quests should feel it move the level bar,
+-- not read as a rounding error next to the 1.6×-per-level curve in
+-- useXPStore.ts (L10 alone costs ~6.9k XP, L20 ~1.2M). This is the
+-- difficulty base only — `make_friend` templates carry a 2.0 `reward_multiplier`
+-- (see the SEED section) specifically so a friend quest always pays the most
+-- at its difficulty tier, up to 50k at hard, which is the actual top of the
+-- range this app hands out. Growing the social graph is worth more than
+-- growing the odometer. Coins are unchanged; only XP was asked to jump.
+-- Mirrored in DIFFICULTY_TIERS in questEngine.ts — keep both in sync.
 CREATE OR REPLACE FUNCTION public.quest_base_reward(p_difficulty TEXT)
 RETURNS TABLE (base_xp INTEGER, base_coins INTEGER) AS $$
   SELECT CASE p_difficulty
            WHEN 'easy'   THEN 10000
-           WHEN 'medium' THEN 15000
-           WHEN 'hard'   THEN 20000
+           WHEN 'medium' THEN 20000
+           WHEN 'hard'   THEN 25000
            ELSE 100
          END,
          CASE p_difficulty
@@ -998,7 +1002,7 @@ INSERT INTO public.quest_templates (
   ('u_easy_drive_m', 'easy', 'driving', 'drive_distance',
     'Quick Spin', 'Drive {target} {unit} to get moving.',
     'Car', '#00D4AA', NULL, NULL, 300, 1000, 100, 'm',
-    1, NULL, NULL, NULL, NULL, 0.9, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.2),
   ('u_easy_speed', 'easy', 'driving', 'reach_speed',
     'Pick Up The Pace', 'Reach {target} {unit} on your drive today.',
     'Gauge', '#F59E0B', NULL, NULL, 40, 60, 5, 'km/h',
@@ -1012,33 +1016,41 @@ INSERT INTO public.quest_templates (
   ('u_med_distance', 'medium', 'driving', 'drive_distance',
     'Distance Grinder', 'Cover {target} {unit} on the road today.',
     'Route', '#FF6B35', NULL, NULL, 25, 60, 5, 'km',
-    1, NULL, NULL, NULL, NULL, 1.1, NULL, 1.3),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.3),
   ('u_med_speed', 'medium', 'driving', 'reach_speed',
     'Highway Ready', 'Reach {target} {unit} on your drive today.',
     'Gauge', '#F59E0B', NULL, NULL, 70, 90, 5, 'km/h',
-    1, NULL, NULL, NULL, NULL, 1.15, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.2),
+  -- Highest-paying template at this difficulty on purpose: growing the
+  -- social graph is worth more than growing the odometer, and the reward
+  -- has to actually read that way — 2.0 puts a friend quest's payout
+  -- clearly above its same-difficulty peers rather than a few hundred XP
+  -- ahead where nobody would notice.
   ('u_med_friend', 'medium', 'social', 'make_friend',
     'New Connection', 'Make {target} new {unit} on Driveverse.',
     'Users', '#FF3B6F', NULL, NULL, 1, NULL, 1, 'friend',
-    1, NULL, NULL, NULL, NULL, 1.2, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 2.0, NULL, 1.2),
 
   -- ── HARD ────────────────────────────────────────────────────────
   ('u_hard_grand_tour', 'hard', 'driving', 'drive_distance',
     'Grand Tour', 'Cover {target} {unit} across the day.',
     'Route', '#FF3B6F', NULL, NULL, 80, 150, 10, 'km',
-    1, NULL, NULL, NULL, NULL, 1.4, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.2),
   ('u_hard_long_haul', 'hard', 'driving', 'drive_distance',
     'Long Haul', 'Log a serious {target} {unit} on the road.',
     'Flame', '#FF6B35', NULL, NULL, 40, 90, 10, 'km',
-    1, NULL, NULL, NULL, NULL, 1.3, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.2),
   ('u_hard_speed', 'hard', 'driving', 'reach_speed',
     'Top Speed', 'Reach {target} {unit} on your drive today.',
     'Gauge', '#EF4444', NULL, NULL, 100, 130, 5, 'km/h',
-    1, NULL, NULL, NULL, NULL, 1.35, NULL, 1.2),
+    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.2),
+  -- The single highest-paying quest in the catalogue: 25000 base * 2.0 =
+  -- 50000 XP at level 1, the actual top of the 10k-50k range. See the note
+  -- on u_med_friend — same reasoning, doubled up at hard.
   ('u_hard_friends', 'hard', 'social', 'make_friend',
     'Social Butterfly', 'Make {target} new {unit} today.',
     'Users', '#FF3B6F', NULL, NULL, 2, 3, 1, 'friends',
-    1, NULL, NULL, NULL, NULL, 1.4, 'social_5', 1.1)
+    1, NULL, NULL, NULL, NULL, 2.0, 'social_5', 1.1)
 ON CONFLICT (id) DO UPDATE SET
   difficulty = EXCLUDED.difficulty, category = EXCLUDED.category,
   objective_type = EXCLUDED.objective_type, title_template = EXCLUDED.title_template,
