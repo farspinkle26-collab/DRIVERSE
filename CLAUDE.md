@@ -193,6 +193,21 @@ merge/staleness rule and its tests. Full detail — connection states, rejoin
 backoff, and how to verify it on two devices — in
 `expo/ONLINE_PRESENCE_REFERENCE.md`.
 
+**`profiles.last_active_at`** (`expo/database_migration_last_active.sql`,
+`expo/LAST_ACTIVE_REFERENCE.md`) records when each driver last had the app
+open, so the dashboard's DAU/WAU/MAU are measured rather than inferred from
+what drivers produced (a trip, a message, a quest — which cannot see the most
+common session this app has: open it, look at the map, close it). Two write
+paths, mirroring presence: the `touch_last_active()` RPC, called by
+`expo/hooks/useLastActivePing.ts` on mount, on every foreground and on a
+heartbeat, and a trigger on `user_locations` as the fallback — **both throttled
+to 5 minutes in SQL**, not only in the client, because positions are upserted
+every ~10 s. It stores **one timestamp per user**, so rolling "active in the
+last N days" windows are exact while the day-by-day DAU chart and the retention
+cohorts are not derivable from it and stay on the old approximation; a NULL
+means *unknown*, never *inactive*. The pure ping rule is
+`expo/lib/lastActive.ts`.
+
 The **problem signal** (`expo/database_migration_problem_signal.sql`,
 `expo/PROBLEM_SIGNAL_REFERENCE.md`) lets a driver in trouble broadcast a help
 signal — breakdown / accident / out-of-fuel / SOS — that every online driver

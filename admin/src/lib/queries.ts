@@ -59,11 +59,35 @@ async function fetchAll<T>(
 }
 
 // ── Per-table fetchers ───────────────────────────────────────────────
-export const getProfiles = () =>
-  fetchAll<ProfileRow>(
+
+/** Everything on `profiles` that predates `last_active_at`. */
+const PROFILE_COLUMNS =
+  "id,name,role,verification_status,driver_verification_status,company_verification_status,country,created_at,verified_at";
+
+/**
+ * `last_active_at` arrives with `expo/database_migration_last_active.sql`, and
+ * this repo's migrations are applied by hand — so a database that has not had
+ * it run yet would fail the whole SELECT on an unknown column and report
+ * `profiles` as unavailable, blanking every section of the dashboard.
+ *
+ * So it is asked for, and only if that fails do we fall back to the columns
+ * that predate it, with the timestamp read as NULL — which is exactly what the
+ * metrics already treat as "unknown". A real failure (RLS, a missing table)
+ * fails the fallback too and is reported normally.
+ */
+export const getProfiles = async (): Promise<TableResult<ProfileRow>> => {
+  const withLastActive = await fetchAll<ProfileRow>(
     "profiles",
-    "id,name,role,verification_status,driver_verification_status,company_verification_status,country,created_at,verified_at",
+    `${PROFILE_COLUMNS},last_active_at`,
   );
+  if (withLastActive.available) return withLastActive;
+
+  const base = await fetchAll<Omit<ProfileRow, "last_active_at">>("profiles", PROFILE_COLUMNS);
+  return {
+    ...base,
+    rows: base.rows.map((r) => ({ ...r, last_active_at: null })),
+  };
+};
 
 export const getTrips = () =>
   fetchAll<TripRow>(

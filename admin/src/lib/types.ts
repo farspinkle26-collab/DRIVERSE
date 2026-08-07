@@ -11,6 +11,16 @@ export interface ProfileRow {
   country: string | null;
   created_at: string | null;
   verified_at: string | null;
+  /**
+   * Last time the user had the app open — the app pings this on launch, on
+   * every foreground and on a heartbeat, and their live-map position touches
+   * it too (`expo/database_migration_last_active.sql`).
+   *
+   * NULL means "not seen since the column shipped", NOT "inactive": rows that
+   * predate the migration and were not caught by its backfill sit at NULL
+   * forever. Treat NULL as unknown and exclude it, never as old.
+   */
+  last_active_at: string | null;
 }
 
 export interface TripRow {

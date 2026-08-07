@@ -25,6 +25,7 @@ import NotificationBanner from "@/components/NotificationBanner";
 import AppErrorBoundary, { ErrorScreen } from "@/components/AppErrorBoundary";
 import CrashReportScreen from "@/components/CrashReportScreen";
 import { useAppFonts } from "@/hooks/useAppFonts";
+import { useLastActivePing } from "@/hooks/useLastActivePing";
 import { shouldSurfaceOnLaunch, type CrashReport } from "@/lib/crashReport";
 import { logEnv } from "@/lib/envCheck";
 import {
@@ -120,6 +121,19 @@ function LaunchComplete() {
     const timer = setTimeout(markLaunchComplete, LAUNCH_SETTLE_MS);
     return () => clearTimeout(timer);
   }, []);
+  return null;
+}
+
+/**
+ * Records that this driver has the app open (`profiles.last_active_at`).
+ *
+ * A component rather than a call inside one of the stores, because it needs a
+ * session and nothing else: mounting it here keeps the ping out of every
+ * store's dependency list, and a metric that fails should not be able to take
+ * a store down with it. It must sit inside `AuthContext` and renders nothing.
+ */
+function LastActivePing() {
+  useLastActivePing();
   return null;
 }
 
@@ -224,6 +238,7 @@ function RootLayoutContent() {
                                       <CosmeticsProvider>
                                         <RootLayoutNav />
                                         <NotificationBanner />
+                                        <LastActivePing />
                                         <LaunchComplete />
                                       </CosmeticsProvider>
                                     </SavedPlacesProvider>

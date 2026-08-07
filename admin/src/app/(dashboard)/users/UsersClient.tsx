@@ -28,6 +28,9 @@ import {
   verificationBreakdown,
   countInRange,
   countInPrev,
+  activeUsersMeasured,
+  hasLastActive,
+  lastActiveCoverage,
 } from "@/lib/metrics";
 import type { ProfileRow } from "@/lib/types";
 
@@ -50,6 +53,14 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
   const verifiedTotal = profiles.filter((p) => p.verification_status === "verified").length;
   const registered = profiles.length;
 
+  // Measured activity (profiles.last_active_at). Shown only once something has
+  // been measured — before the migration and a build carrying the ping, every
+  // window is 0 and a confident 0 reads as "nobody uses this app".
+  const measured = useMemo(() => hasLastActive(profiles), [profiles]);
+  const coverage = useMemo(() => lastActiveCoverage(profiles), [profiles]);
+  const active24h = useMemo(() => activeUsersMeasured(profiles, 1, now), [profiles, now]);
+  const active7d = useMemo(() => activeUsersMeasured(profiles, 7, now), [profiles, now]);
+
   const recent = useMemo(
     () =>
       [...profiles].sort(
@@ -63,6 +74,9 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
     { key: "role", header: "Role", render: (r) => <RolePill role={r.role} />, sortValue: (r) => r.role || "" },
     { key: "verif", header: "Verification", render: (r) => <VerifPill status={r.verification_status} />, sortValue: (r) => r.verification_status || "" },
     { key: "joined", header: "Joined", sortValue: (r) => new Date(r.created_at ?? 0).getTime(), csvValue: (r) => fmtDate(r.created_at), render: (r) => <DateCell value={r.created_at} /> },
+    // Never-seen sorts to the bottom either way: 0 is below every real
+    // timestamp ascending, and the column defaults to newest-first.
+    { key: "lastActive", header: "Last active", sortValue: (r) => new Date(r.last_active_at ?? 0).getTime(), csvValue: (r) => fmtDate(r.last_active_at), render: (r) => <DateCell value={r.last_active_at} /> },
     { key: "id", header: "ID", className: "font-mono text-ink-muted", render: (r) => r.id.slice(0, 8) },
   ];
 
@@ -85,6 +99,31 @@ export function UsersClient({ profiles }: { profiles: ProfileRow[] }) {
         <StatCard label="Verified" value={fmtInt(verifiedTotal)} hint={`${registered ? Math.round((verifiedTotal / registered) * 100) : 0}% of users`} />
         <StatCard label="Drivers" value={fmtInt(roles.find((r) => r.role === "driver")?.count ?? 0)} hint="role = driver" />
       </div>
+
+      {measured ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Active (24h)" value={fmtInt(active24h)} hint="last_active_at" />
+          <StatCard label="Active (7d)" value={fmtInt(active7d)} hint="last_active_at" />
+          <StatCard
+            label="Ever seen"
+            value={fmtInt(coverage.measured)}
+            hint={`${registered ? Math.round((coverage.measured / registered) * 100) : 0}% of users`}
+          />
+          <StatCard
+            label="Never seen"
+            value={fmtInt(coverage.total - coverage.measured)}
+            hint="predates the ping, or has not opened the app since"
+          />
+        </div>
+      ) : (
+        <Banner tone="gap">
+          <strong>No user has been seen yet.</strong> The <em>Last active</em> column
+          reads <code>profiles.last_active_at</code>, which the app writes on launch,
+          on every foreground and on a heartbeat — run{" "}
+          <code>expo/database_migration_last_active.sql</code> and ship a build
+          carrying the ping, and it fills in from there.
+        </Banner>
+      )}
 
       <ChartCard title="Cumulative users" subtitle="Total registered accounts over time (all-time)">
         {growth.length > 1 ? (

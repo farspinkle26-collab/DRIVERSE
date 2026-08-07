@@ -22,6 +22,9 @@ import {
   activityByDay,
   activityByUser,
   activeUsers,
+  activeUsersMeasured,
+  hasLastActive,
+  lastActiveCoverage,
   dauSeries,
   retention,
   ActivityEvent,
@@ -47,6 +50,13 @@ export function OverviewClient(props: Props) {
 
   const byDay = useMemo(() => activityByDay(activity), [activity]);
   const byUser = useMemo(() => activityByUser(activity), [activity]);
+
+  // `profiles.last_active_at` is the measured signal; it only exists once the
+  // migration has run and a build carrying the ping is in drivers' hands, so
+  // the cards fall back to the approximation until something has been measured
+  // rather than showing a confident zero.
+  const measured = useMemo(() => hasLastActive(profiles), [profiles]);
+  const coverage = useMemo(() => lastActiveCoverage(profiles), [profiles]);
 
   const m = useMemo(() => {
     const newUsers = countInRange(profiles, (p) => p.created_at, range, now);
@@ -76,12 +86,17 @@ export function OverviewClient(props: Props) {
 
     const totalXp = xp.reduce((s, u) => s + (u.total_xp ?? 0), 0);
 
-    const dau = activeUsers(byDay, 1, now);
-    const dauPrev = activeUsers(byDay, 1, new Date(now.getTime() - 86400000));
-    const wau = activeUsers(byDay, 7, now);
-    const wauPrev = activeUsers(byDay, 7, new Date(now.getTime() - 7 * 86400000));
-    const mau = activeUsers(byDay, 30, now);
-    const mauPrev = activeUsers(byDay, 30, new Date(now.getTime() - 30 * 86400000));
+    // Measured mode wins when it exists. It carries no previous-window
+    // comparison: `last_active_at` keeps one timestamp per user, so "who was
+    // active in the week before last" is not recoverable from it — a trend
+    // arrow there would be invented, and an approximated arrow next to an
+    // exact number is worse than no arrow.
+    const dau = measured ? activeUsersMeasured(profiles, 1, now) : activeUsers(byDay, 1, now);
+    const dauPrev = measured ? null : activeUsers(byDay, 1, new Date(now.getTime() - 86400000));
+    const wau = measured ? activeUsersMeasured(profiles, 7, now) : activeUsers(byDay, 7, now);
+    const wauPrev = measured ? null : activeUsers(byDay, 7, new Date(now.getTime() - 7 * 86400000));
+    const mau = measured ? activeUsersMeasured(profiles, 30, now) : activeUsers(byDay, 30, now);
+    const mauPrev = measured ? null : activeUsers(byDay, 30, new Date(now.getTime() - 30 * 86400000));
 
     const avgXpPerActive = mau > 0 ? totalXp / mau : 0;
 
@@ -109,7 +124,7 @@ export function OverviewClient(props: Props) {
       d7: retention(profiles, byUser, 7, now),
       d30: retention(profiles, byUser, 30, now),
     };
-  }, [profiles, trips, quests, events, parties, xp, byDay, byUser, range, now]);
+  }, [profiles, trips, quests, events, parties, xp, byDay, byUser, range, now, measured]);
 
   const dau = useMemo(() => dauSeries(byDay, dauDays, now), [byDay, dauDays, now]);
   const hasActivity = activity.length > 0;
@@ -127,13 +142,28 @@ export function OverviewClient(props: Props) {
         }
       />
 
-      <Banner tone="gap">
-        <strong>DAU / WAU / MAU and retention are approximations.</strong> Driveverse
-        does not track true app-opens or last-active per user, so "active" is
-        inferred from users who recorded a trip, sent a message, or were served a
-        quest that day. Add <code>profiles.last_active_at</code> + an activity ping
-        to make these exact.
-      </Banner>
+      {measured ? (
+        <Banner tone="gap">
+          <strong>DAU / WAU / MAU are measured; the DAU chart and retention are not.</strong>{" "}
+          The app writes <code>profiles.last_active_at</code> on launch, on every
+          foreground and on a heartbeat, so the three cards below are exact rolling
+          windows (last 24h / 7d / 30d) over the{" "}
+          {fmtInt(coverage.measured)} of {fmtInt(coverage.total)} users seen since
+          the ping shipped. They carry no period-over-period arrow: only the latest
+          timestamp per user is stored, so an earlier window cannot be recovered
+          from it — and for the same reason the day-by-day chart and the retention
+          cohorts below still infer "active" from users who recorded a trip, sent a
+          message, or were served a quest that day.
+        </Banner>
+      ) : (
+        <Banner tone="gap">
+          <strong>DAU / WAU / MAU and retention are approximations.</strong> No user
+          has been seen through <code>profiles.last_active_at</code> yet — run{" "}
+          <code>expo/database_migration_last_active.sql</code> and ship a build
+          carrying the activity ping — so "active" is still inferred from users who
+          recorded a trip, sent a message, or were served a quest that day.
+        </Banner>
+      )}
 
       {/* Fixed headline cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -154,9 +184,27 @@ export function OverviewClient(props: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="DAU" value={fmtInt(m.dau)} current={m.dau} previous={m.dauPrev} hint="≈ 1d" />
-        <StatCard label="WAU" value={fmtInt(m.wau)} current={m.wau} previous={m.wauPrev} hint="≈ 7d" />
-        <StatCard label="MAU" value={fmtInt(m.mau)} current={m.mau} previous={m.mauPrev} hint="≈ 30d" />
+        <StatCard
+          label="DAU"
+          value={fmtInt(m.dau)}
+          current={m.dau}
+          previous={m.dauPrev}
+          hint={measured ? "last 24h" : "≈ 1d"}
+        />
+        <StatCard
+          label="WAU"
+          value={fmtInt(m.wau)}
+          current={m.wau}
+          previous={m.wauPrev}
+          hint={measured ? "last 7d" : "≈ 7d"}
+        />
+        <StatCard
+          label="MAU"
+          value={fmtInt(m.mau)}
+          current={m.mau}
+          previous={m.mauPrev}
+          hint={measured ? "last 30d" : "≈ 30d"}
+        />
         <StatCard
           label={`Active events + convoys (${range})`}
           value={fmtInt(m.eventsThis + m.partiesThis)}
@@ -184,7 +232,7 @@ export function OverviewClient(props: Props) {
       <ChartCard
         title="Retention (approx)"
         subtitle="Share of a signup cohort active on their Nth day. Activity-based, not app-opens."
-        note="No per-user rank-up or session log exists, so these use the same activity proxy as DAU. Treat as directional until last-active tracking ships."
+        note="Cohort retention needs the days a user was active, and last_active_at keeps only the most recent one — so these still use the trip/message/quest proxy and stay directional until a per-day activity log exists."
       >
         <div className="grid grid-cols-3 gap-3">
           <RetentionCell label="D1" value={m.d1} />
@@ -196,7 +244,11 @@ export function OverviewClient(props: Props) {
       {/* DAU time series */}
       <ChartCard
         title="Daily active users"
-        subtitle={`Approximate DAU over the last ${dauDays} days`}
+        subtitle={
+          measured
+            ? `Approximate DAU over the last ${dauDays} days — activity-based, so it reads lower than the measured DAU card above`
+            : `Approximate DAU over the last ${dauDays} days`
+        }
         right={
           <div className="inline-flex rounded-lg border border-hairline bg-surface-2 p-0.5">
             {[30, 90].map((d) => (
