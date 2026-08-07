@@ -139,7 +139,7 @@ is surfaced with a banner in the relevant section rather than hidden:
 
 | Gap | Effect | Fix |
 |---|---|---|
-| No `last_active_at` / session log | DAU/WAU/MAU + retention are **approximated** from activity timestamps (trips, messages, quests), not true app-opens. | Add `profiles.last_active_at` + an activity ping. |
+| No per-day session log | DAU/WAU/MAU are now **measured** from `profiles.last_active_at` (see below), but the day-by-day DAU chart and D1/D7/D30 retention still need the *days* a user was active, which one timestamp can't give — those stay **approximated** from trips/messages/quests. | Add an activity event log (one row per session/day). |
 | No XP-event log | "XP awarded this period" is approximated from `trips.xp_earned` + completed quests; totals are exact. | Add an `xp_events` table. |
 | No rank-up history | "Avg time-to-rank-up" is **not computable**. | Add a level-change history table. |
 | Quest system is daily-only | Completion is reported by **difficulty + category**, not the daily/weekly/seasonal/community/location taxonomy the brief assumed. | Extend the quest engine if those types are wanted. |
@@ -149,3 +149,28 @@ is surfaced with a banner in the relevant section rather than hidden:
 | Guests not tracked | Signup funnel starts at **registered → verified** (no guest stage). | Track guest sessions if the guest→registered step matters. |
 
 The rank ladder has **12** tiers (the brief said 11); all 12 are shown.
+
+### Measured activity (`profiles.last_active_at`)
+
+The app writes `profiles.last_active_at` on launch, on every foreground and on a
+heartbeat while it stays open, and a driver's live-map position touches it too —
+so DAU/WAU/MAU count users who **opened the app**, not only users who produced a
+trip, a message or a quest. Overview's three cards read exact rolling windows
+(last 24h / 7d / 30d) off it; `/users` gets a **Last active** column and
+Active (24h) / Active (7d) / Ever seen / Never seen cards.
+
+Three things to know when reading those numbers:
+
+- **NULL is unknown, not inactive.** Accounts that predate the column and were
+  not caught by the migration's backfill sit at NULL and are excluded from every
+  window rather than counted as churned.
+- **No trend arrows on the measured cards.** Only the latest timestamp per user
+  is stored, so the preceding window cannot be recovered; an approximated arrow
+  beside an exact number would be worse than none.
+- **The dashboard runs with or without the migration.** `getProfiles` asks for
+  the column and refetches without it if the database doesn't have it yet, so a
+  missing column degrades this one metric instead of blanking every section. Both
+  affected pages say which mode they're in.
+
+Setup, the two write paths and how to verify it on device:
+`expo/database_migration_last_active.sql` and `expo/LAST_ACTIVE_REFERENCE.md`.

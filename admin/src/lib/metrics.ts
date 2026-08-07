@@ -45,11 +45,73 @@ export function countInPrev<T>(
   }, 0);
 }
 
-// ── Activity (DAU/WAU/MAU + retention) ───────────────────────────────
-// IMPORTANT: Driveverse does not track true app-opens / last-active. These are
-// APPROXIMATIONS built by unioning per-day activity timestamps from trips,
-// messages, quests and saved routes. They count users who *did something*, not
-// users who merely opened the app. Surface this caveat in the UI.
+// ── Activity, measured (profiles.last_active_at) ─────────────────────
+// The app writes `profiles.last_active_at` on launch, on every foreground and
+// on a heartbeat while it stays open (expo/database_migration_last_active.sql),
+// so a driver who opens the app and does nothing is counted — which is the
+// whole difference between these numbers and the approximation below.
+//
+// ONE TIMESTAMP PER USER, though: this says when someone was last here, not
+// which days they were here. Rolling "active in the last N days" windows are
+// exact; a per-day series and retention cohorts are not derivable from it and
+// stay on the approximation until there is an event log.
+
+/** How many profiles have ever been pinged — i.e. how much of the roster this measurement covers. */
+export function lastActiveCoverage(profiles: ProfileRow[]): { measured: number; total: number } {
+  return {
+    measured: profiles.reduce((n, p) => (parseDate(p.last_active_at) ? n + 1 : n), 0),
+    total: profiles.length,
+  };
+}
+
+/** True once anything has been measured — the switch between exact and approximated cards. */
+export function hasLastActive(profiles: ProfileRow[]): boolean {
+  return profiles.some((p) => parseDate(p.last_active_at) != null);
+}
+
+/**
+ * Users seen within the last `days` days — exact, and a ROLLING window (the
+ * last 24 hours, not "today"), which is why it does not agree to the unit with
+ * the calendar-day `activeUsers` below.
+ *
+ * A NULL `last_active_at` is unknown, not old: those rows predate the column
+ * and are excluded rather than counted as inactive.
+ */
+export function activeUsersMeasured(
+  profiles: ProfileRow[],
+  days: number,
+  now = new Date(),
+): number {
+  const cutoff = now.getTime() - days * 86400000;
+  return profiles.reduce((n, p) => {
+    const d = parseDate(p.last_active_at);
+    if (!d) return n;
+    const t = d.getTime();
+    // Upper bound too: a timestamp in the future is a bad device clock, and
+    // counting it would inflate every window it lands in.
+    return t >= cutoff && t <= now.getTime() ? n + 1 : n;
+  }, 0);
+}
+
+/** Most-recently-seen first; never-seen (NULL) last. */
+export function byLastActive(profiles: ProfileRow[]): ProfileRow[] {
+  return [...profiles].sort((a, b) => {
+    const ta = parseDate(a.last_active_at)?.getTime();
+    const tb = parseDate(b.last_active_at)?.getTime();
+    if (ta == null && tb == null) return 0;
+    if (ta == null) return 1;
+    if (tb == null) return -1;
+    return tb - ta;
+  });
+}
+
+// ── Activity, approximated (DAU series + retention) ──────────────────
+// IMPORTANT: these are APPROXIMATIONS built by unioning per-day activity
+// timestamps from trips, messages, quests and saved routes. They count users
+// who *did something*, not users who merely opened the app — that is what
+// `last_active_at` above is for. What keeps them is that they are per-day, so
+// the DAU chart and the retention cohorts are still built here. Surface the
+// caveat in the UI.
 
 export interface ActivityEvent {
   userId: string;
