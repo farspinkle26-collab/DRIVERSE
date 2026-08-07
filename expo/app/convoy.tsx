@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -13,9 +13,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, Stack } from "expo-router";
-import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio, Flag } from "lucide-react-native";
+import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio, Flag, Search, Navigation, MapPin } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
-import { useParty } from "@/hooks/usePartyStore";
+import { useParty, type InviteCandidate } from "@/hooks/usePartyStore";
 import { supabase } from "@/lib/supabase";
 import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
@@ -95,8 +95,10 @@ export default function ConvoyScreen() {
     invites,
     loading,
     isLeader,
+    leaderName,
     createParty,
-    inviteFriend,
+    inviteDriver,
+    searchDrivers,
     acceptInvite,
     declineInvite,
     leaveParty,
@@ -105,6 +107,8 @@ export default function ConvoyScreen() {
     loadingPublicParties,
     browsePublicParties,
     joinParty,
+    destination,
+    clearDestination,
     convoyMemberLimit,
     seatsTaken,
   } = useParty();
@@ -112,10 +116,15 @@ export default function ConvoyScreen() {
 
   const [nameDraft, setNameDraft] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [friends, setFriends] = useState<Contact[]>([]);
   const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [invitedIds, setInvitedIds] = useState<string[]>([]);
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [inviteQuery, setInviteQuery] = useState("");
+  const [candidates, setCandidates] = useState<InviteCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const loadFriends = useCallback(async () => {
     if (!user) return;
@@ -152,24 +161,81 @@ export default function ConvoyScreen() {
     if (!result.ok) setJoinError(result.message ?? "Couldn't join that convoy");
   }, [joinParty]);
 
-  const memberIds = new Set(members.map((m) => m.user_id));
+  const memberIds = useMemo(() => new Set(members.map((m) => m.user_id)), [members]);
+
+  /**
+   * Everyone this driver could invite: their friends first (still the most
+   * likely answer), then every other driver the search turned up. The friends
+   * list is merged in on the client rather than asked for again, so a driver
+   * who is both a friend and a search hit appears once, marked.
+   */
+  const inviteList = useMemo((): InviteCandidate[] => {
+    const q = inviteQuery.trim().toLowerCase();
+    const friendIds = new Set(friends.map((f) => f.id));
+    const fromFriends: InviteCandidate[] = friends
+      .filter((f) => !q || f.name.toLowerCase().includes(q))
+      .map((f) => ({ id: f.id, name: f.name, avatar: f.avatar, inConvoy: false, isFriend: true }));
+    const seen = new Set(fromFriends.map((c) => c.id));
+    const rest = candidates
+      .filter((c) => !seen.has(c.id))
+      .map((c) => ({ ...c, isFriend: friendIds.has(c.id) }));
+    return [...fromFriends, ...rest].filter((c) => !memberIds.has(c.id));
+  }, [friends, candidates, inviteQuery, memberIds]);
+
+  // Debounced so typing a name doesn't fire a query per keystroke. Runs with
+  // an empty query too — that's the "who's on Driveverse" default list, which
+  // is what makes inviting someone you haven't friended possible at all.
+  useEffect(() => {
+    if (!party) return;
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      const results = await searchDrivers(inviteQuery);
+      if (cancelled) return;
+      setCandidates(results);
+      setSearching(false);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [inviteQuery, party, searchDrivers]);
 
   const handleCreate = useCallback(async () => {
     if (!nameDraft.trim() || creating) return;
     setCreating(true);
-    const ok = await createParty(nameDraft.trim());
+    setCreateError(null);
+    const result = await createParty(nameDraft.trim());
     setCreating(false);
-    if (ok) setNameDraft("");
-    else Alert.alert("Couldn't create convoy", "Please try again.");
+    if (result.ok) {
+      setNameDraft("");
+      return;
+    }
+    // The real cause, both on screen and in the alert. "Please try again" was
+    // wrong about every failure this can have — none of them are transient.
+    const info = result.error;
+    setCreateError(info ? `${info.title} — ${info.message}` : "The database rejected the write.");
+    Alert.alert(info?.title ?? "Couldn't create convoy", info?.message ?? "The database rejected the write.");
   }, [nameDraft, creating, createParty]);
 
-  const handleInvite = useCallback(async (friendId: string, friendName: string) => {
-    setInvitingId(friendId);
-    const result = await inviteFriend(friendId);
+  const handleInvite = useCallback(async (driverId: string, driverName: string) => {
+    setInvitingId(driverId);
+    const result = await inviteDriver(driverId);
     setInvitingId(null);
-    if (!result.ok) Alert.alert("Couldn't Invite", result.message ?? "Something went wrong.");
-    else Alert.alert("Invite Sent!", `${friendName} was invited to join your convoy.`);
-  }, [inviteFriend]);
+    if (!result.ok) {
+      Alert.alert(result.error?.title ?? "Couldn't invite", result.error?.message ?? "Something went wrong.");
+      return;
+    }
+    setInvitedIds((prev) => (prev.includes(driverId) ? prev : [...prev, driverId]));
+    Alert.alert("Invite sent", `${driverName} was invited to join your convoy.`);
+  }, [inviteDriver]);
+
+  const handleClearDestination = useCallback(() => {
+    Alert.alert("Clear the convoy's destination?", "Everyone's map stops showing it.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Clear", style: "destructive", onPress: () => clearDestination() },
+    ]);
+  }, [clearDestination]);
 
   const handleLeave = useCallback(() => {
     if (!party) return;
@@ -290,6 +356,10 @@ export default function ConvoyScreen() {
                 disabled={!nameDraft.trim() || creating}
                 style={{ width: "100%" }}
               />
+              {/* Kept on screen as well as in the alert: the alert is gone
+                  the moment it's dismissed, and this is the only text anyone
+                  can read back when reporting the problem. */}
+              {createError && <Text style={styles.errorText}>{createError}</Text>}
             </CutCornerSurface>
 
             {joinError && <Text style={styles.errorText}>{joinError}</Text>}
@@ -355,6 +425,52 @@ export default function ConvoyScreen() {
               </CutCornerSurface>
             </View>
 
+            {/* ─── SHARED DESTINATION ───────────────────────────
+                The leader's route is the convoy's route. It is set from the
+                map (tap a place, tap Route) rather than here — this card is
+                the roster screen's copy of it, so a member who isn't looking
+                at the map still knows where the convoy is headed. */}
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Convoy Destination</Text>
+              {destination ? (
+                <CutCornerSurface
+                  fill={colors.carbonSurface}
+                  borderColor={party.color}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.sm}
+                  corners="topRight"
+                  contentStyle={styles.row}
+                >
+                  <MapPin size={18} color={party.color} strokeWidth={ICON_STROKE} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowName} numberOfLines={1}>{destination.name}</Text>
+                    <Text style={styles.rowSub}>
+                      {isLeader ? "Shared with everyone in the convoy" : `Set by ${leaderName}`}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={styles.acceptBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open the convoy destination on the map"
+                    onPress={() => router.push("/(tabs)/map" as any)}
+                  >
+                    <Navigation size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                  </Pressable>
+                  {isLeader && (
+                    <Pressable style={styles.declineBtn} onPress={handleClearDestination} hitSlop={spacing.spacingSm}>
+                      <X size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    </Pressable>
+                  )}
+                </CutCornerSurface>
+              ) : (
+                <Text style={styles.rowSub}>
+                  {isLeader
+                    ? "Pick a place on the map and tap Route — everyone in the convoy will see where you're heading."
+                    : `Nothing set yet. When ${leaderName} routes somewhere, it shows up here and on your map.`}
+                </Text>
+              )}
+            </View>
+
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Members</Text>
               {members.map((m) => (
@@ -386,8 +502,14 @@ export default function ConvoyScreen() {
               ))}
             </View>
 
+            {/* ─── INVITE ANY DRIVER ─────────────────────────────
+                Not "Invite Friends" any more. A convoy invite used to need an
+                accepted friend request on both the client and in RLS, which
+                made the most natural invite — the driver you can see on the
+                map — the one that always failed. Friends still come first in
+                the list because they're still the likeliest answer. */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Invite Friends</Text>
+              <Text style={styles.sectionLabel}>Invite Drivers</Text>
               {/* Convoy size follows the ORGANISER's tier, so this notice is
                   only shown to the leader — a member cannot lift it and
                   offering them an upgrade would be a misleading upsell. */}
@@ -401,28 +523,69 @@ export default function ConvoyScreen() {
                   style={styles.convoyLimitNotice}
                 />
               )}
-              {friends.filter((f) => !memberIds.has(f.id)).length === 0 ? (
-                <Text style={styles.rowSub}>All your friends are already in this convoy.</Text>
+
+              <View style={styles.searchField}>
+                <Search size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search every driver by name"
+                  placeholderTextColor={colors.textSecondary}
+                  value={inviteQuery}
+                  onChangeText={setInviteQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={40}
+                />
+                {inviteQuery.length > 0 && (
+                  <Pressable onPress={() => setInviteQuery("")} hitSlop={spacing.spacingSm}>
+                    <X size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                  </Pressable>
+                )}
+              </View>
+
+              {searching && inviteList.length === 0 ? (
+                <ActivityIndicator color={colors.racingRed} style={styles.loaderSm} />
+              ) : inviteList.length === 0 ? (
+                <Text style={styles.rowSub}>
+                  {inviteQuery.trim()
+                    ? `No driver called "${inviteQuery.trim()}".`
+                    : "No other drivers to invite yet."}
+                </Text>
               ) : (
-                friends.filter((f) => !memberIds.has(f.id)).map((f) => (
-                  <View key={f.id} style={styles.memberRow}>
-                    <View style={styles.avatar}>
-                      {f.avatar ? <Image source={{ uri: f.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{f.name[0]?.toUpperCase()}</Text>}
+                inviteList.map((c) => {
+                  const invited = invitedIds.includes(c.id);
+                  return (
+                    <View key={c.id} style={styles.memberRow}>
+                      <View style={styles.avatar}>
+                        {c.avatar ? <Image source={{ uri: c.avatar }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{c.name[0]?.toUpperCase()}</Text>}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowName} numberOfLines={1}>{c.name}</Text>
+                        {/* Said before the invite goes out, not after it sits
+                            unanswered: a driver already in a convoy has to
+                            leave it before they can accept this one. */}
+                        <Text style={styles.rowSub}>
+                          {c.inConvoy ? "Already in a convoy" : c.isFriend ? "Friend" : "Driver"}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={[styles.inviteBtn, invited && styles.disabled]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Invite ${c.name} to your convoy`}
+                        onPress={() => handleInvite(c.id, c.name)}
+                        disabled={invitingId === c.id || invited}
+                      >
+                        {invitingId === c.id ? (
+                          <ActivityIndicator size="small" color={colors.textSecondary} />
+                        ) : invited ? (
+                          <Check size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        ) : (
+                          <UserPlus size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        )}
+                      </Pressable>
                     </View>
-                    <Text style={[styles.rowName, { flex: 1 }]}>{f.name}</Text>
-                    <Pressable
-                      style={styles.inviteBtn}
-                      onPress={() => handleInvite(f.id, f.name)}
-                      disabled={invitingId === f.id}
-                    >
-                      {invitingId === f.id ? (
-                        <ActivityIndicator size="small" color={colors.textSecondary} />
-                      ) : (
-                        <UserPlus size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                      )}
-                    </Pressable>
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
 
@@ -574,6 +737,24 @@ const styles = StyleSheet.create({
     ...textStyle("caption"),
     color: colors.racingRed,
     marginTop: spacing.spacingSm,
+  },
+  searchField: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingMd,
+    paddingVertical: spacing.spacingSm,
+    marginBottom: spacing.spacingSm,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    ...textStyle("body"),
+    padding: 0,
   },
   loader: { marginTop: spacing.spacingXl },
   loaderSm: { marginTop: spacing.spacingSm },

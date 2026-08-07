@@ -86,9 +86,16 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
-    const ok = await createParty(name, { visibility, description, maxMembers });
-    if (!ok) {
-      setError("Couldn't create convoy. Please try again.");
+    const result = await createParty(name, { visibility, description, maxMembers });
+    if (!result.ok) {
+      // The real reason, in the sheet. Every cause of a failed create is
+      // permanent — a schema gap, a policy, a convoy the driver is already in
+      // — so "please try again" was advice that could not work.
+      setError(
+        result.error
+          ? `${result.error.title} — ${result.error.message}`
+          : "The database rejected the write and didn't say why."
+      );
       setSubmitting(false);
       return;
     }

@@ -136,6 +136,7 @@ import {
   Wrench,
   Fuel,
   LifeBuoy,
+  Flag,
 } from "lucide-react-native";
 import {
   CutCornerBadge,
@@ -178,6 +179,11 @@ import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
 import { useParty } from "@/hooks/usePartyStore";
+import {
+  activeConvoyDestination,
+  convoyDestinationHeadline,
+  sameConvoyDestination,
+} from "@/lib/convoyNav";
 import { useEvents, DriveEvent } from "@/hooks/useEventsStore";
 import { EventTypeIcon, eventTypeLabel } from "@/components/EventMeta";
 import { useAuth } from "@/hooks/useAuthStore";
@@ -880,7 +886,16 @@ export default function MapScreen() {
   } = useOnlineUsers();
   const { user } = useAuth();
   const { activeCar } = useActiveCar();
-  const { party, partyMemberIds, inviteFriend } = useParty();
+  const {
+    party,
+    partyMemberIds,
+    inviteDriver,
+    isLeader: isConvoyLeader,
+    leaderName: convoyLeaderName,
+    destination: convoyDestination,
+    setDestination: shareConvoyDestination,
+    clearDestination: clearConvoyDestination,
+  } = useParty();
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
   // The raise-a-signal chooser sheet, and a tick that re-renders the age
@@ -1414,8 +1429,13 @@ export default function MapScreen() {
     })();
   }, [userLocation]);
 
-  // --- Invite an online friend to my convoy ---
-  const handleInviteToPartyFromMap = useCallback(async (friendId: string, friendName: string) => {
+  // --- Invite any driver on the map to my convoy ---
+  //
+  // "Any driver" is the change here: this used to fail for everyone who
+  // wasn't already an accepted friend, which is nearly everyone you can
+  // actually see on the map. The friends requirement is gone from the RLS
+  // policy and from the store, so the marker you tapped is now invitable.
+  const handleInviteToPartyFromMap = useCallback(async (driverId: string, driverName: string) => {
     if (!party) {
       Alert.alert(
         "You're not in a convoy yet",
@@ -1429,20 +1449,19 @@ export default function MapScreen() {
     }
     setInvitingToParty(true);
     try {
-      const result = await inviteFriend(friendId);
+      const result = await inviteDriver(driverId);
       if (result.ok) {
-        Alert.alert("Invite sent", `${friendName} was invited to join ${party.name}.`);
+        Alert.alert("Invite sent", `${driverName} was invited to join ${party.name}.`);
       } else {
         Alert.alert(
-          "Invite not sent",
-          result.message ??
-            `${friendName} isn't on your friends list yet, and convoy invites only go to friends. Send a friend request first, then invite them.`
+          result.error?.title ?? "Invite not sent",
+          result.error?.message ?? "The database rejected the invite and didn't say why."
         );
       }
     } finally {
       setInvitingToParty(false);
     }
-  }, [party, inviteFriend, router]);
+  }, [party, inviteDriver, router]);
 
   // --- Ask a meetup from map marker ---
   const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
@@ -1571,7 +1590,49 @@ export default function MapScreen() {
     }
     setNavigating(true);
     fetchDirections(userLocation, coords);
-  }, [userLocation, destCoords, fetchDirections]);
+
+    // The leader's route is the convoy's route. Published here — at the tap,
+    // not once the directions come back — because the destination is what the
+    // convoy needs, and it is already known; waiting on Mapbox would delay
+    // every member's banner behind a network call that can also fail.
+    //
+    // Only the leader writes it (`canSetConvoyDestination`, enforced again in
+    // `set_convoy_destination`), and the store drops a republish of the same
+    // point, so nothing here fires twice for one destination.
+    if (isConvoyLeader && party) {
+      void shareConvoyDestination({
+        lat: coords.latitude,
+        lng: coords.longitude,
+        name: destinationStoredName,
+      });
+    }
+  }, [userLocation, destCoords, fetchDirections, isConvoyLeader, party, shareConvoyDestination, destinationStoredName]);
+
+  /** Route to the destination the convoy leader shared. */
+  const handleFollowConvoyDestination = useCallback(() => {
+    if (!convoyDestination) return;
+    setSelectedDestination({
+      type: "location",
+      lat: convoyDestination.lat,
+      lng: convoyDestination.lng,
+      name: convoyDestination.name,
+    });
+    setLocationChosen(true);
+    setRouteInfo(null);
+    setShowDropPinHint(false);
+    if (!userLocation) {
+      Alert.alert(
+        "No GPS fix yet",
+        "The convoy's destination is on your map, but a route has to start from where you are. Wait for the driver marker to appear, then tap Route."
+      );
+      return;
+    }
+    setNavigating(true);
+    fetchDirections(userLocation, {
+      latitude: convoyDestination.lat,
+      longitude: convoyDestination.lng,
+    });
+  }, [convoyDestination, userLocation, fetchDirections]);
 
   const clearRoute = useCallback(() => {
     setRouteInfo(null);
@@ -1592,7 +1653,12 @@ export default function MapScreen() {
     setRouteSplitIdx(null);
     setXpEarned(null);
     setRouteSteps([]);
-  }, []);
+    // The leader stopping is the convoy arriving (or changing its mind).
+    // Nothing else clears the shared destination, so without this a convoy
+    // stays pointed at last night's meet until the 6-hour staleness window in
+    // `lib/convoyNav.ts` expires.
+    if (isConvoyLeader) void clearConvoyDestination();
+  }, [isConvoyLeader, clearConvoyDestination]);
 
   // --- Event handlers ---
   const openCreateEvent = useCallback(() => {
@@ -2425,6 +2491,41 @@ export default function MapScreen() {
           </Mapbox.MarkerView>
         )}
 
+        {/* ─── THE CONVOY'S SHARED DESTINATION ──────────────────
+            The leader routed somewhere, so every member's map marks it — in
+            the convoy's own colour, which is the same colour their markers
+            wear, so "that flag and those rings are the same crew" needs no
+            explaining.
+
+            Suppressed when the driver's own selected destination is the same
+            point (`sameConvoyDestination`), which is always true for the
+            leader who just set it: two pins on one spot reads as two places. */}
+        {activeConvoyDestination(convoyDestination, Date.now()) &&
+          party &&
+          !sameConvoyDestination(
+            convoyDestination,
+            destCoords() ? { lat: destCoords()!.latitude, lng: destCoords()!.longitude } : null
+          ) && (
+          <Mapbox.MarkerView
+            coordinate={toPosition({ latitude: convoyDestination!.lat, longitude: convoyDestination!.lng })}
+            anchor={{ x: 0.5, y: 1 }}
+            allowOverlap
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Convoy destination: ${convoyDestination!.name}. Route there.`}
+              onPress={handleFollowConvoyDestination}
+              style={styles.convoyDestWrap}
+            >
+              <View style={[styles.convoyDestBadge, { borderColor: party.color }]}>
+                <Flag size={spacing.spacingMd} color={party.color} strokeWidth={MAP_GLYPH_STROKE} />
+                <Text style={styles.convoyDestLabel} numberOfLines={1}>{convoyDestination!.name}</Text>
+              </View>
+              <View style={[styles.convoyDestStem, { backgroundColor: party.color }]} />
+            </Pressable>
+          </Mapbox.MarkerView>
+        )}
+
         {/* Online driver markers. The ring carries the driver's livery colour
             (see PLAYER_COLORS); everything else — level badge, convoy badge,
             name plate — is palette. The party ring stays thicker rather than
@@ -2515,7 +2616,17 @@ export default function MapScreen() {
                     </View>
                   ) : isPartyMate ? (
                     <View style={[styles.partyBadge, { backgroundColor: ringColor }]}>
-                      <Users size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
+                      {/* The leader gets the crown, everyone else the convoy
+                          mark. Worth the extra glyph: shared navigation means
+                          one driver on this map decides where the convoy is
+                          going, and which one that is now matters at a
+                          glance. Same slot, same size — it reads as a
+                          variant of the convoy badge, not a new badge. */}
+                      {party && onlineUser.user_id === party.leader_id ? (
+                        <Crown size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
+                      ) : (
+                        <Users size={spacing.spacingSm} color={colors.voidBlack} strokeWidth={MAP_GLYPH_STROKE} />
+                      )}
                     </View>
                   ) : null}
                   {/* Direction of travel, pinned to the top of the ring box
@@ -2540,12 +2651,24 @@ export default function MapScreen() {
                     </View>
                   ) : null}
                 </View>
-                <Text style={styles.playerName} numberOfLines={1}>{onlineUser.name}</Text>
-                {problem && (
+                <Text
+                  style={[styles.playerName, isPartyMate && !problem && { color: ringColor }]}
+                  numberOfLines={1}
+                >
+                  {onlineUser.name}
+                </Text>
+                {problem ? (
                   <Text style={styles.playerProblemLabel} numberOfLines={1}>
                     {problemMeta(problem.type).label}
                   </Text>
-                )}
+                ) : isPartyMate && party ? (
+                  // The convoy's name under a convoy-mate's marker. A ring in
+                  // an arbitrary colour asks the driver to remember what that
+                  // colour meant; the name doesn't.
+                  <Text style={styles.playerConvoyLabel} numberOfLines={1}>
+                    {party.name}
+                  </Text>
+                ) : null}
               </Pressable>
             </Mapbox.MarkerView>
           );
@@ -3707,6 +3830,69 @@ export default function MapScreen() {
                   </Text>
                 </View>
                 <ChevronRight size={spacing.spacingXl} color={colors.racingRed} strokeWidth={CHROME_ICON_STROKE} />
+              </CutCornerSurface>
+            </Pressable>
+          </View>
+        );
+      })()}
+
+      {/* ===================================================== */}
+      {/*   CONVOY DESTINATION — the leader picked a place       */}
+      {/* ===================================================== */}
+      {/* Sits in the same slot as the distress banner and yields to it: a
+          driver who needs help outranks knowing where the convoy is going.
+          Hidden while recording for the same reason the distress banner is —
+          the turn card owns the top of a driving screen.
+
+          Not shown to the leader: they set it, they are already routed to it,
+          and a banner telling them their own destination is chrome. */}
+      {!isRecording && !searchOpen && distressUsers.length === 0 && party && !isConvoyLeader && (() => {
+        const dest = activeConvoyDestination(convoyDestination, Date.now());
+        if (!dest) return null;
+        const alreadyRouted =
+          navigating &&
+          sameConvoyDestination(
+            dest,
+            destCoords() ? { lat: destCoords()!.latitude, lng: destCoords()!.longitude } : null
+          );
+        return (
+          <View style={[styles.distressBannerSlot, { top: insets.top + spacing.spacingMd }]} pointerEvents="box-none">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                alreadyRouted
+                  ? `Following the convoy to ${dest.name}`
+                  : `Route to the convoy's destination, ${dest.name}`
+              }
+              disabled={alreadyRouted}
+              onPress={handleFollowConvoyDestination}
+              style={({ pressed }) => [pressed && styles.pressed]}
+            >
+              <CutCornerSurface
+                fill={colors.carbonSurface}
+                borderColor={party.color}
+                borderWidth={borderWidth.emphasis}
+                cutSize={cut.md}
+                corners="topRight"
+                contentStyle={styles.distressBanner}
+              >
+                <View style={[styles.convoyBannerBadge, { borderColor: party.color }]}>
+                  <Flag size={spacing.spacingLg} color={party.color} strokeWidth={CHROME_ICON_STROKE} />
+                </View>
+                <View style={styles.distressTextWrap}>
+                  <Text style={styles.distressTitle} numberOfLines={1}>
+                    {convoyDestinationHeadline(dest, {
+                      isLeader: false,
+                      leaderName: convoyLeaderName,
+                    })}
+                  </Text>
+                  <Text style={styles.distressSub} numberOfLines={1}>
+                    {alreadyRouted ? `Following ${party.name}` : `${party.name} · Tap to route there`}
+                  </Text>
+                </View>
+                {!alreadyRouted && (
+                  <ChevronRight size={spacing.spacingXl} color={party.color} strokeWidth={CHROME_ICON_STROKE} />
+                )}
               </CutCornerSurface>
             </Pressable>
           </View>
@@ -6139,6 +6325,55 @@ const styles = StyleSheet.create({
     color: colors.racingRed,
     textAlign: "center",
     maxWidth: 92,
+  },
+  /* The convoy's name under a convoy-mate's marker. Secondary colour, not
+     the convoy's — the ring, badge and driver name already carry that, and a
+     fourth element in the same hue would flatten the marker. */
+  playerConvoyLabel: {
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    color: colors.textSecondary,
+    textAlign: "center",
+    maxWidth: 92,
+  },
+
+  /* ---------------- Convoy shared destination ---------------- */
+  /* A flag on a stem rather than the reticle a personal destination gets:
+     the convoy's destination is a place the crew is meeting at, not the
+     point this driver is currently routed to, and the two can be on screen
+     together. Anchored at the bottom of the stem, so the stem's foot is the
+     coordinate. */
+  convoyDestWrap: {
+    alignItems: "center",
+  },
+  convoyDestBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingXs,
+    maxWidth: 160,
+    paddingHorizontal: spacing.spacingSm,
+    paddingVertical: spacing.spacingXs,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.emphasis,
+    backgroundColor: colors.carbonSurface,
+  },
+  convoyDestLabel: {
+    ...textStyle("caption"),
+    color: colors.textPrimary,
+    flexShrink: 1,
+  },
+  convoyDestStem: {
+    width: borderWidth.emphasis,
+    height: spacing.spacingMd,
+  },
+  convoyBannerBadge: {
+    width: spacing.spacingXl,
+    height: spacing.spacingXl,
+    borderRadius: radius.circle,
+    borderWidth: borderWidth.emphasis,
+    backgroundColor: colors.voidBlack,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   /* ---------------- Online driver sheet ---------------- */

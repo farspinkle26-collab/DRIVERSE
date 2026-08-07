@@ -50,6 +50,44 @@ v2, saved routes, trip names, trip privacy, trip speed profile. `expo/database_s
 is a consolidated setup script. `expo/supabase/functions` holds Supabase Edge
 Functions.
 
+**Convoys** (`parties` + `party_members`) are the one area where the additive,
+no-canonical-history migration style drew blood, and
+`expo/CONVOY_REFERENCE.md` is the account. "Couldn't create convoy. Please try
+again." had three permanent causes wearing one alert: the client wrote
+`visibility` / `description` / `max_members`, which arrive in community v2 and
+not in the parties migration, so a half-migrated database failed with
+`PGRST204` before reaching a trigger; RLS policies on `party_members` that
+queried `party_members` aborted the read-back with 42P17 (an
+`.insert().select()` always reads back); and a driver already in a convoy hit
+the one-active unique index. `database_migration_convoy_shared_nav.sql` is the
+single idempotent, self-healing repair — backfills the columns, replaces every
+recursive policy with a `SECURITY DEFINER` membership function, and moves
+creation into `create_convoy()` so the leader's own seat is out of RLS
+entirely. **A convoy write never reports a bare `false` again**:
+`lib/convoyErrors.ts` maps each code to copy naming the cause, and the raw
+Postgres message reaches the phone, because on a store build it is the only
+copy of it that exists. The client falls back to the old direct INSERT when
+the RPC isn't deployed.
+
+Two further bugs came out of *running* that migration against a real Postgres
+rather than reading it, which is the method worth repeating: the convoy's
+group chat carried the same unfixed recursion (so `group_conversations`,
+`group_conversation_members` and `group_messages` were all unreadable), and
+the leader was never in their own convoy's chat — two `AFTER INSERT` triggers
+on `parties` fire **alphabetically**, so `on_party_created` seats the leader
+before `party_create_conversation` exists to put them in it. Both are fixed in
+the same file, with a backfill.
+
+Beyond the repair, convoys gained two things: **an invite may go to any
+driver**, not only an accepted friend (the friends check is gone from the RLS
+policy and the client; `invite_to_convoy` and `search_convoy_invitees` back
+the picker, and only a member of the convoy can invite), and **one shared
+destination**. The leader tapping Route publishes to `parties.dest_*` through
+`set_convoy_destination`; every member's map shows a flag in the convoy colour
+and a banner that routes them there. The rules — leader-only, republish only
+on a real change, 6-hour staleness — are pure and tested in
+`expo/lib/convoyNav.ts`.
+
 **Launch safety** — the app has crashed on open twice, both times from the
 same cause: a native module call at *module scope*, which Hermes runs while
 evaluating the bundle, before any React tree exists and outside every error
