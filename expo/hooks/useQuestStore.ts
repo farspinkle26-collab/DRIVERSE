@@ -9,7 +9,6 @@ import {
   UserBadge,
   QuestEventResult,
   QuestEventType,
-  PlaceCategory,
   sortByDifficulty,
   pendingRewards,
   questDay,
@@ -20,8 +19,8 @@ import {
 // record_quest_event RPCs). Generation is lazy: the first call each day
 // generates the user's 3 universal quests. Quests are AUTO-completed —
 // there is no manual "mark complete". Progress advances only through real
-// indicators (distance driven, a friend made, a place visited) reported
-// via record_quest_event (and server-side triggers for distance/friends).
+// indicators (distance driven, top speed reached, a friend made) reported
+// via record_quest_event (and server-side triggers for distance/speed/friends).
 // Rewards — XP, coins, streak, badges — are granted server-side the moment
 // an indicator meets the target, so levelling has a single source of truth.
 export const [QuestsProvider, useQuests] = createContextHook(() => {
@@ -223,10 +222,9 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
 
   // ─── Report a real-world indicator ─────────────────────────────────
   // The ONLY way quest progress advances. Call this from the app's genuine
-  // signals — e.g. after a drive is recorded (`drive_distance`, km), a
-  // place is visited (`visit_place`, +1, with a category), a photo is taken
-  // (`photo_capture`). Friends and saved routes/trips also fire server-side
-  // triggers automatically, so those need no client call.
+  // signals — e.g. after a drive is recorded (`drive_distance`, km) or a
+  // photo is taken (`photo_capture`). Distance, top speed and friends also
+  // fire server-side triggers automatically, so those need no client call.
   //
   // Any matching quest that reaches its target auto-completes server-side;
   // XP/coins/streak/badges are granted there. Returns the quests that were
@@ -234,8 +232,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
   const recordEvent = useCallback(
     async (
       eventType: QuestEventType,
-      amount: number = 1,
-      category: PlaceCategory | null = null
+      amount: number = 1
     ): Promise<{ completed: QuestEventResult[]; error?: string }> => {
       const uid = userIdRef.current;
       if (!uid) return { completed: [], error: "Not signed in" };
@@ -244,7 +241,6 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
       const { data, error } = await supabase.rpc("record_quest_event", {
         p_event_type: eventType,
         p_amount: amount,
-        p_category: category,
       });
       if (error) {
         await fetchState();
@@ -264,8 +260,8 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
     (km: number) => recordEvent("drive_distance", km),
     [recordEvent]
   );
-  const recordPlaceVisit = useCallback(
-    (category: PlaceCategory) => recordEvent("visit_place", 1, category),
+  const recordSpeed = useCallback(
+    (kmh: number) => recordEvent("reach_speed", kmh),
     [recordEvent]
   );
   const recordPhoto = useCallback(
@@ -299,7 +295,7 @@ export const [QuestsProvider, useQuests] = createContextHook(() => {
     // Indicator intake (quests auto-complete — no manual claim).
     recordEvent,
     recordDrive,
-    recordPlaceVisit,
+    recordSpeed,
     recordPhoto,
   };
 });

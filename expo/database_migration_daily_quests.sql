@@ -3,16 +3,19 @@
 -- A modular quest engine that generates 3 personalised daily quests per
 -- user (1 Easy, 1 Medium, 1 Hard) from a catalogue of templates. Quests
 -- are **global / universal** — they describe generic, worldwide goals
--- ("reach 10 km", "visit a café", "visit a mall", "make a new friend")
+-- ("drive 10 km", "drive 500 m", "reach 80 km/h", "make a new friend")
 -- rather than referencing any specific country or named location — so the
--- system works for every user anywhere on the planet.
+-- system works for every user anywhere on the planet. There are
+-- deliberately no place-based quests ("visit a café", etc.) — that needs a
+-- places API this app doesn't have a reliable one for yet.
 --
 -- Quests are **auto-completed**. A quest can never be marked done by the
 -- user. It finishes only when its real-world indicator/calculation reaches
--- the target: distance actually driven (from saved routes/trips), friends
--- actually made, places actually visited. Real signals flow in through
--- database triggers and the record_quest_event() RPC; rewards (XP, coins,
--- streak, badges) are granted automatically the moment the target is met.
+-- the target: distance actually driven (from saved routes/trips), a top
+-- speed actually reached, friends actually made. Real signals flow in
+-- through database triggers and the record_quest_event() RPC; rewards (XP,
+-- coins, streak, badges) are granted automatically the moment the target
+-- is met.
 --
 -- Run this whole file in your Supabase SQL Editor. It is idempotent
 -- (safe to re-run) — tables use IF NOT EXISTS, policies/functions are
@@ -662,14 +665,15 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- 13. INDICATOR INTAKE — record_quest_event()
 -- =====================================================================
 -- The ONE and ONLY way quest progress advances. A real-world indicator
--- fires (distance driven, a friend made, a place visited) and every
--- matching active quest advances by p_amount. Any quest that reaches its
--- target auto-completes and its rewards are granted immediately.
+-- fires (distance driven, a top speed reached, a friend made) and every
+-- matching active quest advances. Any quest that reaches its target
+-- auto-completes and its rewards are granted immediately.
 --
 -- Event → objective routing:
---   'drive_distance'  → objective_type in (drive_distance, night_drive)   [amount = km]
---   'visit_place'     → objective_type in (visit_place, visit_places),
---                       matching objective_category = p_category OR 'any'  [amount = visits]
+--   'drive_distance'  → objective_type in (drive_distance, night_drive)   [amount = km driven;
+--                        converted to metres and added when the quest's unit is 'm']
+--   'reach_speed'     → objective_type = reach_speed                      [amount = km/h reached;
+--                        progress tracks the BEST speed seen, not a sum]
 --   'make_friend'     → objective_type = make_friend                       [amount = friends]
 --   'photo_capture'   → objective_type = photo_capture                     [amount = photos]
 --
@@ -692,6 +696,7 @@ RETURNS TABLE (
 ) AS $$
 DECLARE
   v_q        public.daily_quests%ROWTYPE;
+  v_amt      NUMERIC;
   v_newprog  NUMERIC;
   v_finished BOOLEAN;
   v_badges   TEXT[];
@@ -706,15 +711,21 @@ BEGIN
       AND status = 'active'
       AND (
         (p_event_type = 'drive_distance' AND objective_type IN ('drive_distance','night_drive'))
-        OR (p_event_type = 'visit_place'   AND objective_type IN ('visit_place','visit_places')
-            AND (objective_category IS NULL OR objective_category = 'any'
-                 OR p_category IS NULL OR objective_category = p_category))
+        OR (p_event_type = 'reach_speed'   AND objective_type = 'reach_speed')
         OR (p_event_type = 'make_friend'   AND objective_type = 'make_friend')
         OR (p_event_type = 'photo_capture' AND objective_type = 'photo_capture')
       )
     FOR UPDATE
   LOOP
-    v_newprog := LEAST(v_q.progress + p_amount, v_q.target);
+    IF v_q.objective_type = 'reach_speed' THEN
+      -- Speed quests track the best (max) speed seen, not a running sum.
+      v_newprog := LEAST(GREATEST(v_q.progress, p_amount), v_q.target);
+    ELSE
+      -- Distance quests may be set in km or m; the trigger always reports
+      -- km, so convert to metres when the quest's own unit is metres.
+      v_amt := CASE WHEN v_q.unit = 'm' THEN p_amount * 1000 ELSE p_amount END;
+      v_newprog := LEAST(v_q.progress + v_amt, v_q.target);
+    END IF;
 
     IF v_newprog >= v_q.target THEN
       v_badges := public._finish_quest(v_q.id);
@@ -762,12 +773,16 @@ GRANT EXECUTE ON FUNCTION public.record_quest_event(TEXT, NUMERIC, TEXT) TO auth
 -- These wire the app's genuine calculations directly to quest progress,
 -- so quests finish on their own — no button, no self-marking.
 
--- Distance actually driven → drive_distance quests.
+-- Distance actually driven → drive_distance quests. Top speed reached →
+-- reach_speed quests.
 CREATE OR REPLACE FUNCTION public.quest_on_saved_route()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.distance_km IS NOT NULL AND NEW.distance_km > 0 THEN
     PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km::NUMERIC, NULL);
+  END IF;
+  IF NEW.top_speed_kmh IS NOT NULL AND NEW.top_speed_kmh > 0 THEN
+    PERFORM public._record_quest_event_for(NEW.user_id, 'reach_speed', NEW.top_speed_kmh::NUMERIC, NULL);
   END IF;
   RETURN NEW;
 END;
@@ -784,12 +799,16 @@ BEGIN
   END IF;
 END $$;
 
--- Distance from completed trips → drive_distance quests.
+-- Distance from completed trips → drive_distance quests. Top speed reached
+-- → reach_speed quests.
 CREATE OR REPLACE FUNCTION public.quest_on_trip()
 RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.distance_km IS NOT NULL AND NEW.distance_km > 0 THEN
     PERFORM public._record_quest_event_for(NEW.user_id, 'drive_distance', NEW.distance_km::NUMERIC, NULL);
+  END IF;
+  IF NEW.top_speed_kmh IS NOT NULL AND NEW.top_speed_kmh > 0 THEN
+    PERFORM public._record_quest_event_for(NEW.user_id, 'reach_speed', NEW.top_speed_kmh::NUMERIC, NULL);
   END IF;
   RETURN NEW;
 END;
@@ -881,6 +900,22 @@ END $$;
 
 
 -- =====================================================================
+-- 16b. CLEANUP — retire the place-based universal templates
+-- =====================================================================
+-- The universal catalogue used to include place-visit quests ("visit a
+-- café", "visit a mall", ...). Removed: the app has no reliable places API
+-- to verify a visit against. daily_quests references templates with
+-- ON DELETE SET NULL, so any already-generated quest is unaffected; the
+-- catalogue is replaced by the distance/speed set below.
+DELETE FROM public.quest_templates
+WHERE id IN (
+  'u_easy_cafe','u_easy_restaurant','u_easy_park',
+  'u_med_mall','u_med_cafe_hop','u_med_viewpoint',
+  'u_hard_explore','u_hard_viewpoints'
+);
+
+
+-- =====================================================================
 -- 17. CLEANUP — retire the old self-marking API + Indonesia-only seeds
 -- =====================================================================
 -- Progress can no longer be set by clients: drop the legacy self-mark
@@ -938,10 +973,11 @@ ON CONFLICT (id) DO UPDATE SET
 -- =====================================================================
 -- 19. SEED — UNIVERSAL QUEST TEMPLATES
 -- =====================================================================
--- Location-agnostic blueprints. Distances, generic place categories, and
--- social/photo goals — valid for a driver anywhere in the world. Targets
--- roll across ranges and combine with time buckets to yield a very large,
--- non-repeating combination space without any specific place data.
+-- Location-agnostic blueprints: drive a distance (km or m), reach a top
+-- speed, or a social/photo goal — valid for a driver anywhere in the
+-- world. No place-based quests — this app has no places API to verify a
+-- visit against. Targets roll across ranges and combine with time buckets
+-- to yield a large, non-repeating combination space.
 INSERT INTO public.quest_templates (
   id, difficulty, category, objective_type, title_template, description_template,
   icon, accent_color, poi_category, place_label, param_min, param_max, param_step, unit,
@@ -953,18 +989,14 @@ INSERT INTO public.quest_templates (
     'Warm-Up Lap', 'Drive {target} {unit} today to get rolling.',
     'Car', '#00D4AA', NULL, NULL, 5, 15, 1, 'km',
     1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.4),
-  ('u_easy_cafe', 'easy', 'exploration', 'visit_place',
-    'Coffee Run', 'Visit {place} for a quick break.',
-    'Coffee', '#8B5CF6', 'cafe', 'a café', 1, NULL, 1, 'visit',
+  ('u_easy_drive_m', 'easy', 'driving', 'drive_distance',
+    'Quick Spin', 'Drive {target} {unit} to get moving.',
+    'Car', '#00D4AA', NULL, NULL, 300, 1000, 100, 'm',
+    1, NULL, NULL, NULL, NULL, 0.9, NULL, 1.2),
+  ('u_easy_speed', 'easy', 'driving', 'reach_speed',
+    'Pick Up The Pace', 'Reach {target} {unit} on your drive today.',
+    'Gauge', '#F59E0B', NULL, NULL, 40, 60, 5, 'km/h',
     1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.3),
-  ('u_easy_restaurant', 'easy', 'exploration', 'visit_place',
-    'Grab a Bite', 'Stop by {place} and refuel.',
-    'MapPin', '#F59E0B', 'restaurant', 'a restaurant', 1, NULL, 1, 'visit',
-    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.1),
-  ('u_easy_park', 'easy', 'exploration', 'visit_place',
-    'Fresh Air', 'Take a break at {place}.',
-    'Mountain', '#22C55E', 'park', 'a park', 1, NULL, 1, 'visit',
-    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.0),
   ('u_easy_photo', 'easy', 'photo', 'photo_capture',
     'Snap It', 'Take {target} {unit} on your drive today.',
     'Camera', '#FF3B6F', NULL, NULL, 1, 2, 1, 'photos',
@@ -975,21 +1007,13 @@ INSERT INTO public.quest_templates (
     'Distance Grinder', 'Cover {target} {unit} on the road today.',
     'Route', '#FF6B35', NULL, NULL, 25, 60, 5, 'km',
     1, NULL, NULL, NULL, NULL, 1.1, NULL, 1.3),
-  ('u_med_mall', 'medium', 'exploration', 'visit_place',
-    'Mall Run', 'Visit {place} today.',
-    'Store', '#EC4899', 'mall', 'a shopping mall', 1, NULL, 1, 'visit',
-    1, NULL, NULL, NULL, NULL, 1.1, NULL, 1.2),
-  ('u_med_cafe_hop', 'medium', 'exploration', 'visit_places',
-    'Café Hop', 'Visit {target} different cafés.',
-    'Coffee', '#8B5CF6', 'cafe', 'a café', 2, 3, 1, 'places',
+  ('u_med_speed', 'medium', 'driving', 'reach_speed',
+    'Highway Ready', 'Reach {target} {unit} on your drive today.',
+    'Gauge', '#F59E0B', NULL, NULL, 70, 90, 5, 'km/h',
     1, NULL, NULL, NULL, NULL, 1.15, NULL, 1.2),
   ('u_med_friend', 'medium', 'social', 'make_friend',
     'New Connection', 'Make {target} new {unit} on Driveverse.',
     'Users', '#FF3B6F', NULL, NULL, 1, NULL, 1, 'friend',
-    1, NULL, NULL, NULL, NULL, 1.2, NULL, 1.2),
-  ('u_med_viewpoint', 'medium', 'scenic', 'visit_place',
-    'Scenic Detour', 'Reach {place} and soak in the view.',
-    'Mountain', '#00D4AA', 'viewpoint', 'a scenic viewpoint', 1, NULL, 1, 'visit',
     1, NULL, NULL, NULL, NULL, 1.2, NULL, 1.2),
 
   -- ── HARD ────────────────────────────────────────────────────────
@@ -1001,14 +1025,10 @@ INSERT INTO public.quest_templates (
     'Long Haul', 'Log a serious {target} {unit} on the road.',
     'Flame', '#FF6B35', NULL, NULL, 40, 90, 10, 'km',
     1, NULL, NULL, NULL, NULL, 1.3, NULL, 1.2),
-  ('u_hard_explore', 'hard', 'exploration', 'visit_places',
-    'City Explorer', 'Visit {target} different places today.',
-    'Compass', '#3B82F6', 'any', 'a new place', 4, 5, 1, 'places',
-    1, NULL, NULL, NULL, NULL, 1.4, 'explorer_10', 1.2),
-  ('u_hard_viewpoints', 'hard', 'scenic', 'visit_places',
-    'Scenic Expedition', 'Reach {target} different viewpoints.',
-    'Mountain', '#00D4AA', 'viewpoint', 'a scenic viewpoint', 2, 3, 1, 'viewpoints',
-    1, NULL, NULL, NULL, NULL, 1.35, 'scenic_10', 1.1),
+  ('u_hard_speed', 'hard', 'driving', 'reach_speed',
+    'Top Speed', 'Reach {target} {unit} on your drive today.',
+    'Gauge', '#EF4444', NULL, NULL, 100, 130, 5, 'km/h',
+    1, NULL, NULL, NULL, NULL, 1.35, NULL, 1.2),
   ('u_hard_friends', 'hard', 'social', 'make_friend',
     'Social Butterfly', 'Make {target} new {unit} today.',
     'Users', '#FF3B6F', NULL, NULL, 2, 3, 1, 'friends',
