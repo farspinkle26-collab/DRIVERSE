@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import * as Location from "expo-location";
 import {
   mergeOnlineUsers,
+  pruneRecentlyOffline,
   STALE_AFTER_MS,
   type OnlineUser,
   type ProblemSignal,
@@ -208,6 +209,19 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   }, []);
 
   // ─── The HTTP fallback sweep ─────────────────────────────
+  //
+  // This is also the *only* thing that can undo a lost presence "leave".
+  // `goOffline` untracks and flips `user_locations.is_online` to false, but if
+  // the untrack push times out or errors — the same failure mode
+  // `publishPosition` already has to guard `track()` against — every other
+  // device's presence state still carries that driver's last-tracked payload,
+  // which is fresh by timestamp for up to `STALE_AFTER_MS` and would keep
+  // rendering them as online with no error anywhere: exactly "I turned
+  // visibility off but other people can still see me." The directory poll
+  // fixing *appearing* online without fixing *disappearing* the same way was
+  // the asymmetry — so this sweep now also asks who explicitly went offline
+  // recently, and prunes them out of `presenceUsers` directly rather than
+  // trusting presence to notice on its own.
   const fetchDirectory = useCallback(
     async (selfId: string) => {
       const since = new Date(Date.now() - STALE_AFTER_MS).toISOString();
@@ -223,22 +237,47 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
           .neq("user_id", selfId)
           .limit(200);
 
+      // Recently flipped to `is_online: false` — the trigger that stamps
+      // `updated_at` on every update means a driver who just went offline is
+      // the *newest* row here, not a stale one, so this always catches a
+      // go-offline within one poll interval.
+      const runRecentlyOffline = () =>
+        supabase
+          .from("user_locations")
+          .select("user_id, updated_at")
+          .eq("is_online", false)
+          .gte("updated_at", since)
+          .neq("user_id", selfId)
+          .limit(200);
+
       try {
-        let { data, error } = await run(problemColumnsRef.current ? withProblem : base);
+        const [{ data, error }, { data: offlineData, error: offlineError }] = await Promise.all([
+          run(problemColumnsRef.current ? withProblem : base),
+          runRecentlyOffline(),
+        ]);
+        let rowsData = data;
+        let rowsError = error;
 
         // 42703 = undefined_column: this project hasn't run
         // database_migration_problem_signal.sql yet. Positions still work.
-        if (error && (error as { code?: string }).code === "42703" && problemColumnsRef.current) {
+        if (rowsError && (rowsError as { code?: string }).code === "42703" && problemColumnsRef.current) {
           problemColumnsRef.current = false;
-          ({ data, error } = await run(base));
+          ({ data: rowsData, error: rowsError } = await run(base));
         }
 
-        if (error) {
-          console.warn("[onlineUsers] user_locations sweep failed:", error.message);
+        if (offlineError) {
+          console.warn("[onlineUsers] recently-offline sweep failed:", offlineError.message);
+        } else if (offlineData && offlineData.length > 0) {
+          const recentlyOfflineIds = (offlineData as { user_id: string }[]).map((r) => r.user_id);
+          setPresenceUsers((prev) => pruneRecentlyOffline(prev, recentlyOfflineIds));
+        }
+
+        if (rowsError) {
+          console.warn("[onlineUsers] user_locations sweep failed:", rowsError.message);
           return;
         }
 
-        const rows = ((data ?? []) as unknown as LocationRow[]).filter(
+        const rows = ((rowsData ?? []) as unknown as LocationRow[]).filter(
           (r) => typeof r.latitude === "number" && typeof r.longitude === "number"
         );
 
@@ -515,9 +554,20 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
 
     if (channelRef.current) {
       try {
-        await channelRef.current.untrack();
-      } catch {
-        // Silent
+        // `untrack` resolves with a status rather than throwing — same as
+        // `track()` in `publishPosition`, and the same failure this file
+        // already treats seriously there: a channel that answers "timed
+        // out" here means the leave never reached the server, and other
+        // devices' presence state keeps this driver until their own
+        // `fetchDirectory` sweep prunes them via the recently-offline check
+        // above. Logged so a stuck "visible after going offline" report has
+        // something to point at instead of silence.
+        const status = await channelRef.current.untrack();
+        if (status !== "ok") {
+          console.warn(`[onlineUsers] untrack returned "${status}" on going offline`);
+        }
+      } catch (e) {
+        console.warn("[onlineUsers] untrack threw on going offline:", (e as Error)?.message ?? e);
       }
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
@@ -525,12 +575,18 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
 
     if (userId) {
       try {
-        await supabase
+        const { error } = await supabase
           .from("user_locations")
           .update({ is_online: false })
           .eq("user_id", userId);
-      } catch {
-        // Silent
+        if (error) {
+          // The other half of "still visible after going offline": if this
+          // write fails, every other device's fallback sweep still finds
+          // `is_online: true` and keeps showing this driver.
+          console.warn("[onlineUsers] is_online=false update failed:", error.message);
+        }
+      } catch (e) {
+        console.warn("[onlineUsers] is_online=false update threw:", (e as Error)?.message ?? e);
       }
     }
 

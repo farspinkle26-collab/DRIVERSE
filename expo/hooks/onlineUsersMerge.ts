@@ -83,3 +83,28 @@ export function mergeOnlineUsers(
   }
   return [...merged.values()];
 }
+
+/**
+ * Drops anyone in `presence` whose `user_locations` row has just told us
+ * `is_online: false`.
+ *
+ * Presence has no expiry of its own — a driver's last-tracked entry sits in
+ * `channel.presenceState()` exactly as it was until an explicit `leave`
+ * arrives, which never happens if `untrack()` timed out or errored on the
+ * way out (`useOnlineUsers.ts`'s `goOffline` — the same failure category
+ * `publishPosition`'s `track()` already had to guard against). That stale
+ * entry is still fresh by timestamp for up to `STALE_AFTER_MS`, so
+ * `mergeOnlineUsers` alone would keep rendering a driver who explicitly
+ * turned visibility off. The `user_locations` poll is the one path
+ * unaffected by presence's own failure mode, so it is what gets to say "no,
+ * really, they're gone" — this is that override, kept pure and separate
+ * from the merge rule itself so it can be pinned by a test the same way.
+ */
+export function pruneRecentlyOffline(
+  presence: OnlineUser[],
+  recentlyOfflineIds: Iterable<string>
+): OnlineUser[] {
+  const offline = recentlyOfflineIds instanceof Set ? recentlyOfflineIds : new Set(recentlyOfflineIds);
+  if (offline.size === 0) return presence;
+  return presence.filter((u) => !offline.has(u.user_id));
+}
