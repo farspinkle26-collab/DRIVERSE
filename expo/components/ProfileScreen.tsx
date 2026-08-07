@@ -79,6 +79,7 @@ import {
   X,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useParty } from "@/hooks/usePartyStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
@@ -364,6 +365,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
+  // Convoy invites addressed to me — already loaded and kept live by
+  // `usePartyStore`'s own realtime subscription (`party_members` inserts/
+  // updates for my user id), so this is a straight reuse, not a new fetch
+  // path. See the NOTIFICATIONS sheet below.
+  const { invites: convoyInvites, acceptInvite: acceptConvoyInvite, declineInvite: declineConvoyInvite } = useParty();
 
   const isSelf = !userId || userId === user?.id;
   const targetId = isSelf ? user?.id : userId;
@@ -696,7 +702,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const otherCars = cars.filter((c) => c.id !== primaryCar?.id);
 
   const unreadMessages = messages.filter((m) => !m.is_read && m.receiver_id === user?.id).length;
-  const notifCount = pendingRequests.length;
+  const notifCount = pendingRequests.length + convoyInvites.length;
 
   // ─── Actions: avatar / name (self) ─────────────────────────
   const pickAndSetAvatar = useCallback(async (useCamera: boolean) => {
@@ -986,6 +992,21 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     await supabase.from("friends").delete().eq("id", friendshipId);
     await Promise.all([loadInboxes(), loadFriends(), loadFriendState()]);
   }, [loadInboxes, loadFriends, loadFriendState]);
+
+  // ─── Actions: convoy invites ────────────────────────────────
+  const handleAcceptConvoyInvite = useCallback(async (partyId: string) => {
+    const result = await acceptConvoyInvite(partyId);
+    if (result.ok) {
+      setNotifOpen(false);
+      router.push("/convoy" as any);
+    } else {
+      appAlert("Couldn't join", result.message ?? "Something went wrong.");
+    }
+  }, [acceptConvoyInvite, router]);
+
+  const handleDeclineConvoyInvite = useCallback(async (partyId: string) => {
+    await declineConvoyInvite(partyId);
+  }, [declineConvoyInvite]);
 
   const handleSearchFriends = useCallback(async () => {
     if (!friendQuery.trim() || !user) return;
@@ -2052,6 +2073,40 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
             </Pressable>
           </View>
           <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
+            {/* Straight off `useParty().invites` — a live DB query
+                (`party_members` rows addressed to me with `status:
+                "invited"`), not a client-side log. It only leaves this list
+                when the invite is actually accepted or declined, so it can
+                never go stale or vanish on its own. */}
+            <Text style={styles.overline}>CONVOY INVITES</Text>
+            {convoyInvites.length === 0 ? (
+              <ProfileMessage
+                icon={Users}
+                heading="Nothing waiting"
+                body="When another driver invites you into their convoy, it shows up here until you accept or decline it."
+              />
+            ) : (
+              convoyInvites.map((invite) => (
+                <DriverRow
+                  key={invite.id}
+                  name={invite.leader_name}
+                  meta={`invited you to ${invite.party_name}`}
+                  avatar={invite.leader_avatar}
+                  onPress={() => { setNotifOpen(false); router.push("/convoy" as any); }}
+                  action={{
+                    label: "Accept",
+                    icon: <Check size={ICON_MD} color={colors.racingRed} strokeWidth={ICON_STROKE} />,
+                    onPress: () => handleAcceptConvoyInvite(invite.party_id),
+                  }}
+                  secondaryAction={{
+                    label: "Decline",
+                    icon: <X size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />,
+                    onPress: () => handleDeclineConvoyInvite(invite.party_id),
+                  }}
+                />
+              ))
+            )}
+
             <Text style={styles.overline}>FRIEND REQUESTS</Text>
             {pendingRequests.length === 0 ? (
               <ProfileMessage
