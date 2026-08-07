@@ -8,14 +8,16 @@
 //   • an objective-type registry so new quest kinds slot in cleanly
 //   • presentation helpers (labels, colours, progress formatting)
 //
-// The quests are **universal**: distances, generic place categories
-// (a café, a mall, a park…), and social goals that make sense for a
-// driver anywhere on Earth — not tied to any one country.
+// The quests are **universal**: distance (km or m) and speed goals, plus
+// social/photo goals that make sense for a driver anywhere on Earth — not
+// tied to any one country. There are deliberately no place-based quests
+// ("visit a café", etc.) — that needs a places API this app doesn't have
+// a reliable one for yet. See EVENT_FOR_OBJECTIVE for the full list.
 //
 // Quests are **auto-completed**. Progress is never set by the user; it is
-// driven only by real indicators (distance driven, a friend made, a place
-// visited) via the `record_quest_event` RPC and database triggers. When an
-// indicator reaches the target the server grants the rewards. See
+// driven only by real indicators (distance driven, top speed reached, a
+// friend made) via the `record_quest_event` RPC and database triggers. When
+// an indicator reaches the target the server grants the rewards. See
 // EVENT_FOR_OBJECTIVE for the objective → indicator routing.
 //
 // Adding a future quest type is a two-step, additive change:
@@ -38,32 +40,13 @@ export type QuestCategory =
   | "eco"
   | "streak";
 
-// Generic, worldwide place categories. These are *kinds* of places, not
-// specific named locations, so a quest like "visit a café" works anywhere.
-export type PlaceCategory =
-  | "cafe"
-  | "restaurant"
-  | "mall"
-  | "park"
-  | "gym"
-  | "viewpoint"
-  | "landmark"
-  | "fuel"
-  | "ev_station"
-  | "workshop"
-  | "any";
-
-/** @deprecated Use PlaceCategory. Kept as an alias for older imports. */
-export type PoiCategory = PlaceCategory;
-
 // How a quest's progress is measured. Extend this union (and OBJECTIVES
 // below) to introduce new quest mechanics. Every objective maps to a
 // real-world indicator via EVENT_FOR_OBJECTIVE.
 export type ObjectiveType =
   | "drive_distance"
   | "night_drive"
-  | "visit_place"
-  | "visit_places"
+  | "reach_speed"
   | "make_friend"
   | "photo_capture";
 
@@ -71,15 +54,14 @@ export type ObjectiveType =
 // (and DB triggers) emit these via record_quest_event.
 export type QuestEventType =
   | "drive_distance"
-  | "visit_place"
+  | "reach_speed"
   | "make_friend"
   | "photo_capture";
 
 export const EVENT_FOR_OBJECTIVE: Record<ObjectiveType, QuestEventType> = {
   drive_distance: "drive_distance",
   night_drive: "drive_distance",
-  visit_place: "visit_place",
-  visit_places: "visit_place",
+  reach_speed: "reach_speed",
   make_friend: "make_friend",
   photo_capture: "photo_capture",
 };
@@ -105,7 +87,7 @@ export interface DailyQuest {
   accent_color: string;
   category: QuestCategory;
   objective_type: ObjectiveType;
-  objective_category: PlaceCategory | null; // place kind an indicator must match
+  objective_category: string | null; // reserved for future objective sub-typing; unused today
   target: number;
   progress: number;
   unit: string;
@@ -214,47 +196,12 @@ export interface ObjectiveMeta {
 }
 
 export const OBJECTIVES: Record<ObjectiveType, ObjectiveMeta> = {
-  drive_distance: { type: "drive_distance", label: "Drive distance", progressNoun: "km driven", incremental: true },
-  night_drive: { type: "night_drive", label: "Night drive", progressNoun: "km driven", incremental: true },
-  visit_place: { type: "visit_place", label: "Visit a place", progressNoun: "visit", incremental: false },
-  visit_places: { type: "visit_places", label: "Visit places", progressNoun: "places visited", incremental: true },
+  drive_distance: { type: "drive_distance", label: "Drive distance", progressNoun: "driven", incremental: true },
+  night_drive: { type: "night_drive", label: "Night drive", progressNoun: "driven", incremental: true },
+  reach_speed: { type: "reach_speed", label: "Reach a speed", progressNoun: "km/h reached", incremental: false },
   make_friend: { type: "make_friend", label: "Make friends", progressNoun: "friends made", incremental: true },
   photo_capture: { type: "photo_capture", label: "Capture photos", progressNoun: "photos taken", incremental: true },
 };
-
-// ─── Place presentation ──────────────────────────────────────────────
-export const PLACE_CATEGORY_LABELS: Record<PlaceCategory, string> = {
-  cafe: "Café",
-  restaurant: "Restaurant",
-  mall: "Shopping Mall",
-  park: "Park",
-  gym: "Gym",
-  viewpoint: "Viewpoint",
-  landmark: "Landmark",
-  fuel: "Fuel Stop",
-  ev_station: "EV Station",
-  workshop: "Workshop",
-  any: "Place",
-};
-
-export const PLACE_CATEGORY_COLORS: Record<PlaceCategory, string> = {
-  cafe: "#8B5CF6",
-  restaurant: "#F59E0B",
-  mall: "#EC4899",
-  park: "#22C55E",
-  gym: "#EF4444",
-  viewpoint: "#00D4AA",
-  landmark: "#3B82F6",
-  fuel: "#F59E0B",
-  ev_station: "#22C55E",
-  workshop: "#FF6B35",
-  any: "#3B82F6",
-};
-
-/** @deprecated Use PLACE_CATEGORY_LABELS. */
-export const POI_CATEGORY_LABELS = PLACE_CATEGORY_LABELS;
-/** @deprecated Use PLACE_CATEGORY_COLORS. */
-export const POI_CATEGORY_COLORS = PLACE_CATEGORY_COLORS;
 
 // ─── Presentation helpers ────────────────────────────────────────────
 export function progressRatio(quest: Pick<DailyQuest, "progress" | "target">): number {

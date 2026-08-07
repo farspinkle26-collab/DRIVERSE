@@ -7,20 +7,21 @@ of parametric **templates**.
 Two principles define the system:
 
 1. **Universal / global.** Quests are worldwide by design. They describe generic
-   goals — *reach/drive N km*, *visit a café*, *visit a mall*, *make a new
-   friend*, *take a photo* — using generic **place categories** ("a café", "a
-   shopping mall") rather than any specific, country-bound location. One
-   catalogue serves every user on Earth. The "quest day" rolls over at **UTC**
-   midnight so everyone refreshes at the same instant.
+   goals — *drive N km*, *drive N m*, *reach N km/h*, *make a new friend*, *take
+   a photo* — with no dependency on any specific, country-bound location. There
+   are deliberately **no place-based quests** ("visit a café", "visit a mall")
+   — the app has no reliable places API to verify a visit against, so that
+   objective type doesn't exist. One catalogue serves every user on Earth. The
+   "quest day" rolls over at **UTC** midnight so everyone refreshes at the same
+   instant.
 2. **Auto-completed — never self-marked.** A quest cannot be marked done by the
    user. It finishes **only when its real indicator/calculation reaches the
-   target**: distance actually driven, friends actually made, places actually
-   visited. Rewards (XP, coins, streak, badges) are granted automatically at
-   that moment.
+   target**: distance actually driven, a top speed actually reached, friends
+   actually made. Rewards (XP, coins, streak, badges) are granted automatically
+   at that moment.
 
-Templates × numeric parameter ranges × place categories × time windows produce a
-very large space of distinct quests without any generative model or location
-database.
+Templates × numeric parameter ranges × time windows produce a large space of
+distinct quests without any generative model or location database.
 
 ---
 
@@ -52,6 +53,7 @@ database.
 │                       award_badges()          ← milestone unlocks       │
 │                       expire_stale_quests()   ← pg_cron daily refresh   │
 │  Triggers             saved_routes / trips  → drive_distance progress   │
+│                                              → reach_speed progress      │
 │                       friends (accepted)    → make_friend progress      │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -82,21 +84,19 @@ Objectives (`objective_type`) and the real indicator that drives each
 
 | Objective | Meaning | Indicator event | Example |
 |-----------|---------|-----------------|---------|
-| `drive_distance` | Reach/drive N km | `drive_distance` (km) | "Drive 10 km today" |
+| `drive_distance` | Drive N km or N m | `drive_distance` (km; converted to m if the quest's unit is `m`) | "Drive 10 km today" / "Drive 500 m to get moving" |
 | `night_drive` | Distance, night-flavoured | `drive_distance` (km) | "Long Haul — 60 km" |
-| `visit_place` | Visit a place of a category | `visit_place` (+1, category) | "Visit a café" |
-| `visit_places` | Visit N different places | `visit_place` (+1, category) | "Café Hop — 3 cafés" |
+| `reach_speed` | Reach a top speed of N km/h | `reach_speed` (km/h — tracks the best speed seen, not a sum) | "Reach 80 km/h today" |
 | `make_friend` | Make N new friends | `make_friend` (+1) | "Make a new friend" |
 | `photo_capture` | Take N photos | `photo_capture` (+N) | "Snap 2 photos" |
 
-**Place categories** are generic and worldwide: `cafe`, `restaurant`, `mall`,
-`park`, `gym`, `viewpoint`, `landmark`, `fuel`, `ev_station`, `workshop`, `any`.
-Templates render them into a friendly phrase via `{place}` (e.g. "a café", "a
-shopping mall") — no specific named location is ever required.
+There are deliberately **no place-based objectives** ("visit a café", "visit a
+mall") — the app has no reliable places API to verify a visit against.
 
-The `points_of_interest` table remains for optional future location-specific
-packs but is **not used** by the universal set, and its old Indonesia-only sample
-rows are removed by the migration.
+The `points_of_interest` table and the `poi_category` / `place_label` /
+`{place}` template plumbing remain in the schema for an optional future
+location-specific pack, but nothing in the current universal catalogue uses
+them.
 
 ---
 
@@ -137,20 +137,21 @@ legacy `complete_quest` / `update_quest_progress` functions are dropped.
 - **Distance** — a DB trigger on `saved_routes` and `trips` fires
   `drive_distance` with the real `distance_km` the moment a drive is recorded.
   Fully automatic; no client call.
+- **Top speed** — the same trigger fires `reach_speed` with the real
+  `top_speed_kmh` from the same row. Fully automatic.
 - **Friends** — a DB trigger on `friends` fires `make_friend` for both users when
   a friendship becomes `accepted`. Fully automatic.
-- **Place visits / photos** — the client calls `record_quest_event` (via
-  `useQuests().recordPlaceVisit(category)` / `recordPhoto(n)`) from a genuine
-  check-in or capture action.
+- **Photos** — the client calls `record_quest_event` (via
+  `useQuests().recordPhoto(n)`) from a genuine capture action.
 
 ```ts
 const {
   quests, activeQuests, allDone,
   coins, streak, badges, earnedBadgeIds,
   generateQuests,     // force (re)generate today's set
-  recordEvent,        // recordEvent(eventType, amount?, category?)
+  recordEvent,        // recordEvent(eventType, amount?)
   recordDrive,        // recordDrive(km)      → drive_distance
-  recordPlaceVisit,   // recordPlaceVisit(category) → visit_place (+1)
+  recordSpeed,        // recordSpeed(kmh)     → reach_speed
   recordPhoto,        // recordPhoto(count)   → photo_capture
 } = useQuests();
 ```
@@ -189,12 +190,12 @@ Adding a new quest type is **additive**:
    register it in `OBJECTIVES` and `EVENT_FOR_OBJECTIVE` in `questEngine.ts`, and
    route its event in `record_quest_event`. Wire the indicator (a client call or
    a DB trigger on the real table).
-2. **New place category** — just use it in a template's `poi_category` /
-   `place_label`; add a label/colour in `PLACE_CATEGORY_LABELS` /
-   `PLACE_CATEGORY_COLORS`.
-3. **New badges** — insert `badges` rows; `award_badges` evaluates them.
-4. **Seasonal / event quests** — set `required_event` on templates and pass the
+2. **New badges** — insert `badges` rows; `award_badges` evaluates them.
+3. **Seasonal / event quests** — set `required_event` on templates and pass the
    matching `p_event` to `ensure_daily_quests`.
+4. **Place-based quests** — deliberately not supported yet; the
+   `points_of_interest` table and the `poi_category` / `place_label` / `{place}`
+   template plumbing are still in the schema for when a real places API exists.
 
 ---
 
