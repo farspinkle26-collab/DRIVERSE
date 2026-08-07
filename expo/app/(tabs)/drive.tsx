@@ -47,6 +47,7 @@ import HubStatStrip from "@/components/HubStatStrip";
 import ShareCardModal from "@/components/ShareCardModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import { tripCode } from "@/lib/tripStats";
+import { speedUnitForCountry } from "@/lib/speedUnits";
 import {
   borderWidth,
   colors,
@@ -241,7 +242,8 @@ function HubMessage({
 export default function DriveHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const [view, setView] = useState<HubView>("trips");
   const [shareQuest, setShareQuest] = useState<DailyQuest | null>(null);
 
@@ -285,9 +287,10 @@ export default function DriveHubScreen() {
           traceWidth={CARD_INNER_WIDTH}
           showMenu={false}
           onPress={() => router.push(`/trip/${trip.id}` as any)}
+          speedUnit={speedUnit}
         />
       )),
-    [trips, router]
+    [trips, router, speedUnit]
   );
 
   return (

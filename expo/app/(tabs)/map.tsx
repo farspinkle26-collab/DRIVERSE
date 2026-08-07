@@ -191,6 +191,7 @@ import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { MAPBOX_ACCESS_TOKEN, mapboxStyleUrl } from "@/constants/mapbox";
+import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUnits";
 import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 import { appAlert } from "@/lib/appAlert";
@@ -885,6 +886,11 @@ export default function MapScreen() {
     clearProblem,
   } = useOnlineUsers();
   const { user } = useAuth();
+  // Every raw km/h reading on this screen — the live speedometer, the
+  // recording HUD, the trip summary — renders through this. See
+  // lib/speedUnits.ts's header for why it always follows the signed-in
+  // driver's own country rather than anything about the drive itself.
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const { activeCar } = useActiveCar();
   const {
     party,
@@ -3127,8 +3133,8 @@ export default function MapScreen() {
                 style={styles.speedometerBox}
                 contentStyle={styles.speedometerContent}
               >
-                <Text style={styles.speedometerValue}>{currentSpeed.toFixed(0)}</Text>
-                <Text style={styles.speedometerUnit}>km/h</Text>
+                <Text style={styles.speedometerValue}>{convertSpeed(currentSpeed, speedUnit).toFixed(0)}</Text>
+                <Text style={styles.speedometerUnit}>{speedUnitLabel(speedUnit)}</Text>
                 <View style={styles.speedometerGearRow}>
                   <View style={styles.speedometerGearDot} />
                   <Text style={styles.speedometerGearText}>D</Text>
@@ -3188,8 +3194,8 @@ export default function MapScreen() {
             <View style={styles.drivingStatsRow}>
               <DriveStat label="DIST" value={fmtMeters(tripDistance)} />
               <DriveStat label="TIME" value={fmtTimer(elapsedMs)} />
-              <DriveStat label="AVG" value={liveAvgSpeed.toFixed(0)} unit="km/h" />
-              <DriveStat label="MAX" value={tripTopSpeed.toFixed(0)} unit="km/h" />
+              <DriveStat label="AVG" value={convertSpeed(liveAvgSpeed, speedUnit).toFixed(0)} unit={speedUnitLabel(speedUnit)} />
+              <DriveStat label="MAX" value={convertSpeed(tripTopSpeed, speedUnit).toFixed(0)} unit={speedUnitLabel(speedUnit)} />
               <DriveStat label="XP" value={`+${liveXpEarned}`} />
             </View>
           </Animated.View>
@@ -3258,9 +3264,9 @@ export default function MapScreen() {
             <View style={styles.statsRow}>
               <DriveStat label="TIME" value={fmtTimer(elapsedMs)} unit="h:m:s" />
               <View style={styles.statDivider} />
-              <DriveStat label="AVG" value={avgSpeed.toFixed(1)} unit="km/h" />
+              <DriveStat label="AVG" value={convertSpeed(avgSpeed, speedUnit).toFixed(1)} unit={speedUnitLabel(speedUnit)} />
               <View style={styles.statDivider} />
-              <DriveStat label="TOP" value={tripTopSpeed.toFixed(0)} unit="km/h" />
+              <DriveStat label="TOP" value={convertSpeed(tripTopSpeed, speedUnit).toFixed(0)} unit={speedUnitLabel(speedUnit)} />
             </View>
 
             {xpEarned != null && routeInfo && (
@@ -4781,6 +4787,7 @@ export default function MapScreen() {
         originName={originLabel ?? ""}
         destinationName={destinationLabel ?? ""}
         onSaved={(routeId) => setSavedRouteId(routeId)}
+        speedUnit={speedUnit}
       />
 
       {/* --- Share the just-saved drive as a trip card --- */}

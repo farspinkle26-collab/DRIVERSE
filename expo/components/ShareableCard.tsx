@@ -48,6 +48,8 @@ import {
 } from "@/lib/tripStats";
 import { decodePolyline } from "@/lib/polyline";
 import { speedDomain, speedProfileForTrip } from "@/lib/speedTrace";
+import { speedUnitForCountry } from "@/lib/speedUnits";
+import { useAuth } from "@/hooks/useAuthStore";
 import { PlatinumBadge } from "@/components/platinum/PlatinumBadge";
 import { platinum } from "@/constants/platinum";
 import {
@@ -378,10 +380,15 @@ function TripVariant({
   speedHeat = true,
   mapImageUri,
 }: TripSharePayload) {
+  // The card always represents the signed-in driver's own trip, so their own
+  // regional unit is also the only one available here — the payload carries
+  // no driver identity to look a different one up from. See lib/speedUnits.ts.
+  const { user } = useAuth();
+  const speedUnit = speedUnitForCountry(user?.country);
   const distance = formatDistance(trip.distance_km);
   const duration = formatDuration(trip.duration_seconds);
-  const avg = formatSpeed(trip.avg_speed_kmh);
-  const top = formatSpeed(trip.top_speed_kmh ?? 0);
+  const avg = formatSpeed(trip.avg_speed_kmh, speedUnit);
+  const top = formatSpeed(trip.top_speed_kmh ?? 0, speedUnit);
   const score = driveScore(trip);
   const stamp = formatShareStamp(trip.completed_at);
 
@@ -466,7 +473,7 @@ function TripVariant({
             )}
           </CutCornerSurface>
           {heat ? (
-            <SpeedLegend topSpeedKmh={domain.max} width={CONTENT_WIDTH} />
+            <SpeedLegend topSpeedKmh={domain.max} width={CONTENT_WIDTH} unit={speedUnit} />
           ) : null}
         </View>
       ) : null}

@@ -23,7 +23,7 @@
  *   settings   a utility list: hairline dividers, no cards
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -61,7 +61,6 @@ import {
   MailOpen,
   MapPin,
   MessageCircle,
-  Pencil,
   Plus,
   Radio,
   Route as RouteIcon,
@@ -121,7 +120,8 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
-import { tripCode } from "@/lib/tripStats";
+import { tripCode, formatSpeed } from "@/lib/tripStats";
+import { speedUnitForCountry, type SpeedUnit } from "@/lib/speedUnits";
 import { supabase } from "@/lib/supabase";
 import { generateCarImage } from "@/lib/generateCarImage";
 import { resizeForUpload } from "@/lib/resizeForUpload";
@@ -361,7 +361,11 @@ function Sheet({
 export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, updateProfilePicture, updateCountry, logout } = useAuth();
+  const { user, isAuthenticated, updateProfilePicture, logout } = useAuth();
+  // Trips shown here may belong to whoever's profile this is, but the unit
+  // they render in always follows the signed-in viewer's own country — see
+  // lib/speedUnits.ts's header for why.
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -433,10 +437,6 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [premiumOpen, setPremiumOpen] = useState(false);
   const [premiumTargetCar, setPremiumTargetCar] = useState<CarItem | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [editingCountry, setEditingCountry] = useState(false);
-  const [countryDraft, setCountryDraft] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [tripMenuTrip, setTripMenuTrip] = useState<TripItem | null>(null);
   const [showShareRank, setShowShareRank] = useState(false);
@@ -740,23 +740,13 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     ]);
   }, [isSelf, pickAndSetAvatar]);
 
-  const saveName = useCallback(async () => {
-    const next = nameDraft.trim();
-    if (!user || !next) {
-      setEditingName(false);
-      return;
-    }
-    setProfileName(next);
-    setEditingName(false);
-    await supabase.from("profiles").update({ name: next }).eq("id", user.id);
-  }, [nameDraft, user]);
-
-  const saveCountry = useCallback(async () => {
-    const next = countryDraft.trim();
-    setEditingCountry(false);
-    if (!user || !next) return;
-    await updateCountry(next);
-  }, [countryDraft, user, updateCountry]);
+  // Name and nation are locked once set — both are enforced server-side by
+  // `lock_profile_identity_trigger` (database_migration_lock_identity.sql),
+  // since either one can be used to reroll the regional speed unit
+  // (lib/speedUnits.ts). There is deliberately no edit affordance for either
+  // field below: both are always already set by the time this screen is
+  // reachable (name at signup, nation during onboarding), so an editable
+  // control here would only ever fail.
 
   // ─── Actions: Founder redeem ─────────────────────────────────
   //
@@ -1223,82 +1213,37 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
           <View style={styles.identityInfo}>
             <View style={styles.nameRow}>
-              {editingName ? (
-                <TextInput
-                  style={styles.nameInput}
-                  value={nameDraft}
-                  onChangeText={setNameDraft}
-                  autoFocus
-                  onBlur={saveName}
-                  onSubmitEditing={saveName}
-                  placeholderTextColor={colors.textSecondary}
-                />
-              ) : (
-                <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
-              )}
+              <Text style={styles.userName} numberOfLines={1}>{profileName}</Text>
               {/* Founder and Platinum, next to the name. Distinct from the
                   rank badge below it, which is progression — these two are
                   status marks: one-time redemption, one subscription. */}
               <FounderNameBadge
-                show={viewedIsFounder && !editingName}
+                show={viewedIsFounder}
                 name={profileName}
               />
               <PlatinumNameBadge
-                show={viewedIsPlatinum && !editingName}
+                show={viewedIsPlatinum}
                 name={profileName}
               />
-              {isSelf && !editingName && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit name"
-                  onPress={() => { setNameDraft(profileName); setEditingName(true); }}
-                  hitSlop={spacing.spacingSm}
-                >
-                  <Pencil size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                </Pressable>
-              )}
             </View>
 
             <Text style={styles.rankSubtitle}>{rank.name}</Text>
 
             {isSelf ? (
               <View style={styles.nameRow}>
-                {editingCountry ? (
-                  <TextInput
-                    style={styles.countryInput}
-                    value={countryDraft}
-                    onChangeText={setCountryDraft}
-                    autoFocus
-                    onBlur={saveCountry}
-                    onSubmitEditing={saveCountry}
-                    placeholder="Country"
-                    placeholderTextColor={colors.textSecondary}
-                  />
-                ) : (
-                  <Tag
-                    icon={
-                      user?.country ? (
-                        <Text style={styles.countryFlag}>{flagForCountry(user.country)}</Text>
-                      ) : (
-                        <MapPin size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                      )
-                    }
-                  >
-                    <Text style={styles.tagText} numberOfLines={1}>
-                      {user?.country || "Set your nation"}
-                    </Text>
-                  </Tag>
-                )}
-                {!editingCountry && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Edit nation"
-                    onPress={() => { setCountryDraft(user?.country ?? ""); setEditingCountry(true); }}
-                    hitSlop={spacing.spacingSm}
-                  >
-                    <Pencil size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                  </Pressable>
-                )}
+                <Tag
+                  icon={
+                    user?.country ? (
+                      <Text style={styles.countryFlag}>{flagForCountry(user.country)}</Text>
+                    ) : (
+                      <MapPin size={ICON_SM} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    )
+                  }
+                >
+                  <Text style={styles.tagText} numberOfLines={1}>
+                    {user?.country || "Nation not set"}
+                  </Text>
+                </Tag>
               </View>
             ) : otherCountry ? (
               <View style={styles.nameRow}>
@@ -1487,6 +1432,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 onGenerate={() => openPremium(primaryCar)}
                 onDelete={() => handleDeleteCar(primaryCar.id)}
                 driveStats={statsByCarId[primaryCar.id]}
+                speedUnit={speedUnit}
               />
             ) : (
               <ProfileMessage
@@ -1511,6 +1457,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 isPlatinum={viewedIsPlatinum}
                 onSetPrimary={() => handleSetPrimary(car.id)}
                 onDelete={() => handleDeleteCar(car.id)}
+                speedUnit={speedUnit}
               />
             ))}
 
@@ -1849,6 +1796,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                     showMenu={isSelf}
                     onPress={() => router.push(`/trip/${trip.id}` as any)}
                     onMenuPress={() => setTripMenuTrip(trip)}
+                    speedUnit={speedUnit}
                   />
                 </View>
               ))
@@ -2468,8 +2416,9 @@ function DriverRow({
 }
 
 /** Per-car drive data: distance / avg speed / XP earned in this car. */
-function CarDriveDataRow({ stats }: { stats?: CarDriveStats }) {
+function CarDriveDataRow({ stats, speedUnit = "kmh" }: { stats?: CarDriveStats; speedUnit?: SpeedUnit }) {
   if (!stats || stats.tripCount === 0) return null;
+  const avgSpeed = formatSpeed(stats.avgSpeedKmh, speedUnit);
   return (
     <View style={styles.driveDataRow}>
       <CarDatum
@@ -2478,7 +2427,7 @@ function CarDriveDataRow({ stats }: { stats?: CarDriveStats }) {
         unit="km"
       />
       <View style={styles.verticalDivider} />
-      <CarDatum label="AVG" value={stats.avgSpeedKmh.toFixed(0)} unit="km/h" />
+      <CarDatum label="AVG" value={avgSpeed.value} unit={avgSpeed.unit} />
       <View style={styles.verticalDivider} />
       <CarDatum label="XP" value={stats.totalXp.toLocaleString("en-US")} />
     </View>
@@ -2519,6 +2468,7 @@ function GarageCard({
   isPlatinum,
   onSetPrimary,
   onDelete,
+  speedUnit = "kmh",
 }: {
   car: CarItem;
   isSelf: boolean;
@@ -2528,6 +2478,7 @@ function GarageCard({
   isPlatinum: boolean;
   onSetPrimary: () => void;
   onDelete: () => void;
+  speedUnit?: SpeedUnit;
 }) {
   return (
     <View style={styles.blockCard}>
@@ -2554,7 +2505,7 @@ function GarageCard({
             <Text style={styles.carName} numberOfLines={1}>{car.name}</Text>
           </View>
           <CarSpecLine car={car} />
-          <CarDriveDataRow stats={stats} />
+          <CarDriveDataRow stats={stats} speedUnit={speedUnit} />
         </View>
         {isSelf && (
           <View style={styles.garageCardActions}>
@@ -2594,12 +2545,14 @@ function FeaturedCar({
   onGenerate,
   onDelete,
   driveStats,
+  speedUnit = "kmh",
 }: {
   car: CarItem;
   isSelf: boolean;
   onGenerate: () => void;
   onDelete: () => void;
   driveStats?: CarDriveStats;
+  speedUnit?: SpeedUnit;
 }) {
   const hasRender = !!car.photo_url;
   return (
@@ -2665,7 +2618,7 @@ function FeaturedCar({
             </View>
           </View>
         )}
-        <CarDriveDataRow stats={driveStats} />
+        <CarDriveDataRow stats={driveStats} speedUnit={speedUnit} />
       </CutCornerSurface>
     </View>
   );
@@ -2832,25 +2785,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flexShrink: 1,
   },
-  nameInput: {
-    ...textStyle("displayMd"),
-    color: colors.textPrimary,
-    borderBottomWidth: borderWidth.hairline,
-    borderBottomColor: colors.racingRed,
-    flex: 1,
-    paddingVertical: 0,
-  },
   rankSubtitle: {
     ...textStyle("body"),
     color: colors.racingRed,
-  },
-  countryInput: {
-    ...textStyle("body"),
-    color: colors.textPrimary,
-    borderBottomWidth: borderWidth.hairline,
-    borderBottomColor: colors.racingRed,
-    flex: 1,
-    paddingVertical: 0,
   },
   countryFlag: {
     fontSize: 14,

@@ -6,6 +6,8 @@ import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, P
 import { supabase } from "@/lib/supabase";
 import { decodePolyline } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
+import { useAuth } from "@/hooks/useAuthStore";
+import { speedUnitForCountry } from "@/lib/speedUnits";
 import RenameModal from "@/components/RenameModal";
 import ShareCardModal from "@/components/ShareCardModal";
 import { ICON_STROKE } from "@/components/TripCard";
@@ -79,6 +81,8 @@ export default function TripDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isDark } = useTheme();
+  const { user } = useAuth();
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [car, setCar] = useState<TripCar | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,8 +202,8 @@ export default function TripDetailScreen() {
   const score = trip ? driveScore(trip) : 0;
   const distance = trip ? formatDistance(trip.distance_km) : formatDistance(0);
   const duration = trip ? formatDuration(trip.duration_seconds) : formatDuration(0);
-  const avgSpeed = trip ? formatSpeed(trip.avg_speed_kmh) : formatSpeed(0);
-  const topSpeed = trip ? formatSpeed(trip.top_speed_kmh ?? 0) : formatSpeed(0);
+  const avgSpeed = trip ? formatSpeed(trip.avg_speed_kmh, speedUnit) : formatSpeed(0, speedUnit);
+  const topSpeed = trip ? formatSpeed(trip.top_speed_kmh ?? 0, speedUnit) : formatSpeed(0, speedUnit);
 
   const legendWidth = SCREEN_WIDTH - spacing.spacingXl * 2;
 
@@ -312,7 +316,7 @@ export default function TripDetailScreen() {
 
           {profile.source !== "none" && coords.length > 1 && (
             <View style={styles.legendRow}>
-              <SpeedLegend topSpeedKmh={domain.max} width={legendWidth} />
+              <SpeedLegend topSpeedKmh={domain.max} width={legendWidth} unit={speedUnit} />
             </View>
           )}
 
@@ -359,12 +363,12 @@ export default function TripDetailScreen() {
               <CutCornerCard corners="topRight" cutSize={cut.sm} style={styles.statBox} contentStyle={styles.statBoxContent}>
                 <TrendingUp size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 <Text style={styles.statBoxValue}>{avgSpeed.value}</Text>
-                <Text style={styles.statBoxLabel}>avg km/h</Text>
+                <Text style={styles.statBoxLabel}>avg {avgSpeed.unit}</Text>
               </CutCornerCard>
               <CutCornerCard corners="topRight" cutSize={cut.sm} style={styles.statBox} contentStyle={styles.statBoxContent}>
                 <Gauge size={16} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
                 <Text style={styles.statBoxValue}>{topSpeed.value}</Text>
-                <Text style={styles.statBoxLabel}>top km/h</Text>
+                <Text style={styles.statBoxLabel}>top {topSpeed.unit}</Text>
               </CutCornerCard>
             </View>
 

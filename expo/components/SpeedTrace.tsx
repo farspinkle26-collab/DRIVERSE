@@ -36,6 +36,7 @@ import {
   type SpeedDomain,
 } from "@/lib/speedTrace";
 import { alpha, colors, fontFamily, spacing } from "@/constants/theme";
+import { convertSpeed, type SpeedUnit } from "@/lib/speedUnits";
 
 export interface SpeedTraceProps {
   points: LatLng[];
@@ -176,15 +177,19 @@ export interface SpeedLegendProps {
   /** Top of the ramp, km/h — the number the reddest stretch reached. */
   topSpeedKmh: number;
   width: number;
+  /** The viewer's own regional unit (`speedUnitForCountry`). Defaults to km/h. */
+  unit?: SpeedUnit;
 }
 
 /**
  * The key for the heatmap: a 16pt gradient bar with "0" at one end and the
  * drive's top speed at the other. Without it the colours are decoration; with
  * it they are data, which is the whole difference between this card and a
- * template.
+ * template. The bare number has no unit label next to it by design (it reads
+ * as a key, not a readout) — which is exactly why it has to be converted
+ * before it gets here rather than trusted to carry its own label.
  */
-export function SpeedLegend({ topSpeedKmh, width }: SpeedLegendProps) {
+export function SpeedLegend({ topSpeedKmh, width, unit = "kmh" }: SpeedLegendProps) {
   const barWidth = Math.max(0, width - 96);
   return (
     <View style={legendStyles.row}>
@@ -203,7 +208,7 @@ export function SpeedLegend({ topSpeedKmh, width }: SpeedLegendProps) {
         </Defs>
         <Rect x={0} y={0} width={barWidth} height={6} fill="url(#speedLegend)" />
       </Svg>
-      <Text style={legendStyles.value}>{Math.round(topSpeedKmh)}</Text>
+      <Text style={legendStyles.value}>{Math.round(convertSpeed(topSpeedKmh, unit))}</Text>
     </View>
   );
 }
