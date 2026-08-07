@@ -388,6 +388,15 @@ BEGIN
       SELECT t.* FROM public.quest_templates t
       WHERE t.is_active
         AND t.difficulty = v_diff
+        -- Belt-and-braces against place-category quests, independent of what
+        -- any stray legacy row happens to be named or id'd: this app has no
+        -- reliable places API to verify a visit against, so nothing with a
+        -- poi_category or an objective_type outside the allowed set is ever
+        -- eligible, no matter what is sitting in the table. See the SEED
+        -- section below for why a row like this could exist in the first
+        -- place — this filter is what makes it harmless either way.
+        AND t.poi_category IS NULL
+        AND t.objective_type IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend')
         AND v_level >= t.min_level
         AND (t.max_level IS NULL OR v_level <= t.max_level)
         AND (t.time_windows IS NULL OR v_time_bucket = ANY(t.time_windows))
@@ -974,10 +983,12 @@ ON CONFLICT (id) DO UPDATE SET
 -- 19. SEED — UNIVERSAL QUEST TEMPLATES
 -- =====================================================================
 -- Location-agnostic blueprints: drive a distance (km or m), reach a top
--- speed, or a social/photo goal — valid for a driver anywhere in the
--- world. No place-based quests — this app has no places API to verify a
--- visit against. Targets roll across ranges and combine with time buckets
--- to yield a large, non-repeating combination space.
+-- speed, or make a new friend — valid for a driver anywhere in the world.
+-- Deliberately only these three: no place-based quests (no places API to
+-- verify a visit against) and no photo quests either — kept to exactly the
+-- three indicators this app can measure without either. Targets roll
+-- across ranges and combine with time buckets to yield a large,
+-- non-repeating combination space.
 INSERT INTO public.quest_templates (
   id, difficulty, category, objective_type, title_template, description_template,
   icon, accent_color, poi_category, place_label, param_min, param_max, param_step, unit,
@@ -997,10 +1008,6 @@ INSERT INTO public.quest_templates (
     'Pick Up The Pace', 'Reach {target} {unit} on your drive today.',
     'Gauge', '#F59E0B', NULL, NULL, 40, 60, 5, 'km/h',
     1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.3),
-  ('u_easy_photo', 'easy', 'photo', 'photo_capture',
-    'Snap It', 'Take {target} {unit} on your drive today.',
-    'Camera', '#FF3B6F', NULL, NULL, 1, 2, 1, 'photos',
-    1, NULL, NULL, NULL, NULL, 1.0, NULL, 1.0),
 
   -- ── MEDIUM ──────────────────────────────────────────────────────
   ('u_med_distance', 'medium', 'driving', 'drive_distance',
@@ -1045,5 +1052,47 @@ ON CONFLICT (id) DO UPDATE SET
   time_windows = EXCLUDED.time_windows, weather = EXCLUDED.weather,
   required_event = EXCLUDED.required_event, reward_multiplier = EXCLUDED.reward_multiplier,
   badge_id = EXCLUDED.badge_id, weight = EXCLUDED.weight;
+
+
+-- =====================================================================
+-- 20. CLEANUP — anything outside the allowed set, by characteristic
+-- =====================================================================
+-- Section 16b and 17 above delete legacy place-based templates by a
+-- *guessed* list of ids — the ones this migration's own history happened to
+-- introduce. That list cannot know about rows this repo never inserted:
+-- Driveverse was bootstrapped from a template project, and quests like
+-- "Grab a Bite" (visit a restaurant) or "Mall Run" (visit a shopping mall)
+-- reached some databases as seed data that was never captured in any
+-- tracked migration file here, under ids no DELETE list above could name.
+--
+-- So this section does not delete by id at all. It deletes by the trait
+-- that actually defines a place-category quest — a set `poi_category`, or
+-- an `objective_type` outside the three this app measures without a places
+-- API (drive_distance, night_drive, reach_speed, make_friend; photo_capture
+-- is retired too — see section 19's header). That catches every stray row
+-- regardless of its name, past or future, which is the same reasoning
+-- behind the `ensure_daily_quests()` filter above — this is the same rule
+-- applied to what is already sitting in the table.
+DELETE FROM public.quest_templates
+WHERE poi_category IS NOT NULL
+   OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend');
+
+-- A deleted template does not retract a quest already generated from it —
+-- `daily_quests.template_id` is ON DELETE SET NULL, so a driver looking at
+-- their quest board right now would still see "Grab a Bite" sitting there
+-- until it expired on its own. Expiring it here (not deleting — this
+-- follows the same status transition `ensure_daily_quests()` already uses
+-- for a quest that ran past its `expires_at`) frees that difficulty slot
+-- immediately, so the next call to `ensure_daily_quests()` — which the
+-- client already makes on every quest-tab load — regenerates it from the
+-- now-clean template pool instead.
+UPDATE public.daily_quests
+SET status = 'expired'
+WHERE status = 'active'
+  AND (
+    poi_id IS NOT NULL
+    OR objective_category IS NOT NULL
+    OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend')
+  );
 
 -- Done. See DAILY_QUEST_SYSTEM.md for architecture and client usage.
