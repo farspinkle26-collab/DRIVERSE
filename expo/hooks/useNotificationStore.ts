@@ -107,11 +107,10 @@ export const [NotificationContext, useNotifications] = createContextHook(() => {
     type: 'chat' | 'request' | 'system' = 'chat',
     data?: any
   ) => {
-    if (!state.permissionGranted) {
-      console.log('Notification permission not granted');
-      return;
-    }
-
+    // The in-app banner/list must not depend on OS push permission — most
+    // drivers never grant that, and it's the in-app toast (not a system
+    // push) that has to appear on any screen. Permission only gates the
+    // native/browser notification below.
     const notificationData: NotificationData = {
       id: Date.now().toString(),
       title,
@@ -153,7 +152,7 @@ export const [NotificationContext, useNotifications] = createContextHook(() => {
         trigger: null, // Show immediately
       });
     }
-  }, [state.permissionGranted]);
+  }, []);
 
   // Show chat notification
   const showChatNotification = useCallback(async (

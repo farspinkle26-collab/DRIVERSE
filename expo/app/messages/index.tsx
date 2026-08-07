@@ -224,19 +224,32 @@ export default function MessagesScreen() {
     setComposeOpen(true);
     if (!user || friends.length > 0) return;
     setFriendsLoading(true);
+    // `friends.user_id`/`friend_id` reference `auth.users`, not
+    // `public.profiles` — no FK PostgREST can embed through, so profiles are
+    // fetched separately and joined client-side.
     const { data: sent } = await supabase
       .from("friends")
-      .select("friend_id, status, profiles!friends_friend_id_fkey(name, avatar)")
+      .select("friend_id, status")
       .eq("user_id", user.id)
       .eq("status", "accepted");
     const { data: received } = await supabase
       .from("friends")
-      .select("user_id, status, profiles!friends_user_id_fkey(name, avatar)")
+      .select("user_id, status")
       .eq("friend_id", user.id)
       .eq("status", "accepted");
+    const otherIds = [
+      ...new Set([
+        ...(sent ?? []).map((r) => r.friend_id),
+        ...(received ?? []).map((r) => r.user_id),
+      ]),
+    ];
+    const { data: profs } = otherIds.length
+      ? await supabase.from("profiles").select("id, name, avatar").in("id", otherIds)
+      : { data: [] as { id: string; name: string; avatar: string | null }[] };
+    const profMap = new Map((profs ?? []).map((p) => [p.id, p]));
     const list: Contact[] = [
-      ...(sent ?? []).map((r: any) => ({ id: r.friend_id, name: r.profiles?.name ?? "Driver", avatar: r.profiles?.avatar })),
-      ...(received ?? []).map((r: any) => ({ id: r.user_id, name: r.profiles?.name ?? "Driver", avatar: r.profiles?.avatar })),
+      ...(sent ?? []).map((r) => ({ id: r.friend_id, name: profMap.get(r.friend_id)?.name ?? "Driver", avatar: profMap.get(r.friend_id)?.avatar })),
+      ...(received ?? []).map((r) => ({ id: r.user_id, name: profMap.get(r.user_id)?.name ?? "Driver", avatar: profMap.get(r.user_id)?.avatar })),
     ];
     setFriends(list);
     setFriendsLoading(false);

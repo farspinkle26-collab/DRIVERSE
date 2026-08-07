@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { parseLimitRejection } from "@/lib/platinumLimits";
 import { useAuth } from "./useAuthStore";
 import { usePlatinum } from "./usePlatinumStore";
+import { useNotifications } from "./useNotificationStore";
 
 // ─── Types ─────────────────────────────────────────────────
 export interface PartyMember {
@@ -66,6 +67,7 @@ export const PARTY_COLORS = ["#FFD700", "#FF3B6F", "#22D3EE", "#A78BFA", "#34D39
 export const [PartyProvider, useParty] = createContextHook(() => {
   const { user } = useAuth();
   const { limit, openPaywall } = usePlatinum();
+  const { showNotification } = useNotifications();
   const [state, setState] = useState<PartyState>({
     party: null,
     members: [],
@@ -444,7 +446,33 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "party_members" },
-        () => loadParty()
+        (payload) => {
+          loadParty();
+
+          // A fresh invite for this driver → toast it, regardless of screen
+          // (this store is mounted globally in `app/_layout.tsx`).
+          const row = payload.new as { user_id?: string; status?: string; party_id?: string } | null;
+          if (
+            payload.eventType === "INSERT" &&
+            row?.user_id === user.id &&
+            row?.status === "invited" &&
+            row.party_id
+          ) {
+            supabase
+              .from("parties")
+              .select("name")
+              .eq("id", row.party_id)
+              .single()
+              .then(({ data }) => {
+                showNotification(
+                  "Convoy invite",
+                  `You've been invited to join ${data?.name ?? "a convoy"}`,
+                  "request",
+                  { partyId: row.party_id }
+                );
+              });
+          }
+        }
       )
       .on(
         "postgres_changes",
@@ -458,7 +486,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [user, loadParty]);
+  }, [user, loadParty, showNotification]);
 
   const partyMemberIds = useMemo(
     () => new Set(state.members.filter((m) => m.status === "accepted" && m.user_id !== user?.id).map((m) => m.user_id)),
