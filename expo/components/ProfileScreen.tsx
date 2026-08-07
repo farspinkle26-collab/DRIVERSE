@@ -80,6 +80,7 @@ import {
   X,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useNotifications } from "@/hooks/useNotificationStore";
 import { useXP } from "@/hooks/useXPStore";
 import { useQuests } from "@/hooks/useQuestStore";
 import { useEvents } from "@/hooks/useEventsStore";
@@ -361,6 +362,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, isAuthenticated, updateProfilePicture, updateCountry, logout } = useAuth();
+  const { showRequestNotification } = useNotifications();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -632,18 +634,47 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         "postgres_changes",
         { event: "*", schema: "public", table: "friends" },
         (payload) => {
-          const row = (payload.new ?? payload.old) as { user_id?: string; friend_id?: string } | null;
+          const row = (payload.new ?? payload.old) as
+            | { user_id?: string; friend_id?: string; status?: string }
+            | null;
           if (row?.user_id !== user.id && row?.friend_id !== user.id) return;
           loadInboxes();
           loadFriends();
           loadFriendState();
+
+          // A new incoming friend request → pop the banner/push notification
+          // too, not just the bell (the bell itself reads `friends` directly
+          // and doesn't need this call to update).
+          if (
+            payload.eventType === "INSERT" &&
+            row?.friend_id === user.id &&
+            row?.status === "pending"
+          ) {
+            const senderId = (payload.new as { user_id?: string })?.user_id;
+            const requestId = (payload.new as { id?: string })?.id ?? "";
+            if (senderId) {
+              supabase
+                .from("profiles")
+                .select("name")
+                .eq("id", senderId)
+                .single()
+                .then(({ data }) => {
+                  const senderName = data?.name ?? "Someone";
+                  showRequestNotification(
+                    "New friend request",
+                    `${senderName} sent you a friend request`,
+                    requestId
+                  );
+                });
+            }
+          }
         }
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState]);
+  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState, showRequestNotification]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
