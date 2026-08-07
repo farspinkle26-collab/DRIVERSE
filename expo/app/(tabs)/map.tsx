@@ -190,10 +190,10 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
-import { Alert } from "react-native";
 import { MAPBOX_ACCESS_TOKEN, mapboxStyleUrl } from "@/constants/mapbox";
 import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
+import { appAlert } from "@/lib/appAlert";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -1035,7 +1035,7 @@ export default function MapScreen() {
     if (!MAPBOX_ACCESS_TOKEN) {
       // Voice rule: name what happened and what fixes it. "Route
       // Unavailable" on its own told the driver nothing they could act on.
-      Alert.alert(
+      appAlert(
         "Routing is switched off in this build",
         "This copy of Driveverse shipped without a Mapbox access token, so it can't calculate routes. Update to the latest version from the store — if the newest version does the same, send us the build number from Profile → About."
       );
@@ -1077,14 +1077,14 @@ export default function MapScreen() {
         });
       } else {
         setNavigating(false);
-        Alert.alert(
+        appAlert(
           "No road route to that point",
           "There's no drivable road connecting you to the pin — it may be offshore, inside a closed area, or on the far side of a water crossing. Drag the pin onto a road and tap Route again."
         );
       }
     } catch {
       setNavigating(false);
-      Alert.alert(
+      appAlert(
         "Couldn't reach the routing service",
         "The request to Mapbox didn't get through, so there's no route yet. Check your connection and tap Route again."
       );
@@ -1320,7 +1320,7 @@ export default function MapScreen() {
     try {
       const { status } = await ImagePickerExpo.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        appAlert(
           "Camera access is off",
           "Driveverse can't open the camera to snap a drive photo. Turn the camera permission on in your device Settings, then tap RECORD again."
         );
@@ -1336,7 +1336,7 @@ export default function MapScreen() {
         photoToastTimerRef.current = setTimeout(() => setPhotoToast(null), 2200);
       }
     } catch {
-      Alert.alert(
+      appAlert(
         "The camera didn't open",
         "Something else on the phone may be holding the camera. Close any other camera app and tap RECORD again."
       );
@@ -1437,7 +1437,7 @@ export default function MapScreen() {
   // policy and from the store, so the marker you tapped is now invitable.
   const handleInviteToPartyFromMap = useCallback(async (driverId: string, driverName: string) => {
     if (!party) {
-      Alert.alert(
+      appAlert(
         "You're not in a convoy yet",
         "An invite has to point at a convoy, and you don't have one running. Start one, then invite drivers straight from their map marker.",
         [
@@ -1451,9 +1451,9 @@ export default function MapScreen() {
     try {
       const result = await inviteDriver(driverId);
       if (result.ok) {
-        Alert.alert("Invite sent", `${driverName} was invited to join ${party.name}.`);
+        appAlert("Invite sent", `${driverName} was invited to join ${party.name}.`);
       } else {
-        Alert.alert(
+        appAlert(
           result.error?.title ?? "Invite not sent",
           result.error?.message ?? "The database rejected the invite and didn't say why."
         );
@@ -1474,12 +1474,12 @@ export default function MapScreen() {
         content: `👋 ${user.name ?? "A driver"} wants to meet up nearby! Are you free to link up?`,
       });
       if (error) {
-        Alert.alert(
+        appAlert(
           "Meetup request not sent",
           `The message to ${friendName} didn't reach the server: ${error.message} Check your connection and tap Ask a Meetup again.`
         );
       } else {
-        Alert.alert("Meetup request sent", `${friendName} will see it in their inbox.`);
+        appAlert("Meetup request sent", `${friendName} will see it in their inbox.`);
       }
     } catch {
       // Silent
@@ -1500,18 +1500,18 @@ export default function MapScreen() {
       });
       if (error) {
         if (error.code === "23505") {
-          Alert.alert(
+          appAlert(
             "Already connected",
             `You and ${friendName} are already friends — no second request needed.`
           );
         } else {
-          Alert.alert(
+          appAlert(
             "Friend request not sent",
             `The request to ${friendName} didn't reach the server: ${error.message} Check your connection and tap Add Friend again.`
           );
         }
       } else {
-        Alert.alert("Friend request sent", `${friendName} will see it on their profile.`);
+        appAlert("Friend request sent", `${friendName} will see it on their profile.`);
       }
     } catch {
       // Silent
@@ -1582,7 +1582,7 @@ export default function MapScreen() {
     const coords = destCoords();
     if (!coords) return;
     if (!userLocation) {
-      Alert.alert(
+      appAlert(
         "No GPS fix yet",
         "A route starts from where you are, and Driveverse doesn't have your position. Check location is on for the app, wait for the driver marker to appear, then tap Route again."
       );
@@ -1621,7 +1621,7 @@ export default function MapScreen() {
     setRouteInfo(null);
     setShowDropPinHint(false);
     if (!userLocation) {
-      Alert.alert(
+      appAlert(
         "No GPS fix yet",
         "The convoy's destination is on your map, but a route has to start from where you are. Wait for the driver marker to appear, then tap Route."
       );
@@ -1663,7 +1663,7 @@ export default function MapScreen() {
   // --- Event handlers ---
   const openCreateEvent = useCallback(() => {
     if (!user) {
-      Alert.alert(
+      appAlert(
         "Events need an account",
         "An event is posted under your driver name, so it can't be created while signed out. Sign in from the banner above the tab bar, then tap Event again."
       );
@@ -1677,7 +1677,7 @@ export default function MapScreen() {
   // switch. ---
   const toggleDrive = useCallback(() => {
     if (!user) {
-      Alert.alert(
+      appAlert(
         "Drives need an account",
         "A drive is recorded to your trip log and awards XP, so it can't start while signed out. Sign in from the banner above the tab bar, then tap DRIVE again."
       );
@@ -1757,7 +1757,7 @@ export default function MapScreen() {
     const { error } = await joinEvent(ev.id);
     setEventActionBusy(false);
     if (error) {
-      Alert.alert(
+      appAlert(
         "Couldn't join the event",
         `${error} Tap Join Event again once you're back online.`
       );
@@ -1769,7 +1769,7 @@ export default function MapScreen() {
     const { error } = await leaveEvent(ev.id);
     setEventActionBusy(false);
     if (error) {
-      Alert.alert(
+      appAlert(
         "Couldn't leave the event",
         `${error} You're still listed as attending. Tap Leave again once you're back online.`
       );
@@ -1777,7 +1777,7 @@ export default function MapScreen() {
   }, [leaveEvent]);
 
   const handleCancelEvent = useCallback((ev: DriveEvent) => {
-    Alert.alert("Cancel this event?", `"${ev.title}" will be removed from the map and everyone who joined will be told it's off. This can't be undone.`, [
+    appAlert("Cancel this event?", `"${ev.title}" will be removed from the map and everyone who joined will be told it's off. This can't be undone.`, [
       { text: "Keep Event", style: "cancel" },
       {
         text: "Cancel Event",
@@ -1788,7 +1788,7 @@ export default function MapScreen() {
           setEventActionBusy(false);
           setSelectedEventId(null);
           if (error) {
-            Alert.alert(
+            appAlert(
               "Event not cancelled",
               `${error} It's still live on the map. Try again once you're back online.`
             );
@@ -1800,7 +1800,7 @@ export default function MapScreen() {
 
   const handleRouteToEvent = useCallback((ev: DriveEvent) => {
     if (!userLocation) {
-      Alert.alert(
+      appAlert(
         "No GPS fix yet",
         "A route starts from where you are, and Driveverse doesn't have your position. Check location is on for the app, wait for the driver marker to appear, then tap Route again."
       );
@@ -2123,7 +2123,7 @@ export default function MapScreen() {
   const handleRaiseProblem = useCallback(
     async (type: ProblemType) => {
       if (!user) {
-        Alert.alert(
+        appAlert(
           "Signalling a problem needs an account",
           "A problem signal is tied to your driver profile so others know who to help. Sign in from the banner above the tab bar, then raise it again."
         );
@@ -2132,7 +2132,7 @@ export default function MapScreen() {
       setProblemChooserOpen(false);
       await raiseProblem(type);
       const meta = problemMeta(type);
-      Alert.alert(
+      appAlert(
         "Signal raised",
         `Every driver on the map can now see that you ${meta.alert}. Tap the red Signal button again to stand it down once you're sorted.`
       );

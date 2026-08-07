@@ -23,6 +23,7 @@ import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
 import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
+import AppAlertHost from "@/components/AppAlertHost";
 import AppErrorBoundary, { ErrorScreen } from "@/components/AppErrorBoundary";
 import CrashReportScreen from "@/components/CrashReportScreen";
 import { useAppFonts } from "@/hooks/useAppFonts";
@@ -240,6 +241,7 @@ function RootLayoutContent() {
                                         <RootLayoutNav />
                                         <NotificationBanner />
                                         <FriendRequestsListener />
+                                        <AppAlertHost />
                                         <LastActivePing />
                                         <LaunchComplete />
                                       </CosmeticsProvider>

@@ -26,7 +26,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Modal,
@@ -126,6 +125,7 @@ import { supabase } from "@/lib/supabase";
 import { generateCarImage } from "@/lib/generateCarImage";
 import { resizeForUpload } from "@/lib/resizeForUpload";
 import { parseLimitRejection } from "@/lib/platinumLimits";
+import { appAlert } from "@/lib/appAlert";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -706,7 +706,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           ? await ImagePickerExpo.requestCameraPermissionsAsync()
           : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
         if (perm.status !== "granted") {
-          Alert.alert("Permission needed", "We need access to update your profile picture.");
+          appAlert("Permission needed", "We need access to update your profile picture.");
           return;
         }
       }
@@ -717,9 +717,9 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       setUploadingAvatar(true);
       const ok = await updateProfilePicture(result.assets[0].uri);
       if (ok) setProfileAvatar(result.assets[0].uri);
-      else Alert.alert("Error", "Could not update your profile picture.");
+      else appAlert("Error", "Could not update your profile picture.");
     } catch {
-      Alert.alert("Error", "Something went wrong updating your photo.");
+      appAlert("Error", "Something went wrong updating your photo.");
     } finally {
       setUploadingAvatar(false);
     }
@@ -727,7 +727,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
 
   const handleChangeAvatar = useCallback(() => {
     if (!isSelf) return;
-    Alert.alert("Profile Picture", "Choose a new profile picture", [
+    appAlert("Profile Picture", "Choose a new profile picture", [
       { text: "Take Photo", onPress: () => pickAndSetAvatar(true) },
       { text: "Choose from Library", onPress: () => pickAndSetAvatar(false) },
       { text: "Cancel", style: "cancel" },
@@ -845,7 +845,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
    * so Back cannot return to a signed-out profile either.
    */
   const handleLogout = useCallback(() => {
-    Alert.alert("Sign Out", "Sign out of Driveverse? You'll need to sign in again to drive.", [
+    appAlert("Sign Out", "Sign out of Driveverse? You'll need to sign in again to drive.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
@@ -855,7 +855,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           if (ok) {
             router.replace("/login" as any);
           } else {
-            Alert.alert(
+            appAlert(
               "Couldn't sign out",
               "Something went wrong ending your session. Check your connection and try again."
             );
@@ -866,7 +866,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   }, [logout, router]);
 
   const handleDeleteCar = useCallback((carId: string) => {
-    Alert.alert("Remove Car", "Are you sure you want to remove this car?", [
+    appAlert("Remove Car", "Are you sure you want to remove this car?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
@@ -887,7 +887,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     const { error } = await supabase.from("trips").update({ is_public: nextPublic }).eq("id", trip.id);
     if (error) {
       setTrips((prev) => prev.map((t) => (t.id === trip.id ? { ...t, is_public: !nextPublic } : t)));
-      Alert.alert("Error", "Could not update trip privacy.");
+      appAlert("Error", "Could not update trip privacy.");
     }
   }, []);
 
@@ -929,7 +929,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       if (Platform.OS !== "web") {
         const perm = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
         if (perm.status !== "granted") {
-          Alert.alert("Permission needed", "We need photo access to generate your car.");
+          appAlert("Permission needed", "We need photo access to generate your car.");
           return;
         }
       }
@@ -949,7 +949,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
       setPremiumOpen(false);
       setPremiumTargetCar(null);
       await loadCars();
-      Alert.alert("Ready!", `${car.name} has been generated and added to your garage.`);
+      appAlert("Ready!", `${car.name} has been generated and added to your garage.`);
     } catch (err) {
       setGenerating(false);
       // The server disagreed with the client gate above — a lapsed
@@ -960,7 +960,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         openPaywall("showcase");
         return;
       }
-      Alert.alert("Error", err instanceof Error ? err.message : "Could not generate your car.");
+      appAlert("Error", err instanceof Error ? err.message : "Could not generate your car.");
     }
   }, [user, premiumTargetCar, selfIsPlatinum, openPaywall, loadCars]);
 
@@ -970,10 +970,10 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     setFriendActionLoading(true);
     const { error } = await supabase.from("friends").insert({ user_id: user.id, friend_id: targetId, status: "pending" });
     setFriendActionLoading(false);
-    if (error) Alert.alert("Error", error.message);
+    if (error) appAlert("Error", error.message);
     else {
       setFriendState("pending_sent");
-      Alert.alert("Sent!", `Friend request sent to ${profileName}.`);
+      appAlert("Sent!", `Friend request sent to ${profileName}.`);
     }
   }, [user, targetId, profileName]);
 
@@ -1013,9 +1013,9 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const handleAddSearchFriend = useCallback(async (friendId: string, name: string) => {
     if (!user) return;
     const { error } = await supabase.from("friends").insert({ user_id: user.id, friend_id: friendId, status: "pending" });
-    if (error) Alert.alert("Error", error.message);
+    if (error) appAlert("Error", error.message);
     else {
-      Alert.alert("Sent!", `Friend request sent to ${name}`);
+      appAlert("Sent!", `Friend request sent to ${name}`);
       loadFriends();
     }
   }, [user, loadFriends]);

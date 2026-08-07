@@ -8,7 +8,6 @@ import {
   StyleSheet, 
   KeyboardAvoidingView, 
   Platform,
-  Alert,
   Linking,
   ActivityIndicator 
 } from 'react-native';
@@ -17,6 +16,7 @@ import { useTheme } from '@/hooks/useThemeStore';
 import { useChat } from '@/hooks/useChatStore';
 import { useAuth } from '@/hooks/useAuthStore';
 import { ChatMessage } from '@/types';
+import { appAlert } from '@/lib/appAlert';
 
 interface ChatProps {
   requestId: string;
@@ -132,14 +132,14 @@ export default function Chat({ requestId, receiverId, onClose }: ChatProps) {
         if (!messageText) {
           setMessage(textToSend); // Restore message if failed
         }
-        Alert.alert('Error', 'Gagal mengirim pesan. Silakan coba lagi.');
+        appAlert('Error', 'Gagal mengirim pesan. Silakan coba lagi.');
       }
     } catch (err) {
       console.error('Error in handleSendMessage:', err);
       if (!messageText) {
         setMessage(textToSend); // Restore message if failed
       }
-      Alert.alert('Error', 'Gagal mengirim pesan. Silakan coba lagi.');
+      appAlert('Error', 'Gagal mengirim pesan. Silakan coba lagi.');
     }
   };
 
@@ -152,14 +152,14 @@ export default function Chat({ requestId, receiverId, onClose }: ChatProps) {
 
     const success = await sendLocationMessage(requestId, receiverId);
     if (!success) {
-      Alert.alert('Error', 'Gagal mengirim lokasi. Silakan coba lagi.');
+      appAlert('Error', 'Gagal mengirim lokasi. Silakan coba lagi.');
     }
   };
 
   const handlePhoneCall = async () => {
     const phoneNumber = getOtherUserPhone();
     if (!phoneNumber) {
-      Alert.alert("Error", "Nomor telepon tidak tersedia");
+      appAlert("Error", "Nomor telepon tidak tersedia");
       return;
     }
 
@@ -175,11 +175,11 @@ export default function Chat({ requestId, receiverId, onClose }: ChatProps) {
       if (canOpen) {
         await Linking.openURL(phoneUrl!);
       } else {
-        Alert.alert("Error", "Tidak dapat membuka aplikasi telepon");
+        appAlert("Error", "Tidak dapat membuka aplikasi telepon");
       }
     } catch (error) {
       console.error('Error opening phone app:', error);
-      Alert.alert("Error", "Gagal membuka aplikasi telepon");
+      appAlert("Error", "Gagal membuka aplikasi telepon");
     }
   };
 

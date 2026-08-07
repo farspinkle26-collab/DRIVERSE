@@ -34,7 +34,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -77,6 +76,7 @@ import {
   textStyle,
 } from "@/constants/theme";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
+import { appAlert } from "@/lib/appAlert";
 import {
   type EntitlementSnapshot,
   type PlatinumPeriod,
@@ -240,7 +240,7 @@ export default function PlatinumPaywallScreen() {
       // Google Play prepaid/deferred, or Apple's Ask to Buy. The purchase is
       // real and unfinished; the entitlement lands on the customer-info
       // listener when payment clears. Calling this a failure would be a lie.
-      Alert.alert(
+      appAlert(
         "Waiting on payment",
         "Your payment is still being processed. Platinum unlocks automatically as soon as it goes through."
       );
@@ -250,7 +250,7 @@ export default function PlatinumPaywallScreen() {
     if (result.status === "already_owned") {
       // Owned on this store account but not yet attached here — a restore is
       // the fix, and the entitlement has already been applied by the store.
-      Alert.alert(
+      appAlert(
         "Already yours",
         "This store account already owns Platinum, so it's been restored rather than charged again."
       );
@@ -258,13 +258,13 @@ export default function PlatinumPaywallScreen() {
       return;
     }
     if (result.status === "unavailable") {
-      Alert.alert(
+      appAlert(
         "Not available",
         "Purchases aren't available on this build. Try the App Store or Play Store build of Driveverse."
       );
       return;
     }
-    Alert.alert("Purchase failed", result.message);
+    appAlert("Purchase failed", result.message);
   }, [selected, purchase, router]);
 
   const handleRestore = useCallback(async () => {
@@ -273,21 +273,21 @@ export default function PlatinumPaywallScreen() {
     setBusy(null);
 
     if (result.status === "restored") {
-      Alert.alert("Platinum restored", "Your subscription is active again.");
+      appAlert("Platinum restored", "Your subscription is active again.");
       return;
     }
     if (result.status === "nothing_to_restore") {
-      Alert.alert(
+      appAlert(
         "Nothing to restore",
         "No previous Platinum purchase was found on this store account."
       );
       return;
     }
     if (result.status === "unavailable") {
-      Alert.alert("Not available", "The store isn't reachable on this build.");
+      appAlert("Not available", "The store isn't reachable on this build.");
       return;
     }
-    Alert.alert("Restore failed", result.message);
+    appAlert("Restore failed", result.message);
   }, [restore]);
 
   /* ─── Render ────────────────────────────────────────────── */

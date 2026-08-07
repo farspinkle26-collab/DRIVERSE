@@ -25,7 +25,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   Platform,
@@ -53,6 +52,7 @@ import {
   textStyle,
 } from "@/constants/theme";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
+import { appAlert } from "@/lib/appAlert";
 import { resizeForUpload } from "@/lib/resizeForUpload";
 import {
   fetchShowcaseQuota,
@@ -117,7 +117,7 @@ export default function ShowcaseModal({ visible, onClose, car }: ShowcaseModalPr
       if (Platform.OS !== "web") {
         const perm = await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
         if (perm.status !== "granted") {
-          Alert.alert("Permission needed", "We need photo access to build your showcase.");
+          appAlert("Permission needed", "We need photo access to build your showcase.");
           return;
         }
       }
@@ -153,13 +153,13 @@ export default function ShowcaseModal({ visible, onClose, car }: ShowcaseModalPr
       }
       if (outcome.status === "quota_exhausted") {
         setQuota(outcome.quota ?? quota);
-        Alert.alert("Out of showcases", outcome.message);
+        appAlert("Out of showcases", outcome.message);
         return;
       }
-      Alert.alert("Couldn't generate", outcome.message);
+      appAlert("Couldn't generate", outcome.message);
     } catch (err) {
       setGenerating(false);
-      Alert.alert(
+      appAlert(
         "Couldn't generate",
         err instanceof Error ? err.message : "Something went wrong."
       );

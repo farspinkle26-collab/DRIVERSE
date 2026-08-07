@@ -7,7 +7,6 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
-  Alert,
   Share,
   Platform,
   KeyboardAvoidingView,
@@ -44,6 +43,7 @@ import { decodePolyline, regionForPath } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
+import { appAlert } from "@/lib/appAlert";
 
 function fmtDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -139,7 +139,7 @@ export default function RouteDetailScreen() {
     } catch {
       // Fallback: copy link
       await Clipboard.setStringAsync(url);
-      Alert.alert("Link copied", "Route link copied to clipboard");
+      appAlert("Link copied", "Route link copied to clipboard");
     }
   }, [route]);
 
@@ -147,7 +147,7 @@ export default function RouteDetailScreen() {
     if (!route) return;
     const url = createAppLink(`route/${route.id}`);
     await Clipboard.setStringAsync(url);
-    Alert.alert("Link copied", "Route link copied to clipboard");
+    appAlert("Link copied", "Route link copied to clipboard");
   }, [route]);
 
   const handlePost = useCallback(async () => {
@@ -156,7 +156,7 @@ export default function RouteDetailScreen() {
     const { error } = await addComment(id, commentText);
     setPosting(false);
     if (error) {
-      Alert.alert("Could not post", error);
+      appAlert("Could not post", error);
       return;
     }
     setCommentText("");
@@ -165,14 +165,14 @@ export default function RouteDetailScreen() {
 
   const handleDeleteRoute = useCallback(() => {
     if (!route) return;
-    Alert.alert("Delete Route", `Delete "${route.title}"? This cannot be undone.`, [
+    appAlert("Delete Route", `Delete "${route.title}"? This cannot be undone.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
           const { error } = await deleteRoute(route.id);
-          if (error) Alert.alert("Error", error);
+          if (error) appAlert("Error", error);
           else router.back();
         },
       },
@@ -181,7 +181,7 @@ export default function RouteDetailScreen() {
 
   const handleChangeVisibility = useCallback(() => {
     if (!route) return;
-    Alert.alert("Route Visibility", "Who can see this route?", [
+    appAlert("Route Visibility", "Who can see this route?", [
       { text: "🌍 Public", onPress: () => updateRoute(route.id, { visibility: "public" }) },
       { text: "👥 Friends only", onPress: () => updateRoute(route.id, { visibility: "friends" }) },
       { text: "🔒 Private", onPress: () => updateRoute(route.id, { visibility: "private" }) },
@@ -190,7 +190,7 @@ export default function RouteDetailScreen() {
   }, [route, updateRoute]);
 
   const handleOwnerMenu = useCallback(() => {
-    Alert.alert("Route Options", undefined, [
+    appAlert("Route Options", undefined, [
       { text: "Rename route", onPress: () => setShowRename(true) },
       { text: "Change visibility", onPress: handleChangeVisibility },
       { text: "Copy share link", onPress: handleCopyLink },
@@ -205,7 +205,7 @@ export default function RouteDetailScreen() {
     const { error } = await updateRoute(route.id, { title: value });
     setRenaming(false);
     if (error) {
-      Alert.alert("Error", error);
+      appAlert("Error", error);
       return;
     }
     setShowRename(false);
