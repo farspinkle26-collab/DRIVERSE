@@ -6,7 +6,14 @@
  * formatters return the value and its unit separately: the value is set in
  * JetBrains Mono (`dataLg` / `dataSm`), the unit in Inter (`caption`), so a
  * unit suffix never lands inside a mono readout.
+ *
+ * `driveScoreBreakdown` and every other calculation here stay in km/h no
+ * matter what — that is the one canonical unit `trips`/`saved_routes` store
+ * and the drive score, XP and quest math are all tuned against. Only
+ * `formatSpeed`, the display layer, knows about `lib/speedUnits.ts`.
  */
+
+import { convertSpeed, speedUnitLabel, type SpeedUnit } from "@/lib/speedUnits";
 
 export interface TripLike {
   distance_km: number;
@@ -50,10 +57,14 @@ export function formatDuration(seconds: number): Readout {
   };
 }
 
-/** Average speed, rounded — sub-integer precision is noise at this size. */
-export function formatSpeed(kmh: number): Readout {
-  const safe = Number.isFinite(kmh) ? Math.max(0, kmh) : 0;
-  return { value: String(Math.round(safe)), unit: "km/h" };
+/**
+ * Average speed, rounded — sub-integer precision is noise at this size.
+ * `unit` defaults to `"kmh"` so every existing call site keeps its current
+ * behaviour untouched; pass the viewer's own unit (`speedUnitForCountry`)
+ * to localise it.
+ */
+export function formatSpeed(kmh: number, unit: SpeedUnit = "kmh"): Readout {
+  return { value: String(Math.round(convertSpeed(kmh, unit))), unit: speedUnitLabel(unit) };
 }
 
 /**

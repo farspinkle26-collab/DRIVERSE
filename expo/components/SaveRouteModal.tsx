@@ -60,6 +60,7 @@ import {
 import { CutCornerButton } from "@/components/CutCorner";
 import TierLimitNotice from "@/components/platinum/TierLimitNotice";
 import { ICON_STROKE } from "@/components/TripCard";
+import { convertSpeed, speedUnitLabel, type SpeedUnit } from "@/lib/speedUnits";
 import {
   borderWidth,
   colors,
@@ -104,6 +105,8 @@ interface SaveRouteModalProps {
    * never named, even though the Drive Hub and trip detail screen both
    * prefer it over the destination fallback. */
   tripId?: string | null;
+  /** The viewer's own regional unit (`speedUnitForCountry`). Defaults to km/h. */
+  speedUnit?: SpeedUnit;
 }
 
 type IconComponent = React.FC<{ size: number; color: string; strokeWidth?: number }>;
@@ -190,6 +193,7 @@ export default function SaveRouteModal({
   destinationName,
   carId,
   tripId,
+  speedUnit = "kmh",
 }: SaveRouteModalProps) {
   const insets = useSafeAreaInsets();
   const { saveRoute, myRoutes, savedRouteLimit } = useRoutes();
@@ -350,8 +354,8 @@ export default function SaveRouteModal({
                 <View style={styles.statDivider} />
                 <StatColumn
                   glyph={Gauge}
-                  value={Number.isFinite(avgSpeedKmh) ? avgSpeedKmh.toFixed(0) : "0"}
-                  unit="km/h"
+                  value={Number.isFinite(avgSpeedKmh) ? convertSpeed(avgSpeedKmh, speedUnit).toFixed(0) : "0"}
+                  unit={speedUnitLabel(speedUnit)}
                   label="AVG"
                 />
               </View>

@@ -37,6 +37,7 @@ import {
   formatTripTimestamp,
   SCORE_STANDOUT,
 } from "@/lib/tripStats";
+import type { SpeedUnit } from "@/lib/speedUnits";
 
 /** Every icon on the Drive Hub is drawn at this weight. See ICON_STROKE. */
 export const ICON_STROKE = 1.5;
@@ -108,6 +109,8 @@ export interface TripCardProps {
   showMenu?: boolean;
   onPress?: () => void;
   onMenuPress?: () => void;
+  /** The viewer's own regional unit (`speedUnitForCountry`). Defaults to km/h. */
+  speedUnit?: SpeedUnit;
 }
 
 export function TripCard({
@@ -117,12 +120,13 @@ export function TripCard({
   showMenu = false,
   onPress,
   onMenuPress,
+  speedUnit = "kmh",
 }: TripCardProps) {
   const [pressed, setPressed] = React.useState(false);
 
   const distance = formatDistance(trip.distance_km);
   const time = formatDuration(trip.duration_seconds);
-  const speed = formatSpeed(trip.avg_speed_kmh);
+  const speed = formatSpeed(trip.avg_speed_kmh, speedUnit);
   const score = driveScore(trip);
   const standout = score >= SCORE_STANDOUT;
 

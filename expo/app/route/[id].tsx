@@ -44,6 +44,7 @@ import { useTheme } from "@/hooks/useThemeStore";
 import { MAP_STYLE_LIGHT, MAP_STYLE_DARK } from "@/constants/mapStyles";
 import RenameModal from "@/components/RenameModal";
 import { appAlert } from "@/lib/appAlert";
+import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUnits";
 
 function fmtDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -79,6 +80,7 @@ export default function RouteDetailScreen() {
   const mapRef = useRef<MapView>(null);
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const { getRoute, toggleKudos, fetchComments, addComment, deleteComment, deleteRoute, updateRoute } = useRoutes();
 
   const route = getRoute(id ?? "");
@@ -129,7 +131,7 @@ export default function RouteDetailScreen() {
     const url = createAppLink(`route/${route.id}`);
     const message =
       `🚗 ${route.title}\n` +
-      `${route.distance_km.toFixed(1)} km · ${fmtDuration(route.duration_seconds)} · ${route.avg_speed_kmh.toFixed(0)} km/h avg\n` +
+      `${route.distance_km.toFixed(1)} km · ${fmtDuration(route.duration_seconds)} · ${convertSpeed(route.avg_speed_kmh, speedUnit).toFixed(0)} ${speedUnitLabel(speedUnit)} avg\n` +
       `Check out my route on Driveverse: ${url}`;
     try {
       const res = await Share.share({ message, title: route.title });
@@ -348,13 +350,13 @@ export default function RouteDetailScreen() {
               </View>
               <View style={styles.statBox}>
                 <TrendingUp size={16} color="#3B82F6" />
-                <Text style={styles.statBoxValue}>{route.avg_speed_kmh.toFixed(0)}</Text>
-                <Text style={styles.statBoxLabel}>km/h avg</Text>
+                <Text style={styles.statBoxValue}>{convertSpeed(route.avg_speed_kmh, speedUnit).toFixed(0)}</Text>
+                <Text style={styles.statBoxLabel}>{speedUnitLabel(speedUnit)} avg</Text>
               </View>
               <View style={styles.statBox}>
                 <Gauge size={16} color="#FF3B6F" />
-                <Text style={styles.statBoxValue}>{route.top_speed_kmh.toFixed(0)}</Text>
-                <Text style={styles.statBoxLabel}>km/h top</Text>
+                <Text style={styles.statBoxValue}>{convertSpeed(route.top_speed_kmh, speedUnit).toFixed(0)}</Text>
+                <Text style={styles.statBoxLabel}>{speedUnitLabel(speedUnit)} top</Text>
               </View>
             </View>
 

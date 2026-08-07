@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   StyleSheet,
   View,
@@ -33,6 +33,7 @@ import { useRoutes, SavedRoute, ActivityType, RouteVisibility } from "@/hooks/us
 import { useAuth } from "@/hooks/useAuthStore";
 import RoutePreview from "@/components/RoutePreview";
 import TierLimitNotice from "@/components/platinum/TierLimitNotice";
+import { convertSpeed, speedUnitForCountry, speedUnitLabel, type SpeedUnit } from "@/lib/speedUnits";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -69,7 +70,17 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function RouteCard({ route, onKudos, onOpen }: { route: SavedRoute; onKudos: () => void; onOpen: () => void }) {
+function RouteCard({
+  route,
+  onKudos,
+  onOpen,
+  speedUnit = "kmh",
+}: {
+  route: SavedRoute;
+  onKudos: () => void;
+  onOpen: () => void;
+  speedUnit?: SpeedUnit;
+}) {
   const meta = ACTIVITY_META[route.activity_type] ?? ACTIVITY_META.drive;
   const initial = (route.author_name || "D")[0].toUpperCase();
 
@@ -118,7 +129,7 @@ function RouteCard({ route, onKudos, onOpen }: { route: SavedRoute; onKudos: () 
         </View>
         <View style={styles.stat}>
           <Gauge size={14} color="#8A8A9A" />
-          <Text style={styles.statValue}>{route.avg_speed_kmh.toFixed(0)} km/h</Text>
+          <Text style={styles.statValue}>{convertSpeed(route.avg_speed_kmh, speedUnit).toFixed(0)} {speedUnitLabel(speedUnit)}</Text>
         </View>
       </View>
 
@@ -151,7 +162,8 @@ function RouteCard({ route, onKudos, onOpen }: { route: SavedRoute; onKudos: () 
 export default function RoutesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const { feed, myRoutes, loadingRoutes, fetchRoutes, toggleKudos, savedRouteLimit } = useRoutes();
   const [tab, setTab] = useState<"feed" | "mine">("feed");
   const [refreshing, setRefreshing] = useState(false);
@@ -248,6 +260,7 @@ export default function RoutesScreen() {
                 route={route}
                 onKudos={() => toggleKudos(route.id)}
                 onOpen={() => router.push(`/route/${route.id}` as any)}
+                speedUnit={speedUnit}
               />
             ))
           )}
