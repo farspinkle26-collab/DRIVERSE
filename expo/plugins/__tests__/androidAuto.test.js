@@ -50,7 +50,11 @@ describe("applyCarAppDependencies", () => {
     // Without app-projected the app builds, the manifest validates, and the
     // car never offers it — the single most confusing way to fail here.
     expect(out).toContain('implementation "androidx.car.app:app-projected:');
-    expect(out).toContain("com.mapbox.maps:android");
+    // compileOnly, NOT implementation: an `implementation` here joins the
+    // runtime graph and can silently upgrade the Maps SDK the PHONE's map runs
+    // against, turning a car-only change into a map-tab regression.
+    expect(out).toContain('compileOnly "com.mapbox.maps:android');
+    expect(out).not.toContain('implementation "com.mapbox.maps');
   });
 
   it("adds to the app dependencies, not the buildscript's", () => {

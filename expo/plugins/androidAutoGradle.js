@@ -21,17 +21,31 @@
  * build — with an "unresolved reference" that reads like a typo rather than a
  * dependency-scope problem.
  *
- * THE VERSION IS A GUESS UNTIL SOMEONE CHECKS IT. Nothing in this repository
- * chooses the Maps SDK version; `@rnmapbox/maps` does, and Gradle resolves the
- * two declarations to whichever is higher. Declaring a version ABOVE what
- * rnmapbox expects is the dangerous direction — it upgrades rnmapbox's own
- * dependency underneath it, which is how the phone's map breaks in a change
- * that was only ever about the car. Check the resolved version with:
+ * WHY IT IS `compileOnly` AND NOT `implementation`
+ *
+ * With `implementation`, this declaration joins the runtime graph and Gradle
+ * resolves it against rnmapbox's to whichever is higher — so a version here
+ * that is newer than rnmapbox expects silently UPGRADES the phone's map, and
+ * the first symptom is the map tab breaking in a change that was only ever
+ * about the car. That is an unacceptable blast radius for a feature nobody has
+ * on yet.
+ *
+ * `compileOnly` puts it on the compile classpath only. The APK still contains
+ * exactly the Maps SDK `@rnmapbox/maps` chose, the phone's map is untouched by
+ * this feature by construction, and the version below only has to be close
+ * enough for `MapboxCarMap.kt` to compile.
+ *
+ * The cost is that a mismatch between the two moves from build time to run
+ * time — a `NoClassDefFoundError` or `NoSuchMethodError` when the car map
+ * loads. That is precisely the failure `CarMapSurface` was built to absorb: it
+ * lands in `CarMapRenderer`'s `catch (t: Throwable)` and produces a dark map
+ * under a working template, never a dead car app. Check the runtime version
+ * with:
  *
  *     cd android && ./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep mapbox
  *
- * and set `DRIVERSE_MAPBOX_MAPS_VERSION` in `~/.gradle/gradle.properties` if it
- * disagrees with the default below.
+ * and set `DRIVERSE_MAPBOX_MAPS_VERSION` in `~/.gradle/gradle.properties` to
+ * match it if the car map fails to load.
  *
  * The failure mode this file guards against is the one `releaseSigningGradle.js`
  * guards against too: a string replace that silently matches nothing, leaving a
@@ -42,8 +56,9 @@
 const CAR_APP_VERSION = "1.4.0";
 
 /**
- * Default Maps SDK version — see this file's header. This is the floor, not a
- * pin: Gradle takes the higher of this and whatever `@rnmapbox/maps` asks for.
+ * Maps SDK version to COMPILE against — see this file's header. It never
+ * reaches the APK, so it does not have to match what `@rnmapbox/maps` ships;
+ * it only has to be close enough for `MapboxCarMap.kt` to resolve.
  */
 const MAPBOX_MAPS_VERSION = "11.4.0";
 
@@ -83,9 +98,12 @@ function applyCarAppDependencies(contents) {
     // The Android Auto host binding. Without this the app builds and the
     // manifest validates, and the car never offers Driverse at all.
     implementation "androidx.car.app:app-projected:${CAR_APP_VERSION}"
-    // Compile-time access to the Maps SDK that @rnmapbox/maps already ships.
-    // A floor, not a pin — Gradle takes the higher of this and rnmapbox's.
-    implementation "com.mapbox.maps:android:\${project.hasProperty('DRIVERSE_MAPBOX_MAPS_VERSION') ? DRIVERSE_MAPBOX_MAPS_VERSION : '${MAPBOX_MAPS_VERSION}'}"
+    // COMPILE-ONLY, and that is the whole point — see this file's header.
+    // @rnmapbox/maps already ships the Maps SDK at runtime; this line exists
+    // only so MapboxCarMap.kt can name MapSurface at compile time, and
+    // compileOnly keeps it off the runtime classpath so it cannot change which
+    // version the phone's map actually runs against.
+    compileOnly "com.mapbox.maps:android:\${project.hasProperty('DRIVERSE_MAPBOX_MAPS_VERSION') ? DRIVERSE_MAPBOX_MAPS_VERSION : '${MAPBOX_MAPS_VERSION}'}"
 `;
 
   return contents.slice(0, at) + block + contents.slice(at + anchor.length);

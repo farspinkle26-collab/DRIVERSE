@@ -864,6 +864,15 @@ export default function MapScreen() {
    * recording exactly as it always has. See `hooks/useNativeTrip.ts` for why
    * both paths still exist rather than one replacing the other.
    */
+  /**
+   * Whether the native service owns the drive's numbers right now.
+   *
+   * A ref because the GPS subscription below is registered once, on mount, and
+   * reads recording state through refs for exactly that reason — a `useState`
+   * read inside it would be the value from the render that registered it.
+   */
+  const nativeActiveRef = useRef(false);
+
   const nativeTrip = useNativeTrip({
     onCarCommand: useCallback((command: "start" | "pause" | "resume" | "end") => {
       // The service has already acted by the time this arrives — the drive is
@@ -1167,6 +1176,7 @@ export default function MapScreen() {
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { routeInfoRef.current = routeInfo; }, [routeInfo]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { nativeActiveRef.current = nativeTrip.active; }, [nativeTrip.active]);
   useEffect(() => {
     destinationLabelRef.current =
       selectedDestination == null
@@ -1253,7 +1263,12 @@ export default function MapScreen() {
               pathTimesRef.current.push(now);
               setRecordedPath((prev) => {
                 const next = [...prev, newCoord];
-                if (lastCoordRef.current) {
+                // The path is still appended on every fix — the polyline,
+                // the speed profile and the saved route all come from it.
+                // DISTANCE is different: when the native service is recording
+                // it publishes an absolute total, and adding to it here as
+                // well counts every metre twice.
+                if (lastCoordRef.current && !nativeActiveRef.current) {
                   const dist = haversineMeters(lastCoordRef.current, newCoord);
                   if (dist > 0.1) {
                     setTripDistance((d) => d + dist);
@@ -1270,8 +1285,10 @@ export default function MapScreen() {
                   const dist = haversineMeters(lastCoordRef.current, newCoord);
                   const speedKmh = (dist / 1000) / (timeDeltaSec / 3600);
                   if (speedKmh < 200) {
-                    setCurrentSpeed(speedKmh);
-                    setTripTopSpeed((m) => Math.max(m, speedKmh));
+                    if (!nativeActiveRef.current) {
+                      setCurrentSpeed(speedKmh);
+                      setTripTopSpeed((m) => Math.max(m, speedKmh));
+                    }
 
                     // --- "Smooth Drive" score: penalize harsh accel/braking ---
                     // Derived from real telemetry (rolling avg of |speed delta|
@@ -1366,7 +1383,10 @@ export default function MapScreen() {
   // --- Recording timer --- (stops ticking while paused; pausedAccumRef keeps the
   // elapsed clock continuous across a pause/resume cycle)
   useEffect(() => {
-    if (isRecording && !isPaused && tripStartMs != null) {
+    // Not while the service owns the clock: it publishes an absolute elapsed
+    // at 1 Hz, and a 200 ms timer writing its own value in between makes the
+    // HUD flicker between two slightly different numbers.
+    if (isRecording && !isPaused && tripStartMs != null && !nativeTrip.active) {
       recordTimerRef.current = setInterval(() => {
         setElapsedMs(Date.now() - tripStartMs - pausedAccumRef.current);
       }, 200);
@@ -1376,7 +1396,7 @@ export default function MapScreen() {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     };
-  }, [isRecording, isPaused, tripStartMs]);
+  }, [isRecording, isPaused, tripStartMs, nativeTrip.active]);
 
   // --- Pause / resume handler ---
   const togglePause = useCallback(() => {
