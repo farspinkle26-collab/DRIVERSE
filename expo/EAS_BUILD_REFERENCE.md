@@ -248,6 +248,13 @@ cd android
 ./gradlew bundleRelease          # .aab, not .apk
 ```
 
+Wrapped as `bun run build:android` (`package.json`) — same two commands, nothing
+else. Needs a local Android SDK; there is no SDK in this repo's CI or in a
+standard dev container, so this only runs somewhere Android Studio (or the SDK
+command-line tools) is installed. Without one, use `npx eas build --platform
+android --profile diagnostic` (§2) instead — it builds on an EAS worker that
+already has the SDK.
+
 Verify what came out before uploading anything:
 
 ```bash
