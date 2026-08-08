@@ -191,6 +191,9 @@ import { EventTypeIcon, eventTypeLabel } from "@/components/EventMeta";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useActiveCar } from "@/hooks/useActiveCarStore";
 import { useTheme } from "@/hooks/useThemeStore";
+import { usePressMotion } from "@/hooks/usePressMotion";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useUnreadMessages } from "@/hooks/useUnreadMessages";
 import { supabase } from "@/lib/supabase";
 import { MAPBOX_ACCESS_TOKEN, mapboxStyleUrl } from "@/constants/mapbox";
 import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUnits";
@@ -578,6 +581,13 @@ const DROP_PIN_HINT_OFFSET = spacing.spacingXxxl * 3 + spacing.spacingXxxl / 2 +
 /** Where the idle bottom stack (live feed, action stack) sits above the bar. */
 const BOTTOM_STACK_OFFSET = spacing.spacingXxxl * 4; // 192
 
+/** How long the camera takes to fly to the driver, and so how long My
+ *  Location shows its busy state. */
+const CENTER_ON_USER_MS = 800;
+
+/** One breath of the armed-Drive pulse — see `DRIVE_PULSE` at its use site. */
+const DRIVE_PULSE_MS = 900;
+
 const ROUTE_CASING_WIDTH = 8;
 const ROUTE_CORE_WIDTH = 4;
 
@@ -639,39 +649,89 @@ function ActionRow({
 
 
 /**
- * A labelled icon button in the map's floating chrome (search, locate,
- * filters, event, clear). Square utility surface at `radius.sharp` — these
- * are not brand surfaces, so they do not take the corner cut; the cut is
- * reserved for the sheets, cards and primary actions.
+ * A labelled icon button in the map's floating chrome — Search, My Location,
+ * Filters, Event, Convoy, Chat, and Clear when a route is up.
+ *
+ * THE SECONDARY SET. Every one of these is subordinate to DRIVE, and the way
+ * that is enforced is by what they deliberately do *not* have: no lit edge, no
+ * elevation, no shadow choreography. `constants/theme.ts` reserves that
+ * treatment for primary surfaces, and a stack of seven buttons is exactly
+ * where ignoring the rule would cost the most — seven raised slabs is a
+ * toolbar with no primary action in it. They stay square utility surfaces at
+ * `radius.sharp`, for the same reason they do not take the corner cut.
+ *
+ * What they do share is a single lightweight press: a scale-down through
+ * `usePressMotion`, identical across all seven, replacing the opacity flash
+ * they each used to do on their own.
+ *
+ * `active` is the on-state (Filters open, Convoy joined). `badge` is a count,
+ * `dot` a bare presence mark; both hang off the top-right corner and both are
+ * drawn with the app's existing `CutCornerBadge`, not a shape invented here.
  */
 function MapChromeButton({
   label,
   accessibilityLabel,
   active = false,
+  disabled = false,
+  busy = false,
+  badge,
+  dot = false,
   onPress,
   children,
 }: {
   label: string;
   accessibilityLabel: string;
   active?: boolean;
+  /** No target and no affordance — the action cannot run yet. */
+  disabled?: boolean;
+  /** The action is running. Swaps the glyph for a spinner. */
+  busy?: boolean;
+  /** Unread-style count. Rendered `9+` past nine, as the inbox does. */
+  badge?: number;
+  /** Presence mark for state that has no number worth showing. */
+  dot?: boolean;
   onPress: () => void;
   children: React.ReactNode;
 }) {
+  const motion = usePressMotion("scale");
+  const showBadge = !!badge && badge > 0;
+
   return (
     <View style={styles.labeledBtn}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        accessibilityState={{ selected: active }}
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.actionBtn,
-          active && styles.actionBtnActive,
-          pressed && styles.pressed,
-        ]}
-      >
-        {children}
-      </Pressable>
+      <Animated.View style={motion.style}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={accessibilityLabel}
+          accessibilityState={{ selected: active, disabled: disabled || busy }}
+          disabled={disabled || busy}
+          onPress={onPress}
+          onPressIn={motion.onPressIn}
+          onPressOut={motion.onPressOut}
+          style={[
+            styles.actionBtn,
+            active && styles.actionBtnActive,
+            (disabled || busy) && styles.actionBtnDisabled,
+          ]}
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={colors.textPrimary} />
+          ) : (
+            children
+          )}
+        </Pressable>
+        {showBadge ? (
+          <View style={styles.chromeBadge} pointerEvents="none">
+            <CutCornerBadge
+              label={badge > 9 ? "9+" : String(badge)}
+              numeric
+              solid
+              corners="topRight"
+            />
+          </View>
+        ) : dot ? (
+          <View style={styles.chromeDot} pointerEvents="none" />
+        ) : null}
+      </Animated.View>
       <Text style={styles.actionBtnLabel} numberOfLines={1}>{label}</Text>
     </View>
   );
@@ -946,6 +1006,8 @@ export default function MapScreen() {
 
   // Events system
   const { events, joinEvent, leaveEvent, cancelEvent } = useEvents();
+  /** Drives the Chat button's badge. A count only — see the hook's header. */
+  const unreadMessages = useUnreadMessages();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [eventActionBusy, setEventActionBusy] = useState(false);
   // Keep the selected event fresh as realtime updates flow in
@@ -960,6 +1022,9 @@ export default function MapScreen() {
   const recSlide = useRef(new Animated.Value(200)).current;
   const onlinePulse = useRef(new Animated.Value(1)).current;
   const onlineSlide = useRef(new Animated.Value(0)).current;
+  /** Armed-Drive breath. Rests at 1; only ever runs while `showDropPinHint`. */
+  const drivePulse = useRef(new Animated.Value(1)).current;
+  const reducedMotion = useReducedMotion();
 
   // --- Landmarks around a point (see LANDMARK_RADIUS_METERS' header) ---
   //
@@ -1366,6 +1431,49 @@ export default function MapScreen() {
     return () => pulse.stop();
   }, [isRecording, recPulse]);
 
+  /**
+   * DRIVE, armed.
+   *
+   * Worth being precise about what this marks, because the obvious answer is
+   * wrong: it is NOT a "recording" indicator. The whole action stack is gated
+   * on `hudIdle`, which requires `!isRecording` — once a drive is recording
+   * this button is off screen entirely and the driving HUD has taken over, so
+   * there is nothing here to pulse. The state that *is* visible and does need
+   * marking is the one in between: DRIVE tapped, waiting for the driver to
+   * pick a destination on the map. The button has already inverted to a
+   * carbon slab with a red rim and reads "Tap Map"; the breath is what says
+   * the app is waiting on you rather than that it has simply changed colour.
+   *
+   * Stops dead when disarmed, and never starts under reduce-motion — the
+   * inverted fill and the changed label carry the state on their own, so
+   * there is nothing to substitute an instant end-state for.
+   */
+  useEffect(() => {
+    if (!showDropPinHint || reducedMotion) {
+      drivePulse.setValue(1);
+      return;
+    }
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(drivePulse, {
+          toValue: 1.06,
+          duration: DRIVE_PULSE_MS,
+          useNativeDriver: true,
+        }),
+        Animated.timing(drivePulse, {
+          toValue: 1,
+          duration: DRIVE_PULSE_MS,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => {
+      pulse.stop();
+      drivePulse.setValue(1);
+    };
+  }, [showDropPinHint, reducedMotion, drivePulse]);
+
   // --- Car float ---
   useEffect(() => {
     Animated.loop(
@@ -1557,11 +1665,37 @@ export default function MapScreen() {
   }, [user]);
 
   // --- Handlers ---
+  /**
+   * Centring takes 800ms of camera animation, and before the first GPS fix it
+   * cannot happen at all. Both used to look identical from outside: a tap that
+   * did nothing. `centeringOnUser` drives the button's busy state so the
+   * in-flight case reads as working, and the button is disabled outright while
+   * `userLocation` is null rather than accepting a tap it will drop.
+   */
+  const [centeringOnUser, setCenteringOnUser] = useState(false);
+  const centeringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (centeringTimerRef.current) clearTimeout(centeringTimerRef.current);
+    },
+    []
+  );
+
   const centerOnUser = useCallback(() => {
     if (!userLocation) return;
+    setCenteringOnUser(true);
     animateCamera(
       { center: userLocation, zoom: 17, pitch: 50, heading },
-      { duration: 800 }
+      { duration: CENTER_ON_USER_MS }
+    );
+    if (centeringTimerRef.current) clearTimeout(centeringTimerRef.current);
+    // `animateCamera` reports no completion, so the spinner is cleared on the
+    // duration it was given. Erring long would leave a spinner over a map that
+    // has already settled, so it clears exactly when the camera does.
+    centeringTimerRef.current = setTimeout(
+      () => setCenteringOnUser(false),
+      CENTER_ON_USER_MS
     );
   }, [userLocation, heading, animateCamera]);
 
@@ -3509,7 +3643,15 @@ export default function MapScreen() {
 
           <MapChromeButton
             label="My Location"
-            accessibilityLabel="Centre the map on me"
+            accessibilityLabel={
+              userLocation
+                ? "Centre the map on me"
+                : "Centre the map on me — waiting for a GPS fix"
+            }
+            // Before the first fix there is nowhere to go, and the old
+            // behaviour was to accept the tap and silently drop it.
+            disabled={!userLocation}
+            busy={centeringOnUser}
             onPress={centerOnUser}
           >
             <LocateFixed
@@ -3779,34 +3921,36 @@ export default function MapScreen() {
           {/* DRIVE is the screen's primary action, so it is the one solid
               red slab in the idle viewport. */}
           <View style={styles.labeledBtn}>
-            <CutCornerPressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: showDropPinHint }}
-              accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
-              onPress={toggleDrive}
-              fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
-              borderColor={colors.racingRed}
-              borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
-              cutSize={cut.md}
-              corners="topRight"
-              // The screen's primary action, so it sinks like a button rather
-              // than scaling like a card, and carries the accent highlight
-              // while it is the red slab.
-              motion="sink"
-              highlightColor={
-                showDropPinHint ? edge.highlight : edge.highlightOnAccent
-              }
-              elevation="floating"
-              style={styles.driveBtn}
-              padding={0}
-              contentStyle={styles.driveBtnContent}
-            >
-              <Car
-                size={spacing.spacingXl}
-                color={showDropPinHint ? colors.racingRed : onRacingRed}
-                strokeWidth={MAP_GLYPH_STROKE}
-              />
-            </CutCornerPressable>
+            <Animated.View style={{ transform: [{ scale: drivePulse }] }}>
+              <CutCornerPressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: showDropPinHint }}
+                accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
+                onPress={toggleDrive}
+                fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
+                borderColor={colors.racingRed}
+                borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
+                cutSize={cut.md}
+                corners="topRight"
+                // The screen's primary action, so it sinks like a button rather
+                // than scaling like a card, and carries the accent highlight
+                // while it is the red slab.
+                motion="sink"
+                highlightColor={
+                  showDropPinHint ? edge.highlight : edge.highlightOnAccent
+                }
+                elevation="floating"
+                style={styles.driveBtn}
+                padding={0}
+                contentStyle={styles.driveBtnContent}
+              >
+                <Car
+                  size={spacing.spacingXl}
+                  color={showDropPinHint ? colors.racingRed : onRacingRed}
+                  strokeWidth={MAP_GLYPH_STROKE}
+                />
+              </CutCornerPressable>
+            </Animated.View>
             <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
           </View>
 
@@ -3840,7 +3984,12 @@ export default function MapScreen() {
 
           <MapChromeButton
             label="Chat"
-            accessibilityLabel="Open messages"
+            accessibilityLabel={
+              unreadMessages > 0
+                ? `Open messages, ${unreadMessages} unread`
+                : "Open messages"
+            }
+            badge={unreadMessages}
             onPress={() => router.push("/messages" as any)}
           >
             <MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
@@ -4217,6 +4366,8 @@ export default function MapScreen() {
                 borderWidth={borderWidth.hairline}
                 cutSize={cut.md}
                 corners="topRight"
+                edges
+                elevation="raised"
                 contentStyle={styles.onlineBanner}
               >
                 <View style={styles.onlineBannerLeft}>
@@ -4243,6 +4394,8 @@ export default function MapScreen() {
                 borderWidth={borderWidth.hairline}
                 cutSize={cut.md}
                 corners="topRight"
+                edges
+                elevation="raised"
                 contentStyle={styles.onlineBanner}
               >
                 {/* The body opens the privacy sheet; the switch flips
@@ -4287,6 +4440,8 @@ export default function MapScreen() {
                 borderWidth={borderWidth.hairline}
                 cutSize={cut.md}
                 corners="topRight"
+                edges
+                elevation="raised"
                 contentStyle={styles.onlineBanner}
               >
                 <Pressable
@@ -5069,6 +5224,33 @@ const styles = StyleSheet.create({
   },
   actionBtnActive: {
     borderColor: colors.racingRed,
+  },
+  /** No target yet (My Location before the first fix) or action in flight. */
+  actionBtnDisabled: {
+    opacity: 0.45,
+  },
+  /**
+   * Count and presence marks, hung off the button's top-right corner.
+   * Negative offsets on purpose: the mark belongs to the button's edge, and
+   * insetting it would eat the 40pt glyph area these buttons are sized around.
+   */
+  chromeBadge: {
+    position: "absolute",
+    top: -spacing.spacingSm,
+    right: -spacing.spacingSm,
+  },
+  chromeDot: {
+    position: "absolute",
+    top: -spacing.spacingXs,
+    right: -spacing.spacingXs,
+    width: spacing.spacingSm,
+    height: spacing.spacingSm,
+    borderRadius: radius.circle,
+    backgroundColor: colors.racingRed,
+    // A hairline of the page behind it, so the dot reads as sitting on the
+    // button rather than merging into a red border when `active` is also on.
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.voidBlack,
   },
   labeledBtn: {
     alignItems: "center",
