@@ -267,7 +267,12 @@ function BigStat({
   return (
     <View style={styles.bigStat}>
       <View style={styles.bigStatValueRow}>
-        <Text style={[styles.bigStatValue, accent && { color: colors.racingRed }]}>
+        <Text
+          style={[styles.bigStatValue, accent && { color: colors.racingRed }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.5}
+        >
           {value}
         </Text>
         {unit ? <Text style={styles.bigStatUnit}>{unit}</Text> : null}
@@ -320,7 +325,12 @@ function SmallStat({
     <View style={styles.smallStat}>
       <Text style={styles.smallStatLabel}>{label}</Text>
       <View style={styles.smallStatValueRow}>
-        <Text style={[styles.smallStatValue, accent && { color: colors.racingRed }]}>
+        <Text
+          style={[styles.smallStatValue, accent && { color: colors.racingRed }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.5}
+        >
           {value}
         </Text>
         {unit ? <Text style={styles.smallStatUnit}>{unit}</Text> : null}
@@ -485,7 +495,12 @@ function TripVariant({
       <View style={[styles.heroRow, !showRoute && styles.heroRowTall]}>
         <View style={styles.hero}>
           <View style={styles.heroValueRow}>
-            <Text style={[styles.heroValue, !showRoute && styles.heroValueTall]}>
+            <Text
+              style={[styles.heroValue, !showRoute && styles.heroValueTall]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.5}
+            >
               {distance.value}
             </Text>
             <Text style={styles.heroUnit}>{distance.unit}</Text>
@@ -856,6 +871,8 @@ const styles = StyleSheet.create({
     letterSpacing: -4,
   },
   hero: {
+    flexShrink: 1,
+    minWidth: 0,
     gap: spacing.spacingXs,
   },
   heroValueRow: {
@@ -864,6 +881,8 @@ const styles = StyleSheet.create({
     gap: spacing.spacingXs,
   },
   heroValue: {
+    flexShrink: 1,
+    minWidth: 0,
     fontFamily: fontFamily.dataBold,
     fontSize: 52,
     lineHeight: 56,
@@ -871,6 +890,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   heroUnit: {
+    flexShrink: 0,
     fontFamily: fontFamily.bodyMedium,
     fontSize: 15,
     color: colors.textSecondary,
@@ -882,6 +902,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   scoreBlock: {
+    flexShrink: 0,
     alignItems: "flex-end",
     gap: spacing.spacingXs,
     paddingBottom: spacing.spacingXs,
@@ -923,6 +944,8 @@ const styles = StyleSheet.create({
     gap: spacing.spacingXs,
   },
   smallStatValue: {
+    flexShrink: 1,
+    minWidth: 0,
     fontFamily: fontFamily.dataBold,
     fontSize: 22,
     lineHeight: 26,
@@ -930,6 +953,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   smallStatUnit: {
+    flexShrink: 0,
     fontFamily: fontFamily.bodyRegular,
     fontSize: 11,
     color: colors.textSecondary,
@@ -990,6 +1014,8 @@ const styles = StyleSheet.create({
     gap: spacing.spacingXs,
   },
   bigStatValue: {
+    flexShrink: 1,
+    minWidth: 0,
     fontFamily: fontFamily.dataBold,
     fontSize: 34,
     lineHeight: 38,
