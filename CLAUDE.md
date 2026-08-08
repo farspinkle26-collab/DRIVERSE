@@ -221,6 +221,33 @@ spec, including the device checks that are still unverified, in
   a static import of a package that reaches a native module runs that lookup
   at module scope, which is §10's crash.
 
+**Android Auto** (`expo/native/androidauto/`, `expo/ANDROID_AUTO_REFERENCE.md`)
+puts Driverse on the car display under the **Navigation** category — native
+Kotlin against the Car App Library, because a car app is not a view tree and
+neither React Native nor `@rnmapbox/maps` reaches it. **Read §0 of the reference
+first: none of the Kotlin has been compiled and the car app has never launched**
+— there is no Android SDK, DHU or device in CI, so what exists is source plus
+tests for every part testable without a car. Three things are load-bearing.
+**The Kotlin is committed outside `android/`** and copied in by
+`plugins/withAndroidAuto.js`, because `android/` is generated and gitignored and
+a prebuild that erased the car sources would fail *silently* —
+`lib/tripRecorder.ts` reads a missing native module as "no native recorder, use
+the JS one", which is correct on iOS and indistinguishable from a broken build.
+**The recorder moved out of React** into `TripRecorderService`, a foreground
+service writing to a process-wide `TripStore`, because the host can start the
+car app with the map screen unmounted or the app never opened; `map.tsx` and the
+car screen are now two subscribers, and the phone's own recorder still runs
+wherever the native one is absent. **What the car may show is enforced by
+type**: the car renders only from `CarScreenModel` / `lib/carTrip.ts`, which
+have no field for speed or XP even though the snapshot carries both — no top
+speed in a driver's eyeline, no distance-rewarded score, and a stale GPS fix
+shown as stale rather than left on screen as a frozen number. The Mapbox car
+surface is quarantined behind `CarMapSurface` and constructed inside
+`catch (Throwable)` for `LAUNCH_SAFETY_REFERENCE.md` §10's reason in a different
+runtime: `@rnmapbox/maps` owns the Maps SDK version, and a class that moved
+under us must fail where it can be caught, not inside a `SurfaceCallback` that
+takes the car app down with it.
+
 **Online presence** — who each driver sees on the map — runs on two paths at
 once, both in `expo/hooks/useOnlineUsers.ts`: Supabase Realtime Presence on
 the `online-players` channel (instant), and a 10-second poll of the
