@@ -6,8 +6,13 @@
  *
  * Visual direction: motorsport / telemetry. Precise, angular, technical.
  * Deliberately NOT: rounded-everything, gradient washes, glassmorphism,
- * pastel accents. Separation comes from 1px hairlines and surface steps,
- * not from drop shadows.
+ * pastel accents.
+ *
+ * SEPARATION comes from 1px hairlines and surface steps. Since the
+ * dimensionality pass it also comes from a lit top edge and a grounded bottom
+ * edge — see `edge` and `elevation` below. Those are still hairlines: one
+ * lighter, one darker, both 1px, both following the corner cut. What this file
+ * still does not do is wash a gradient across a surface or blur anything.
  *
  * NOTE: this file is additive. `constants/colors.ts` (the legacy orange
  * `driveverse` palette consumed via `useTheme()`) is still live and is not
@@ -282,9 +287,9 @@ export const hairlineDivider: ViewStyle = {
 };
 
 /**
- * Elevation is expressed as a surface step plus a hairline, never as a
- * shadow. Included so screens have something concrete to migrate their
- * `shadowColor` / `elevation` blocks onto.
+ * Elevation is expressed as a surface step plus a hairline. `elevation` below
+ * adds a soft outer shadow on top of that; the surface step remains the part
+ * that carries on every platform.
  */
 export const surface = {
   base: { backgroundColor: colors.voidBlack } as ViewStyle,
@@ -292,6 +297,89 @@ export const surface = {
     backgroundColor: colors.carbonSurface,
     ...hairlineBorder,
   } as ViewStyle,
+} as const;
+
+/* ------------------------------------------------------------------ *
+ * DIMENSIONALITY
+ *
+ * Two devices, both hairlines, both drawn by `components/CutCorner.tsx` as
+ * strokes along the polygon so they follow the 45° cut instead of stopping
+ * short of it.
+ *
+ *   `edge.highlight`  1px, along the top side and its diagonals. Suggests a
+ *                     light source above the screen and is what makes a slab
+ *                     read as a raised object rather than a coloured area.
+ *   `edge.shade`      1px, along the bottom side and its diagonals. The
+ *                     grounding half.
+ *
+ * WHY EDGES AND NOT ONLY A DROP SHADOW. The app background is `voidBlack`
+ * (#0B0C10). A drop shadow is black at partial alpha, so on this background it
+ * resolves to a difference of about four values out of 255 — very nearly
+ * invisible. Blurred shadows are kept (they do real work where a surface sits
+ * over a lighter one — a sheet over content, a button on a card), but they are
+ * the supporting device here, not the load-bearing one. On a dark UI the lit
+ * edge is what reads.
+ *
+ * KEEP THESE LOW. The brief is a surface that looks real, not a bevel. Above
+ * roughly 0.14 the highlight stops reading as light and starts reading as a
+ * second border in a different colour.
+ * ------------------------------------------------------------------ */
+
+export const edge = {
+  /** Lit top edge on a `racingRed` primary slab. */
+  highlightOnAccent: alpha("#FFFFFF", 0.28),
+  /** Lit top edge on a dark surface (`carbonSurface` cards, ghost buttons). */
+  highlight: alpha("#FFFFFF", 0.09),
+  /** Grounded bottom edge, both surface families. */
+  shade: alpha("#000000", 0.45),
+} as const;
+
+/**
+ * Outer shadow, three steps. `flat` is the default for everything — a screen
+ * background, a list row, an inert badge — and exists so a caller can say
+ * "deliberately none" rather than omitting the prop.
+ *
+ * ANDROID DRAWS NOTHING HERE, on purpose. Android derives a shadow from the
+ * view's outline, and a view with no background drawable has an empty outline,
+ * so `elevation` on the transparent wrapper `CutCornerSurface` renders is a
+ * no-op. The alternative — giving that wrapper a background so Android has an
+ * outline to work from — would paint a full rectangle behind a shape whose
+ * whole point is a cut corner, and the cut would fill in with an opaque
+ * triangle. A missing shadow is invisible on this background; a filled corner
+ * is a broken logo. So Android takes the edge hairlines and the press motion,
+ * which are the parts that read anyway, and iOS additionally gets the shadow
+ * (UIKit derives it from the layer's composited alpha, so it follows the
+ * polygon correctly with no `shadowPath` to maintain).
+ */
+export const elevation = {
+  flat: {} as ViewStyle,
+  /** Standard cards: trip, quest, garage, event. */
+  raised: {
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.45,
+    shadowRadius: 6,
+  } as ViewStyle,
+  /** Focused or expanded: an open bottom sheet, a modal card, a primary CTA. */
+  floating: {
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+  } as ViewStyle,
+} as const;
+
+export type ElevationToken = keyof typeof elevation;
+
+/**
+ * How far a pressed surface sinks, in points, and how far a pressed card
+ * scales down. Small on purpose: the cue should be felt more than seen.
+ */
+export const press = {
+  /** Buttons sink; the highlight goes with them. */
+  translateY: 2,
+  /** Cards scale rather than sink — a large surface sliding looks loose. */
+  scale: 0.985,
 } as const;
 
 /**
@@ -317,11 +405,19 @@ export const mapLabelShadow = {
  * MOTION
  * ------------------------------------------------------------------ */
 
-/** Short and mechanical. Nothing should bounce. */
+/**
+ * Short and mechanical. Nothing travels far enough to bounce.
+ *
+ * The one sanctioned spring is a press release (`components/CutCorner.tsx`),
+ * and it is tightly damped over a 2pt travel — it settles rather than
+ * overshoots. If a spring is ever visibly oscillating, it is wrong.
+ */
 export const duration = {
   fast: 120,
   base: 200,
   slow: 320,
+  /** Press-in. Shorter than `fast`: the surface should meet the finger. */
+  press: 90,
 } as const;
 
 /* ------------------------------------------------------------------ *
@@ -343,6 +439,9 @@ const theme = {
   hairlineBorder,
   hairlineDivider,
   surface,
+  edge,
+  elevation,
+  press,
   duration,
 } as const;
 

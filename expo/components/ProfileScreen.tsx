@@ -2488,6 +2488,8 @@ function GarageCard({
         borderWidth={borderWidth.hairline}
         cutSize={cut.md}
         corners="topRight"
+        edges
+        elevation="raised"
         contentStyle={styles.garageCard}
       >
         <View style={styles.edgeAccent} />
@@ -2563,6 +2565,8 @@ function FeaturedCar({
         borderWidth={borderWidth.hairline}
         cutSize={cut.md}
         corners="topRight"
+        edges
+        elevation="raised"
         contentStyle={styles.featuredCard}
       >
         <View style={styles.edgeAccent} />
