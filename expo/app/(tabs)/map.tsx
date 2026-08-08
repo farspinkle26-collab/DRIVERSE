@@ -195,7 +195,6 @@ import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUn
 import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 import { appAlert } from "@/lib/appAlert";
-import { carRouteFromDirections, useNativeTrip } from "@/hooks/useNativeTrip";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -811,24 +810,6 @@ export default function MapScreen() {
   const [routeSplitIdx, setRouteSplitIdx] = useState<number | null>(null); // index where user crossed on route polyline
   // Turn-by-turn steps parsed from the last fetched Directions route
   const [routeSteps, setRouteSteps] = useState<RouteStep[]>([]);
-  /**
-   * The same route, in the shape the car display needs.
-   *
-   * Kept separately rather than derived from `routeSteps` because that type is
-   * a lossy projection for the phone's instruction card — it drops the
-   * maneuver's coordinates, and the car needs them to walk through the steps as
-   * the driver moves (`TripGeo.currentStepIndex`).
-   */
-  const [carRoute, setCarRoute] = useState<ReturnType<typeof carRouteFromDirections>>(null);
-  /**
-   * The destination's display name, for the car's ETA card.
-   *
-   * A ref because `fetchDirections` is a `useCallback` that deliberately does
-   * not depend on the selected destination — adding it there would rebuild the
-   * callback, and with it the route request, every time the selection object is
-   * re-created.
-   */
-  const destinationLabelRef = useRef<string | undefined>(undefined);
   // Driving-mode HUD extras
   const [isPaused, setIsPaused] = useState(false);
   const [nearbyExpanded, setNearbyExpanded] = useState(false);
@@ -838,43 +819,6 @@ export default function MapScreen() {
   const [photoToast, setPhotoToast] = useState<string | null>(null);
   const isPausedRef = useRef(false);
   const pauseStartRef = useRef<number>(0);
-
-  /**
-   * The car display's buttons, on their way into this screen's handlers.
-   *
-   * A ref rather than the handlers directly, because `useNativeTrip` subscribes
-   * once and the handlers are `useCallback`s defined several hundred lines
-   * below this point — closing over them here would be a use-before-declare,
-   * and passing them in would tear the subscription down and rebuild it on
-   * every render, which on this screen is several times a second while
-   * recording.
-   */
-  const carCommandHandlersRef = useRef<{
-    start: () => void;
-    pause: () => void;
-    resume: () => void;
-    end: () => void;
-  } | null>(null);
-
-  /**
-   * The native recorder, when this build has one.
-   *
-   * `nativeTrip.active` is false on iOS, on web, and on any Android build made
-   * before the Android Auto config plugin — and on all three this screen keeps
-   * recording exactly as it always has. See `hooks/useNativeTrip.ts` for why
-   * both paths still exist rather than one replacing the other.
-   */
-  const nativeTrip = useNativeTrip({
-    onCarCommand: useCallback((command: "start" | "pause" | "resume" | "end") => {
-      // The service has already acted by the time this arrives — the drive is
-      // running or finished regardless. This is the phone catching up, which
-      // is the whole point: without it a driver who ends a drive on the head
-      // unit finds their phone still showing a recording that will never save.
-      const handlers = carCommandHandlersRef.current;
-      if (!handlers) return;
-      handlers[command]();
-    }, []),
-  });
   const pausedAccumRef = useRef<number>(0);
   const speedSamplesRef = useRef<number[]>([]);
   /** Capture time (epoch ms) of each fix in `recordedPath`, same length. */
@@ -1135,9 +1079,6 @@ export default function MapScreen() {
           };
         });
         setRouteSteps(steps);
-        setCarRoute(
-          carRouteFromDirections(result.steps, result, destinationLabelRef.current)
-        );
 
         fitToCoordinates(result.coordinates, {
           edgePadding: { top: 80, right: 60, bottom: 250, left: 60 },
@@ -1167,14 +1108,6 @@ export default function MapScreen() {
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { routeInfoRef.current = routeInfo; }, [routeInfo]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
-  useEffect(() => {
-    destinationLabelRef.current =
-      selectedDestination == null
-        ? undefined
-        : selectedDestination.type === "cafe"
-          ? selectedDestination.data.name
-          : selectedDestination.name;
-  }, [selectedDestination]);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -1387,49 +1320,9 @@ export default function MapScreen() {
       } else {
         pausedAccumRef.current += Date.now() - pauseStartRef.current;
       }
-      // Keep the service in step, so the car display shows "Drive paused"
-      // rather than a distance that has quietly stopped advancing.
-      void (next ? nativeTrip.pause() : nativeTrip.resume());
       return next;
     });
-  }, [nativeTrip]);
-
-
-  /**
-   * Mirror the service's totals while it owns the drive.
-   *
-   * Only when `nativeTrip.active` — otherwise this screen's own GPS callback
-   * is the recorder and writing over its numbers here would fight it. The two
-   * measure the same road with the same haversine rule and the same jitter
-   * floor, so the handover is a change of source rather than a change of value.
-   *
-   * The path is NOT mirrored: it does not cross the bridge on every tick (a
-   * two-hour drive is some seven thousand points at 1 Hz), so this screen keeps
-   * drawing its own live polyline and the service's full path is read once,
-   * when the drive ends.
-   */
-  useEffect(() => {
-    if (!nativeTrip.active) return;
-    const native = nativeTrip.state;
-    if (!native || native.recording === "idle") return;
-    setTripDistance(native.distanceMeters);
-    setElapsedMs(native.elapsedMs);
-    if (native.speedKmh >= 0) setCurrentSpeed(native.speedKmh);
-    setTripTopSpeed((prev) => Math.max(prev, native.topSpeedKmh));
-  }, [nativeTrip.active, nativeTrip.state]);
-
-  /**
-   * Publish the destination route to the car, or clear it.
-   *
-   * Directions are fetched once, here, for the phone's navigation card and
-   * pushed down — the car never calls Mapbox itself. Two screens in one car
-   * showing two subtly different routes would be worse than either being a
-   * little stale, and the car is the place least likely to have a connection.
-   */
-  useEffect(() => {
-    if (!nativeTrip.active) return;
-    void nativeTrip.publishRoute(carRoute);
-  }, [nativeTrip, carRoute]);
+  }, []);
 
   // --- Record button: snap a quick photo of the drive ---
   const captureDrivePhoto = useCallback(async () => {
@@ -1794,7 +1687,6 @@ export default function MapScreen() {
     setRouteSplitIdx(null);
     setXpEarned(null);
     setRouteSteps([]);
-    setCarRoute(null);
     // The leader stopping is the convoy arriving (or changing its mind).
     // Nothing else clears the shared destination, so without this a convoy
     // stays pointed at last night's meet until the 6-hour staleness window in
@@ -1982,11 +1874,6 @@ export default function MapScreen() {
   // --- Recording handlers ---
   const startRecording = useCallback(() => {
     const now = Date.now();
-    // Hand the drive to the native service where there is one, so the car
-    // display has something to show even with this screen unmounted and the
-    // app backgrounded. Fire-and-forget: it resolves false rather than throwing
-    // when unavailable, and this screen's own recorder runs either way.
-    void nativeTrip.start();
     setIsRecording(true);
     setTripStartMs(now);
     setElapsedMs(0);
@@ -2031,12 +1918,9 @@ export default function MapScreen() {
         { duration: 600 }
       );
     }
-  }, [userLocation, heading, resolveOriginName, animateCamera, nativeTrip]);
+  }, [userLocation, heading, resolveOriginName, animateCamera]);
 
   const stopRecording = useCallback(() => {
-    // Stop the service too. Its own totals are read back inside `stopTrip`
-    // before it shuts down, so this is safe to fire without awaiting.
-    void nativeTrip.stop();
     setIsRecording(false);
     setCurrentSpeed(0);
     setRouteSplitIdx(null);
@@ -2141,30 +2025,6 @@ export default function MapScreen() {
 
     // Keep path visible after stopping
   }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, destinationStoredName, originLabel, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar]);
-
-  /**
-   * The car's buttons, bound to this screen's handlers.
-   *
-   * Populated in an effect rather than passed into `useNativeTrip` directly
-   * because the handlers are defined below where the hook is called. See the
-   * ref's declaration for why the subscription must not depend on them.
-   */
-  useEffect(() => {
-    carCommandHandlersRef.current = {
-      start: () => {
-        if (!isRecordingRef.current) startRecording();
-      },
-      pause: () => {
-        if (isRecordingRef.current && !isPausedRef.current) togglePause();
-      },
-      resume: () => {
-        if (isRecordingRef.current && isPausedRef.current) togglePause();
-      },
-      end: () => {
-        if (isRecordingRef.current) stopRecording();
-      },
-    };
-  }, [startRecording, stopRecording, togglePause]);
 
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
