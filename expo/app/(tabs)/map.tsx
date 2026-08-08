@@ -141,6 +141,7 @@ import {
 import {
   CutCornerBadge,
   CutCornerButton,
+  CutCornerPressable,
   CutCornerSurface,
 } from "@/components/CutCorner";
 import {
@@ -159,6 +160,7 @@ import {
   borderWidth,
   colors,
   cut,
+  edge,
   fontFamily,
   mapLabelShadow,
   onRacingRed,
@@ -3777,28 +3779,34 @@ export default function MapScreen() {
           {/* DRIVE is the screen's primary action, so it is the one solid
               red slab in the idle viewport. */}
           <View style={styles.labeledBtn}>
-            <Pressable
+            <CutCornerPressable
               accessibilityRole="button"
               accessibilityState={{ selected: showDropPinHint }}
               accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
               onPress={toggleDrive}
+              fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
+              borderColor={colors.racingRed}
+              borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
+              cutSize={cut.md}
+              corners="topRight"
+              // The screen's primary action, so it sinks like a button rather
+              // than scaling like a card, and carries the accent highlight
+              // while it is the red slab.
+              motion="sink"
+              highlightColor={
+                showDropPinHint ? edge.highlight : edge.highlightOnAccent
+              }
+              elevation="floating"
+              style={styles.driveBtn}
+              padding={0}
+              contentStyle={styles.driveBtnContent}
             >
-              <CutCornerSurface
-                fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
-                borderColor={colors.racingRed}
-                borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
-                cutSize={cut.md}
-                corners="topRight"
-                style={styles.driveBtn}
-                contentStyle={styles.driveBtnContent}
-              >
-                <Car
-                  size={spacing.spacingXl}
-                  color={showDropPinHint ? colors.racingRed : onRacingRed}
-                  strokeWidth={MAP_GLYPH_STROKE}
-                />
-              </CutCornerSurface>
-            </Pressable>
+              <Car
+                size={spacing.spacingXl}
+                color={showDropPinHint ? colors.racingRed : onRacingRed}
+                strokeWidth={MAP_GLYPH_STROKE}
+              />
+            </CutCornerPressable>
             <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
           </View>
 
