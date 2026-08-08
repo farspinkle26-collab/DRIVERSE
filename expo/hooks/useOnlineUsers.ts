@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AppState } from "react-native";
 import { supabase } from "@/lib/supabase";
 import * as Location from "expo-location";
+import { DEMO_DRIVERS_ENABLED, withDemoDrivers } from "@/lib/demoDrivers";
 import {
   mergeOnlineUsers,
   pruneRecentlyOffline,
@@ -106,10 +107,31 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
 
   useEffect(() => { userIdRef.current = userId; }, [userId]);
 
+  // ─── TEMPORARY: promo capture ────────────────────────────
+  // Delete this block together with `lib/demoDrivers.ts`. It is inert while
+  // DEMO_DRIVERS_ENABLED is false, which is enforced by that module's test.
+  const [demoCentre, setDemoCentre] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [demoTick, setDemoTick] = useState(0);
+  useEffect(() => {
+    if (!DEMO_DRIVERS_ENABLED) return;
+    const id = setInterval(() => setDemoTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // ─── The map's view of everyone else ─────────────────────
   const onlineUsers = useMemo(
-    () => mergeOnlineUsers(presenceUsers, directoryUsers),
-    [presenceUsers, directoryUsers]
+    () =>
+      withDemoDrivers(
+        mergeOnlineUsers(presenceUsers, directoryUsers),
+        demoCentre
+      ),
+    // `demoTick` is what re-runs this once a second so the demo cast moves;
+    // it is unused in the body and does nothing while the flag is off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [presenceUsers, directoryUsers, demoCentre, demoTick]
   );
 
   // ─── Listen for auth state ───────────────────────────────
@@ -330,6 +352,13 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   // ─── Broadcast own position: presence track + DB persist ──
   const publishPosition = useCallback(
     async (uid: string, pos: { latitude: number; longitude: number; heading: number }) => {
+      // TEMPORARY, with lib/demoDrivers.ts: the demo cast wanders around
+      // wherever you are, so it needs your position. No-op while the flag is
+      // off — see that module's header.
+      if (DEMO_DRIVERS_ENABLED) {
+        setDemoCentre({ latitude: pos.latitude, longitude: pos.longitude });
+      }
+
       const payload: OnlineUser = {
         user_id: uid,
         name: profileRef.current.name,
