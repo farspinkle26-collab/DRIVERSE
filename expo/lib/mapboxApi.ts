@@ -129,6 +129,17 @@ export interface DirectionsStep {
   maneuverModifier?: string;
   distanceMeters: number;
   durationSeconds: number;
+  /**
+   * Where the maneuver happens.
+   *
+   * Added for the car display: the Android Auto screen has to advance through
+   * the steps as the driver actually moves, which means matching the current
+   * position against each maneuver's location (`TripGeo.currentStepIndex`).
+   * The phone's navigation card never needed it because it advances off the
+   * route geometry it is already drawing.
+   */
+  latitude: number;
+  longitude: number;
 }
 
 export interface DetailedDirectionsResult {
@@ -176,6 +187,10 @@ export async function getDirectionsWithSteps(
         maneuverModifier: step.maneuver?.modifier,
         distanceMeters: step.distance ?? 0,
         durationSeconds: step.duration ?? 0,
+        // `maneuver.location` is [lng, lat], like every other Mapbox
+        // coordinate and unlike every other field on this object.
+        latitude: step.maneuver?.location?.[1] ?? 0,
+        longitude: step.maneuver?.location?.[0] ?? 0,
       })),
     };
   } catch (error) {
