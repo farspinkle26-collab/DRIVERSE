@@ -166,13 +166,6 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
-import {
-  DEMO_DRIVERS_ENABLED,
-  demoAvatarSource as avatarSource,
-  isDemoDriver,
-  withDemoDrivers,
-} from "@/lib/demoDrivers";
-import DemoDriverSheet from "@/components/DemoDriverSheet";
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -913,11 +906,6 @@ export default function MapScreen() {
   } = useParty();
   const [convoyMenuOpen, setConvoyMenuOpen] = useState(false);
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
-  // TEMPORARY: promo capture. A demo driver's "See profile" opens this local
-  // sheet instead of navigating to /user/[id] — that route loads a real
-  // profile from Supabase, and a demo-driver-N id has no row to load. Delete
-  // with lib/demoDrivers.ts and components/DemoDriverSheet.tsx.
-  const [demoProfileUser, setDemoProfileUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
   // The raise-a-signal chooser sheet, and a tick that re-renders the age
   // labels ("3 min ago") on active signals once a minute.
@@ -1512,19 +1500,6 @@ export default function MapScreen() {
   // --- Ask a meetup from map marker ---
   const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!user) return;
-    // TEMPORARY: promo capture. A demo driver satisfies no foreign key, so the
-    // insert below would fail and the footage would show an error alert on the
-    // one action most worth filming. Answer it locally instead — the sheet
-    // behaves exactly as it does for a real driver, and still nothing is
-    // written. Delete with lib/demoDrivers.ts.
-    if (isDemoDriver(friendId)) {
-      setAskingMeetup(true);
-      setTimeout(() => {
-        setAskingMeetup(false);
-        appAlert("Meetup request sent", `${friendName} will see it in their inbox.`);
-      }, 600);
-      return;
-    }
     setAskingMeetup(true);
     try {
       const { error } = await supabase.from("direct_messages").insert({
@@ -1550,15 +1525,6 @@ export default function MapScreen() {
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!user) return;
-    // TEMPORARY: promo capture — same reason as the meetup handler above.
-    if (isDemoDriver(friendId)) {
-      setAddingFriend(true);
-      setTimeout(() => {
-        setAddingFriend(false);
-        appAlert("Friend request sent", `${friendName} will get your request.`);
-      }, 600);
-      return;
-    }
     setAddingFriend(true);
     try {
       const { error } = await supabase.from("friends").insert({
@@ -2150,38 +2116,10 @@ export default function MapScreen() {
     }
   }
 
-  // ─── TEMPORARY: promo capture ────────────────────────────
-  // Delete this block together with `lib/demoDrivers.ts`.
-  //
-  // Folded in HERE rather than inside `useOnlineUsers` because the centre has
-  // to be `userLocation`, which the screen's own location watcher fills in
-  // whether or not you are sharing your position. Hanging it off the presence
-  // broadcast meant nothing appeared with VISIBILITY OFF, which is the state
-  // the app opens in.
-  //
-  // The real list still obeys the reciprocal-privacy rule below (hidden means
-  // you do not see others); only the demo cast is exempt, so a capture works
-  // without having to go online first.
-  const [demoTick, setDemoTick] = useState(0);
-  useEffect(() => {
-    if (!DEMO_DRIVERS_ENABLED) return;
-    const id = setInterval(() => setDemoTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  /** What the map actually draws: real drivers if visible, plus the cast. */
-  const visibleDrivers = useMemo(
-    () => withDemoDrivers(isUserOnline ? onlineUsers : [], userLocation),
-    // `demoTick` is what re-runs this once a second so the cast moves; it is
-    // unused in the body and does nothing while the flag is off.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isUserOnline, onlineUsers, userLocation, demoTick]
-  );
-
   // Nearest other online player (for the "Jason Lv.34 600m" style card)
   let nearestFriend: (OnlineUser & { dist: number }) | null = null;
   if (userLocation) {
-    for (const ou of visibleDrivers) {
+    for (const ou of onlineUsers) {
       const d = haversineMeters(userLocation, { latitude: ou.latitude, longitude: ou.longitude });
       if (!nearestFriend || d < nearestFriend.dist) nearestFriend = { ...ou, dist: d };
     }
@@ -2626,7 +2564,7 @@ export default function MapScreen() {
             (see PLAYER_COLORS); everything else — level badge, convoy badge,
             name plate — is palette. The party ring stays thicker rather than
             brighter, because a shadow-based "glow" is not in the system. */}
-        {visibleDrivers.length > 0 && visibleDrivers.map((onlineUser) => {
+        {isUserOnline && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
           // A raised problem takes the accent and overrides the livery/party
           // colour: distress has to win the marker outright, or it competes
@@ -2687,9 +2625,9 @@ export default function MapScreen() {
                     { borderColor: ringColor },
                     (isPartyMate || problem) && styles.playerRingParty,
                   ]}>
-                    {avatarSource(onlineUser.avatar) ? (
+                    {onlineUser.avatar ? (
                       <Image
-                        source={avatarSource(onlineUser.avatar)!}
+                        source={{ uri: onlineUser.avatar }}
                         style={styles.playerAvatarImg}
                         fadeDuration={0}
                         onLoadEnd={() => handleAvatarLoaded(onlineUser.user_id)}
@@ -4403,11 +4341,6 @@ export default function MapScreen() {
               style={styles.driverSheetHeader}
               onPress={() => {
                 const uid = selectedOnlineUser.user_id;
-                if (isDemoDriver(uid)) {
-                  setDemoProfileUser(selectedOnlineUser);
-                  setSelectedOnlineUser(null);
-                  return;
-                }
                 setSelectedOnlineUser(null);
                 router.push(`/user/${uid}` as any);
               }}
@@ -4418,8 +4351,8 @@ export default function MapScreen() {
                   { borderColor: playerColor(selectedOnlineUser.user_id) },
                 ]}
               >
-                {avatarSource(selectedOnlineUser.avatar) ? (
-                  <Image source={avatarSource(selectedOnlineUser.avatar)!} style={styles.driverSheetAvatarImg} />
+                {selectedOnlineUser.avatar ? (
+                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.driverSheetAvatarImg} />
                 ) : (
                   <Text style={styles.avatarInitial}>
                     {(selectedOnlineUser.name?.[0] ?? "D").toUpperCase()}
@@ -4479,11 +4412,6 @@ export default function MapScreen() {
                 icon={<User size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => {
                   const uid = selectedOnlineUser.user_id;
-                  if (isDemoDriver(uid)) {
-                    setDemoProfileUser(selectedOnlineUser);
-                    setSelectedOnlineUser(null);
-                    return;
-                  }
                   setSelectedOnlineUser(null);
                   router.push(`/user/${uid}` as any);
                 }}
@@ -4534,9 +4462,6 @@ export default function MapScreen() {
           </CutCornerSurface>
         </View>
       )}
-
-      {/* TEMPORARY: promo capture — see the state declaration above. */}
-      <DemoDriverSheet driver={demoProfileUser} onClose={() => setDemoProfileUser(null)} />
 
       {/* --- Selected destination callout (landmark or dropped pin) ---
               Rajdhani for the place name, Inter for the address line,
