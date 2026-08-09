@@ -166,6 +166,7 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
+import { DEMO_DRIVERS_ENABLED, withDemoDrivers } from "@/lib/demoDrivers";
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -2116,10 +2117,38 @@ export default function MapScreen() {
     }
   }
 
+  // ─── TEMPORARY: promo capture ────────────────────────────
+  // Delete this block together with `lib/demoDrivers.ts`.
+  //
+  // Folded in HERE rather than inside `useOnlineUsers` because the centre has
+  // to be `userLocation`, which the screen's own location watcher fills in
+  // whether or not you are sharing your position. Hanging it off the presence
+  // broadcast meant nothing appeared with VISIBILITY OFF, which is the state
+  // the app opens in.
+  //
+  // The real list still obeys the reciprocal-privacy rule below (hidden means
+  // you do not see others); only the demo cast is exempt, so a capture works
+  // without having to go online first.
+  const [demoTick, setDemoTick] = useState(0);
+  useEffect(() => {
+    if (!DEMO_DRIVERS_ENABLED) return;
+    const id = setInterval(() => setDemoTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  /** What the map actually draws: real drivers if visible, plus the cast. */
+  const visibleDrivers = useMemo(
+    () => withDemoDrivers(isUserOnline ? onlineUsers : [], userLocation),
+    // `demoTick` is what re-runs this once a second so the cast moves; it is
+    // unused in the body and does nothing while the flag is off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isUserOnline, onlineUsers, userLocation, demoTick]
+  );
+
   // Nearest other online player (for the "Jason Lv.34 600m" style card)
   let nearestFriend: (OnlineUser & { dist: number }) | null = null;
   if (userLocation) {
-    for (const ou of onlineUsers) {
+    for (const ou of visibleDrivers) {
       const d = haversineMeters(userLocation, { latitude: ou.latitude, longitude: ou.longitude });
       if (!nearestFriend || d < nearestFriend.dist) nearestFriend = { ...ou, dist: d };
     }
@@ -2564,7 +2593,7 @@ export default function MapScreen() {
             (see PLAYER_COLORS); everything else — level badge, convoy badge,
             name plate — is palette. The party ring stays thicker rather than
             brighter, because a shadow-based "glow" is not in the system. */}
-        {isUserOnline && onlineUsers.length > 0 && onlineUsers.map((onlineUser) => {
+        {visibleDrivers.length > 0 && visibleDrivers.map((onlineUser) => {
           const isPartyMate = partyMemberIds.has(onlineUser.user_id);
           // A raised problem takes the accent and overrides the livery/party
           // colour: distress has to win the marker outright, or it competes
