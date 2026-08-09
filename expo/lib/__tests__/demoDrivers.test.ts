@@ -1,6 +1,7 @@
 import {
   DEMO_DRIVERS_ENABLED,
   demoAvatarSource,
+  demoCarFor,
   demoDrivers,
   isDemoDriver,
   withDemoDrivers,
@@ -190,5 +191,23 @@ describe("demoAvatarSource", () => {
     expect(demoAvatarSource(null)).toBeNull();
     expect(demoAvatarSource(undefined)).toBeNull();
     expect(demoAvatarSource("")).toBeNull();
+  });
+});
+
+describe("demoCarFor", () => {
+  it("gives every demo driver a car — an empty garage would look broken", () => {
+    for (const d of demoDrivers(CENTRE, 1_000_000)) {
+      const car = demoCarFor(d.user_id);
+      expect(car).not.toBeNull();
+      expect(car!.name.length).toBeGreaterThan(0);
+      expect(car!.make.length).toBeGreaterThan(0);
+      expect(car!.hp).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns null for a real driver — nothing to fake there", () => {
+    expect(demoCarFor("real-1")).toBeNull();
+    expect(demoCarFor(null)).toBeNull();
+    expect(demoCarFor(undefined)).toBeNull();
   });
 });

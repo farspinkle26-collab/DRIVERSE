@@ -45,6 +45,7 @@ import {
   ArrowLeft,
   Bell,
   Bookmark,
+  Camera,
   Car,
   Check,
   CheckCircle2,
@@ -112,6 +113,7 @@ import {
   CutCornerSurface,
 } from "@/components/CutCorner";
 import {
+  alpha,
   borderWidth,
   colors,
   cut,
@@ -124,6 +126,7 @@ import { tripCode, formatSpeed } from "@/lib/tripStats";
 import { speedUnitForCountry, type SpeedUnit } from "@/lib/speedUnits";
 import { supabase } from "@/lib/supabase";
 import { generateCarImage } from "@/lib/generateCarImage";
+import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
 import { resizeForUpload } from "@/lib/resizeForUpload";
 import { parseLimitRejection } from "@/lib/platinumLimits";
 import { appAlert } from "@/lib/appAlert";
@@ -894,6 +897,66 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
     loadCars();
   }, [user, loadCars]);
 
+  // ─── Manual car photo upload ─────────────────────────────────
+  //
+  // Distinct from the AI showcase below: `onGenerate` renders a stylised shot
+  // from a reference photo through the paid Gemini pipeline. This is the
+  // plain case — a driver (or anyone customizing an account for a demo/promo
+  // capture) just wants the photo they picked to be the photo on the card,
+  // no generation involved. Writes `car_collections.photo_url` directly, the
+  // same column the AI path writes, so `FeaturedCar`'s `hasRender` check and
+  // the share card both work unmodified either way a photo got there.
+  const [uploadingCarPhoto, setUploadingCarPhoto] = useState<string | null>(null);
+
+  const pickAndUploadCarPhoto = useCallback(
+    async (car: CarItem, useCamera: boolean) => {
+      if (!user) return;
+      try {
+        if (Platform.OS !== "web") {
+          const perm = useCamera
+            ? await ImagePickerExpo.requestCameraPermissionsAsync()
+            : await ImagePickerExpo.requestMediaLibraryPermissionsAsync();
+          if (perm.status !== "granted") {
+            appAlert("Permission needed", "We need access to update your car's photo.");
+            return;
+          }
+        }
+        const result = useCamera
+          ? await ImagePickerExpo.launchCameraAsync({ allowsEditing: true, aspect: [4, 3], quality: 0.85 })
+          : await ImagePickerExpo.launchImageLibraryAsync({ allowsEditing: true, aspect: [4, 3], quality: 0.85 });
+        if (result.canceled || !result.assets?.[0]) return;
+
+        setUploadingCarPhoto(car.id);
+        const publicUrl = await uploadCarPhoto(user.id, car.id, result.assets[0].uri);
+        const { error } = await supabase
+          .from("car_collections")
+          .update({ photo_url: publicUrl })
+          .eq("id", car.id);
+        if (error) {
+          appAlert("Error", "Could not save the new photo.");
+          return;
+        }
+        setCars((prev) => prev.map((c) => (c.id === car.id ? { ...c, photo_url: publicUrl } : c)));
+      } catch {
+        appAlert("Error", "Something went wrong uploading that photo.");
+      } finally {
+        setUploadingCarPhoto(null);
+      }
+    },
+    [user]
+  );
+
+  const handleChangeCarPhoto = useCallback(
+    (car: CarItem) => {
+      appAlert("Car Photo", "Choose a photo for this car", [
+        { text: "Take Photo", onPress: () => pickAndUploadCarPhoto(car, true) },
+        { text: "Choose from Library", onPress: () => pickAndUploadCarPhoto(car, false) },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    },
+    [pickAndUploadCarPhoto]
+  );
+
   // ─── AI car render (Gemini Lite) ────────────────────────────
   // Platinum-gated, same as the garage-slot cap above: check before the
   // modal opens so a Regular driver sees the paywall, not a "free" pitch
@@ -1430,6 +1493,8 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
                 car={primaryCar}
                 isSelf={isSelf}
                 onGenerate={() => openPremium(primaryCar)}
+                onUploadPhoto={() => handleChangeCarPhoto(primaryCar)}
+                uploadingPhoto={uploadingCarPhoto === primaryCar.id}
                 onDelete={() => handleDeleteCar(primaryCar.id)}
                 driveStats={statsByCarId[primaryCar.id]}
                 speedUnit={speedUnit}
@@ -2543,6 +2608,8 @@ function FeaturedCar({
   car,
   isSelf,
   onGenerate,
+  onUploadPhoto,
+  uploadingPhoto = false,
   onDelete,
   driveStats,
   speedUnit = "kmh",
@@ -2550,6 +2617,12 @@ function FeaturedCar({
   car: CarItem;
   isSelf: boolean;
   onGenerate: () => void;
+  /**
+   * Manual photo pick, separate from `onGenerate`'s AI render — a driver who
+   * just wants the photo they picked to be the photo, no generation.
+   */
+  onUploadPhoto?: () => void;
+  uploadingPhoto?: boolean;
   onDelete: () => void;
   driveStats?: CarDriveStats;
   speedUnit?: SpeedUnit;
@@ -2590,7 +2663,28 @@ function FeaturedCar({
         </View>
 
         {hasRender ? (
-          <Image source={{ uri: car.photo_url as string }} style={styles.featuredImage} resizeMode="cover" />
+          <View style={styles.featuredImageWrap}>
+            <Image source={{ uri: car.photo_url as string }} style={styles.featuredImage} resizeMode="cover" />
+            {isSelf && onUploadPhoto && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Change car photo"
+                onPress={onUploadPhoto}
+                disabled={uploadingPhoto}
+                style={({ pressed }) => [
+                  styles.changePhotoBtn,
+                  pressed && styles.pressed,
+                  uploadingPhoto && styles.disabled,
+                ]}
+              >
+                {uploadingPhoto ? (
+                  <ActivityIndicator size="small" color={colors.textPrimary} />
+                ) : (
+                  <Camera size={ICON_SM} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+                )}
+              </Pressable>
+            )}
+          </View>
         ) : (
           <View style={styles.featuredLocked}>
             <View style={styles.featuredSilhouette}>
@@ -2602,16 +2696,35 @@ function FeaturedCar({
                 <Text style={styles.premiumTagText}>AI RENDER</Text>
               </View>
               {isSelf ? (
-                <CutCornerButton
-                  title="Generate My Car"
-                  variant="primary"
-                  size="sm"
-                  corners="topRight"
-                  onPress={onGenerate}
-                  icon={
-                    <Sparkles size={ICON_SM} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
-                  }
-                />
+                <View style={styles.featuredLockedActions}>
+                  <CutCornerButton
+                    title="Generate My Car"
+                    variant="primary"
+                    size="sm"
+                    corners="topRight"
+                    onPress={onGenerate}
+                    icon={
+                      <Sparkles size={ICON_SM} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                    }
+                  />
+                  {onUploadPhoto && (
+                    <CutCornerButton
+                      title={uploadingPhoto ? "Uploading…" : "Upload Photo"}
+                      variant="outline"
+                      size="sm"
+                      corners="topRight"
+                      disabled={uploadingPhoto}
+                      onPress={onUploadPhoto}
+                      icon={
+                        uploadingPhoto ? (
+                          <ActivityIndicator size="small" color={colors.racingRed} />
+                        ) : (
+                          <Camera size={ICON_SM} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                        )
+                      }
+                    />
+                  )}
+                </View>
               ) : (
                 <Text style={styles.featuredLockedNote}>Not generated yet</Text>
               )}
@@ -2942,11 +3055,32 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flexShrink: 1,
   },
+  featuredImageWrap: {
+    position: "relative",
+  },
   featuredImage: {
     width: "100%",
     height: 176, // 4 × 44
     backgroundColor: colors.voidBlack,
   },
+  changePhotoBtn: {
+    position: "absolute",
+    bottom: spacing.spacingSm,
+    right: spacing.spacingSm,
+    width: 36,
+    height: 36,
+    borderRadius: radius.circle,
+    backgroundColor: alpha(colors.voidBlack, 0.75),
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featuredLockedActions: {
+    flexDirection: "row",
+    gap: spacing.spacingSm,
+  },
+  disabled: { opacity: 0.5 },
   featuredLocked: {
     height: 176,
     backgroundColor: colors.voidBlack,
