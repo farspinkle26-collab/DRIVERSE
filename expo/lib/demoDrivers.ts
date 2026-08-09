@@ -90,6 +90,26 @@ const DEMO_AVATARS = [
 ] as const;
 
 /**
+ * A demo driver's garage car — enough for the "see their car" step of a
+ * profile tap to have something real to show, without a photo asset.
+ *
+ * `color` is a hex swatch, drawn exactly where a real car without a photo
+ * draws one (`GarageCard`/`FeaturedCar` already fall back to `car.color`
+ * when `photo_url` is absent) — so a demo car needs no bundled image and no
+ * upload, and still renders through the app's existing empty-photo path
+ * rather than a bespoke one.
+ */
+export interface DemoCar {
+  name: string;
+  make: string;
+  model: string;
+  year: string;
+  hp: number;
+  color: string;
+  colorName: string;
+}
+
+/**
  * The cast.
  *
  * Every name is distinct and every avatar slot is used at most once — a map
@@ -98,15 +118,55 @@ const DEMO_AVATARS = [
  *
  * Levels are spread 3–33 and weighted low, which is what a young app's
  * population actually looks like.
+ *
+ * Every driver carries a car — tapping through to a demo profile with an
+ * empty garage would look like a broken account rather than a populated one,
+ * which defeats the point of this layer.
  */
-const CAST: { name: string; level: number; avatarIndex?: number }[] = [
-  { name: "Marcus", level: 12, avatarIndex: 0 },
-  { name: "Ellie", level: 4 },
-  { name: "Priya", level: 27, avatarIndex: 1 },
-  { name: "Jonah", level: 8 },
-  { name: "Tom H.", level: 19, avatarIndex: 2 },
-  { name: "Sofia", level: 3 },
-  { name: "Dean", level: 33 },
+const CAST: {
+  name: string;
+  level: number;
+  avatarIndex?: number;
+  car: DemoCar;
+}[] = [
+  {
+    name: "Marcus",
+    level: 12,
+    avatarIndex: 0,
+    car: { name: "Night Runner", make: "Nissan", model: "Silvia S15", year: "2001", hp: 250, color: "#1A1A1A", colorName: "Phantom Black" },
+  },
+  {
+    name: "Ellie",
+    level: 4,
+    car: { name: "Sunday Driver", make: "Mazda", model: "MX-5", year: "2019", hp: 181, color: "#EF4444", colorName: "Racing Red" },
+  },
+  {
+    name: "Priya",
+    level: 27,
+    avatarIndex: 1,
+    car: { name: "Daily", make: "Volkswagen", model: "Golf GTI", year: "2022", hp: 241, color: "#3B82F6", colorName: "Midnight Blue" },
+  },
+  {
+    name: "Jonah",
+    level: 8,
+    car: { name: "Workhorse", make: "Toyota", model: "Corolla", year: "2018", hp: 139, color: "#F9FAFB", colorName: "Arctic White" },
+  },
+  {
+    name: "Tom H.",
+    level: 19,
+    avatarIndex: 2,
+    car: { name: "The Beast", make: "BMW", model: "M3", year: "2020", hp: 473, color: "#1A1A1A", colorName: "Phantom Black" },
+  },
+  {
+    name: "Sofia",
+    level: 3,
+    car: { name: "First Car", make: "Honda", model: "Civic", year: "2015", hp: 158, color: "#22C55E", colorName: "Toxic Green" },
+  },
+  {
+    name: "Dean",
+    level: 33,
+    car: { name: "Track Day", make: "Porsche", model: "911", year: "2023", hp: 379, color: "#F59E0B", colorName: "Solar Orange" },
+  },
 ];
 
 /** How many wander around you. Enough to look alive, not like a crowd. */
@@ -228,6 +288,18 @@ export function demoAvatarSource(
   if (!avatar.startsWith(prefix)) return { uri: avatar };
   const index = Number(avatar.slice(prefix.length));
   return DEMO_AVATARS[index] ?? null;
+}
+
+/**
+ * The car for a demo driver, by id. Backs the "See profile" step on a demo
+ * marker — see the note in `app/(tabs)/map.tsx` on why that opens a local
+ * sheet instead of `router.push("/user/[id]")`: that route loads a real
+ * profile from Supabase, and a `demo-driver-N` id has no row to load.
+ */
+export function demoCarFor(userId: string | null | undefined): DemoCar | null {
+  if (!isDemoDriver(userId)) return null;
+  const index = Number(userId!.slice(DEMO_ID_PREFIX.length));
+  return CAST[index]?.car ?? null;
 }
 
 /**

@@ -172,6 +172,7 @@ import {
   isDemoDriver,
   withDemoDrivers,
 } from "@/lib/demoDrivers";
+import DemoDriverSheet from "@/components/DemoDriverSheet";
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -912,6 +913,11 @@ export default function MapScreen() {
   } = useParty();
   const [convoyMenuOpen, setConvoyMenuOpen] = useState(false);
   const [selectedOnlineUser, setSelectedOnlineUser] = useState<OnlineUser | null>(null);
+  // TEMPORARY: promo capture. A demo driver's "See profile" opens this local
+  // sheet instead of navigating to /user/[id] — that route loads a real
+  // profile from Supabase, and a demo-driver-N id has no row to load. Delete
+  // with lib/demoDrivers.ts and components/DemoDriverSheet.tsx.
+  const [demoProfileUser, setDemoProfileUser] = useState<OnlineUser | null>(null);
   const [invitingToParty, setInvitingToParty] = useState(false);
   // The raise-a-signal chooser sheet, and a tick that re-renders the age
   // labels ("3 min ago") on active signals once a minute.
@@ -4397,6 +4403,11 @@ export default function MapScreen() {
               style={styles.driverSheetHeader}
               onPress={() => {
                 const uid = selectedOnlineUser.user_id;
+                if (isDemoDriver(uid)) {
+                  setDemoProfileUser(selectedOnlineUser);
+                  setSelectedOnlineUser(null);
+                  return;
+                }
                 setSelectedOnlineUser(null);
                 router.push(`/user/${uid}` as any);
               }}
@@ -4468,6 +4479,11 @@ export default function MapScreen() {
                 icon={<User size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
                 onPress={() => {
                   const uid = selectedOnlineUser.user_id;
+                  if (isDemoDriver(uid)) {
+                    setDemoProfileUser(selectedOnlineUser);
+                    setSelectedOnlineUser(null);
+                    return;
+                  }
                   setSelectedOnlineUser(null);
                   router.push(`/user/${uid}` as any);
                 }}
@@ -4518,6 +4534,9 @@ export default function MapScreen() {
           </CutCornerSurface>
         </View>
       )}
+
+      {/* TEMPORARY: promo capture — see the state declaration above. */}
+      <DemoDriverSheet driver={demoProfileUser} onClose={() => setDemoProfileUser(null)} />
 
       {/* --- Selected destination callout (landmark or dropped pin) ---
               Rajdhani for the place name, Inter for the address line,
