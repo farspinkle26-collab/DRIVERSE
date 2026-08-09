@@ -167,7 +167,6 @@ export default function CustomizeProfileScreen() {
   // Step 4: Car identity, and the optional photo of the real car
   const [carName, setCarName] = useState("");
   const [carYear, setCarYear] = useState("2024");
-  const [licensePlate, setLicensePlate] = useState("");
   const [carPhotoUri, setCarPhotoUri] = useState<string | null>(null);
   const [pickingCarPhoto, setPickingCarPhoto] = useState(false);
 
@@ -384,7 +383,6 @@ export default function CustomizeProfileScreen() {
             year: carYear,
             color: selectedColor.hex,
             color_name: selectedColor.name,
-            license_plate: licensePlate.trim() || null,
             ...(photoUrl ? { photo_url: photoUrl } : {}),
           })
           .eq("id", primaryCar.id);
@@ -676,17 +674,11 @@ export default function CustomizeProfileScreen() {
                   />
                 </View>
 
-                <View style={[styles.inputWrapper, { marginTop: spacing.spacingMd }]}>
-                  <Car size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="License plate (optional)"
-                    placeholderTextColor={colors.textSecondary}
-                    value={licensePlate}
-                    onChangeText={setLicensePlate}
-                    autoCapitalize="characters"
-                  />
-                </View>
+                {/* No license plate field, deliberately. A plate identifies a
+                    real vehicle and, through it, a person — it is the one
+                    thing a driver could enter here that would follow them
+                    off the app, and nothing in Driveverse reads it. Do not
+                    add it back without a feature that needs it. */}
 
                 {/* ---- Optional photo of the real car ----
                     Offered, never required, and deliberately not gated behind
