@@ -19,7 +19,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Lock, MoreVertical } from "lucide-react-native";
-import { CutCornerBadge, CutCornerPressable } from "@/components/CutCorner";
+import { CutCornerBadge, CutCornerSurface } from "@/components/CutCorner";
 import RouteLine from "@/components/RouteLine";
 import {
   borderWidth,
@@ -131,104 +131,106 @@ export function TripCard({
   const standout = score >= SCORE_STANDOUT;
 
   return (
-    <CutCornerPressable
+    <Pressable
       testID="trip-card"
       accessibilityRole="button"
       accessibilityLabel={`Trip ${code}, ${tripTitle(trip)}, ${distance.value} kilometres, score ${score}`}
       onPress={onPress}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      fill={pressed ? colors.hairline : colors.carbonSurface}
-      borderColor={colors.hairline}
-      borderWidth={borderWidth.hairline}
-      cutSize={cut.md}
-      corners="topRight"
-      padding={0}
-      contentStyle={styles.card}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <CutCornerBadge label={code} numeric corners="topRight" />
-        <Text style={styles.title} numberOfLines={1}>
-          {tripTitle(trip)}
-        </Text>
-        {trip.is_public === false ? (
-          <Lock size={12} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-        ) : null}
-        {showMenu ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Trip options"
-            hitSlop={spacing.spacingSm}
-            onPress={(e) => {
-              e.stopPropagation();
-              onMenuPress?.();
-            }}
-          >
-            <MoreVertical
-              size={16}
-              color={colors.textSecondary}
-              strokeWidth={ICON_STROKE}
+      <CutCornerSurface
+        fill={pressed ? colors.hairline : colors.carbonSurface}
+        borderColor={colors.hairline}
+        borderWidth={borderWidth.hairline}
+        cutSize={cut.md}
+        corners="topRight"
+        contentStyle={styles.card}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <CutCornerBadge label={code} numeric corners="topRight" />
+          <Text style={styles.title} numberOfLines={1}>
+            {tripTitle(trip)}
+          </Text>
+          {trip.is_public === false ? (
+            <Lock size={12} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+          ) : null}
+          {showMenu ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Trip options"
+              hitSlop={spacing.spacingSm}
+              onPress={(e) => {
+                e.stopPropagation();
+                onMenuPress?.();
+              }}
+            >
+              <MoreVertical
+                size={16}
+                color={colors.textSecondary}
+                strokeWidth={ICON_STROKE}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Text style={styles.timestamp}>{formatTripTimestamp(trip.completed_at)}</Text>
+
+        {/* Origin → destination */}
+        <View style={styles.legs}>
+          <View style={styles.leg}>
+            <View style={styles.legMarkerStart} />
+            <Text style={styles.legLabel} numberOfLines={1}>
+              {trip.origin_name || "Unknown origin"}
+            </Text>
+          </View>
+          <View style={styles.legConnector} />
+          <View style={styles.leg}>
+            <View style={styles.legMarkerEnd} />
+            <Text style={styles.legLabel} numberOfLines={1}>
+              {trip.destination_name || "Unknown destination"}
+            </Text>
+          </View>
+        </View>
+
+        <RouteLine
+          polyline={trip.route_polyline}
+          width={traceWidth}
+          height={96}
+          origin={{ lat: trip.origin_lat, lng: trip.origin_lng }}
+          destination={{ lat: trip.destination_lat, lng: trip.destination_lng }}
+        />
+
+        {/* Hero readout + score */}
+        <View style={styles.heroRow}>
+          <View style={styles.heroValueRow}>
+            <Text style={styles.heroValue}>{distance.value}</Text>
+            <Text style={styles.heroUnit}>{distance.unit}</Text>
+          </View>
+          <View style={styles.scoreBadge}>
+            <Text style={styles.scoreLabel}>SCORE</Text>
+            <CutCornerBadge
+              label={String(score)}
+              numeric
+              solid={standout}
+              color={standout ? colors.racingRed : colors.hairline}
+              textColor={colors.textPrimary}
+              corners="topRight"
+              style={styles.scoreChip}
             />
-          </Pressable>
-        ) : null}
-      </View>
-
-      <Text style={styles.timestamp}>{formatTripTimestamp(trip.completed_at)}</Text>
-
-      {/* Origin → destination */}
-      <View style={styles.legs}>
-        <View style={styles.leg}>
-          <View style={styles.legMarkerStart} />
-          <Text style={styles.legLabel} numberOfLines={1}>
-            {trip.origin_name || "Unknown origin"}
-          </Text>
+          </View>
         </View>
-        <View style={styles.legConnector} />
-        <View style={styles.leg}>
-          <View style={styles.legMarkerEnd} />
-          <Text style={styles.legLabel} numberOfLines={1}>
-            {trip.destination_name || "Unknown destination"}
-          </Text>
-        </View>
-      </View>
 
-      <RouteLine
-        polyline={trip.route_polyline}
-        width={traceWidth}
-        height={96}
-        origin={{ lat: trip.origin_lat, lng: trip.origin_lng }}
-        destination={{ lat: trip.destination_lat, lng: trip.destination_lng }}
-      />
-
-      {/* Hero readout + score */}
-      <View style={styles.heroRow}>
-        <View style={styles.heroValueRow}>
-          <Text style={styles.heroValue}>{distance.value}</Text>
-          <Text style={styles.heroUnit}>{distance.unit}</Text>
+        <View style={styles.statsRow}>
+          <Stat label="TIME" value={time.value} unit={time.unit} />
+          <View style={styles.statDivider} />
+          <Stat label="AVG" value={speed.value} unit={speed.unit} />
+          <View style={styles.statDivider} />
+          <Stat label="XP" value={`+${trip.xp_earned ?? 0}`} />
         </View>
-        <View style={styles.scoreBadge}>
-          <Text style={styles.scoreLabel}>SCORE</Text>
-          <CutCornerBadge
-            label={String(score)}
-            numeric
-            solid={standout}
-            color={standout ? colors.racingRed : colors.hairline}
-            textColor={colors.textPrimary}
-            corners="topRight"
-            style={styles.scoreChip}
-          />
-        </View>
-      </View>
-
-      <View style={styles.statsRow}>
-        <Stat label="TIME" value={time.value} unit={time.unit} />
-        <View style={styles.statDivider} />
-        <Stat label="AVG" value={speed.value} unit={speed.unit} />
-        <View style={styles.statDivider} />
-        <Stat label="XP" value={`+${trip.xp_earned ?? 0}`} />
-      </View>
-    </CutCornerPressable>
+      </CutCornerSurface>
+    </Pressable>
   );
 }
 

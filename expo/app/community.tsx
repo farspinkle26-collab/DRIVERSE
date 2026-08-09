@@ -27,7 +27,7 @@ import { useEvents } from "@/hooks/useEventsStore";
 import { useParty } from "@/hooks/usePartyStore";
 import { EventTypeIcon } from "@/components/EventMeta";
 import CreateConvoyModal from "@/components/CreateConvoyModal";
-import { CutCornerButton, CutCornerPressable } from "@/components/CutCorner";
+import { CutCornerButton, CutCornerSurface } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
 import {
   alpha,
@@ -209,33 +209,33 @@ export default function CommunityScreen() {
               </View>
             )}
             {party && (
-              <CutCornerPressable
-                onPress={() => router.push(`/convoy/${party.id}` as any)}
-                fill={colors.carbonSurface}
-                borderColor={colors.hairline}
-                borderWidth={borderWidth.hairline}
-                cutSize={cut.md}
-                corners="topRight"
-                padding={0}
-                contentStyle={styles.card}
-              >
-                <View style={styles.cardTop}>
-                  <View style={[styles.colorDot, { backgroundColor: party.color }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{party.name}</Text>
-                    {!!party.description && <Text style={styles.cardDesc}>{party.description}</Text>}
+              <Pressable onPress={() => router.push(`/convoy/${party.id}` as any)}>
+                <CutCornerSurface
+                  fill={colors.carbonSurface}
+                  borderColor={colors.hairline}
+                  borderWidth={borderWidth.hairline}
+                  cutSize={cut.md}
+                  corners="topRight"
+                  contentStyle={styles.card}
+                >
+                  <View style={styles.cardTop}>
+                    <View style={[styles.colorDot, { backgroundColor: party.color }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle}>{party.name}</Text>
+                      {!!party.description && <Text style={styles.cardDesc}>{party.description}</Text>}
+                    </View>
+                    <Pressable onPress={() => router.push("/convoy" as any)} hitSlop={spacing.spacingSm}>
+                      <Settings size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                    </Pressable>
                   </View>
-                  <Pressable onPress={() => router.push("/convoy" as any)} hitSlop={spacing.spacingSm}>
-                    <Settings size={18} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                  </Pressable>
-                </View>
-                <View style={styles.cardMeta}>
-                  <View style={styles.metaItem}>
-                    <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                    <Text style={styles.metaText}>{members.length} member{members.length === 1 ? "" : "s"}</Text>
+                  <View style={styles.cardMeta}>
+                    <View style={styles.metaItem}>
+                      <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                      <Text style={styles.metaText}>{members.length} member{members.length === 1 ? "" : "s"}</Text>
+                    </View>
                   </View>
-                </View>
-              </CutCornerPressable>
+                </CutCornerSurface>
+              </Pressable>
             )}
 
             <View style={styles.headerRow}>
@@ -257,44 +257,43 @@ export default function CommunityScreen() {
               browsableConvoys.map((c) => {
                 const full = c.max_members > 0 && c.member_count >= c.max_members;
                 return (
-                  <CutCornerPressable
-                    key={c.id}
-                    onPress={() => router.push(`/convoy/${c.id}` as any)}
-                    fill={colors.carbonSurface}
-                    borderColor={colors.hairline}
-                    borderWidth={borderWidth.hairline}
-                    cutSize={cut.md}
-                    corners="topRight"
-                    padding={0}
-                    contentStyle={styles.card}
-                  >
-                    <View style={styles.cardTop}>
-                      <View style={[styles.colorDot, { backgroundColor: c.color }]} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{c.name}</Text>
-                        <Text style={styles.cardDesc}>{c.description || `Led by ${c.leader_name}`}</Text>
+                  <Pressable key={c.id} onPress={() => router.push(`/convoy/${c.id}` as any)}>
+                    <CutCornerSurface
+                      fill={colors.carbonSurface}
+                      borderColor={colors.hairline}
+                      borderWidth={borderWidth.hairline}
+                      cutSize={cut.md}
+                      corners="topRight"
+                      contentStyle={styles.card}
+                    >
+                      <View style={styles.cardTop}>
+                        <View style={[styles.colorDot, { backgroundColor: c.color }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.cardTitle}>{c.name}</Text>
+                          <Text style={styles.cardDesc}>{c.description || `Led by ${c.leader_name}`}</Text>
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.cardMeta}>
-                      <View style={styles.metaItem}>
-                        <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                        <Text style={styles.metaText}>
-                          {c.member_count}{c.max_members > 0 ? `/${c.max_members}` : ""} members
-                        </Text>
+                      <View style={styles.cardMeta}>
+                        <View style={styles.metaItem}>
+                          <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                          <Text style={styles.metaText}>
+                            {c.member_count}{c.max_members > 0 ? `/${c.max_members}` : ""} members
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                    {!party && (
-                      <CutCornerButton
-                        title={full ? "Full" : "Join convoy"}
-                        size="sm"
-                        corners="topRight"
-                        disabled={full || joiningId === c.id}
-                        onPress={() => handleJoinConvoy(c.id)}
-                        icon={joiningId === c.id ? undefined : <Flag size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
-                        style={styles.actionBtn}
-                      />
-                    )}
-                  </CutCornerPressable>
+                      {!party && (
+                        <CutCornerButton
+                          title={full ? "Full" : "Join convoy"}
+                          size="sm"
+                          corners="topRight"
+                          disabled={full || joiningId === c.id}
+                          onPress={() => handleJoinConvoy(c.id)}
+                          icon={joiningId === c.id ? undefined : <Flag size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />}
+                          style={styles.actionBtn}
+                        />
+                      )}
+                    </CutCornerSurface>
+                  </Pressable>
                 );
               })
             )}
@@ -330,69 +329,68 @@ export default function CommunityScreen() {
               />
             ) : (
               events.map((ev) => (
-                <CutCornerPressable
-                  key={ev.id}
-                  onPress={() => router.push(`/event/${ev.id}` as any)}
-                  fill={colors.carbonSurface}
-                  borderColor={ev.is_live ? colors.racingRed : colors.hairline}
-                  borderWidth={borderWidth.hairline}
-                  cutSize={cut.md}
-                  corners="topRight"
-                  padding={0}
-                  contentStyle={styles.card}
-                >
-                  <View style={styles.cardTop}>
-                    <View style={styles.eventThumb}>
-                      <EventTypeIcon
-                        type={ev.event_type}
-                        size={20}
-                        color={ev.is_live ? colors.racingRed : colors.textPrimary}
-                        strokeWidth={ICON_STROKE}
+                <Pressable key={ev.id} onPress={() => router.push(`/event/${ev.id}` as any)}>
+                  <CutCornerSurface
+                    fill={colors.carbonSurface}
+                    borderColor={ev.is_live ? colors.racingRed : colors.hairline}
+                    borderWidth={borderWidth.hairline}
+                    cutSize={cut.md}
+                    corners="topRight"
+                    contentStyle={styles.card}
+                  >
+                    <View style={styles.cardTop}>
+                      <View style={styles.eventThumb}>
+                        <EventTypeIcon
+                          type={ev.event_type}
+                          size={20}
+                          color={ev.is_live ? colors.racingRed : colors.textPrimary}
+                          strokeWidth={ICON_STROKE}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.cardTitle}>{ev.title}</Text>
+                        <Text style={styles.hostText}>by {ev.host_name}{ev.is_live ? " · Live now" : ""}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.eventMeta}>
+                      <View style={styles.metaItem}>
+                        <Clock size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        <Text style={styles.metaText}>{formatWhen(ev.starts_at)}</Text>
+                      </View>
+                      {!!ev.location_name && (
+                        <View style={styles.metaItem}>
+                          <MapPin size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                          <Text style={styles.metaText}>{ev.location_name}</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.eventFooter}>
+                      <View style={styles.metaItem}>
+                        <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+                        <Text style={styles.metaText}>
+                          {ev.participant_count}{ev.max_participants > 0 ? `/${ev.max_participants}` : ""} going
+                        </Text>
+                      </View>
+                      <CutCornerButton
+                        title={ev.is_joined ? "Going" : "RSVP"}
+                        variant={ev.is_joined ? "primary" : "outline"}
+                        size="sm"
+                        corners="topRight"
+                        disabled={joiningId === ev.id}
+                        onPress={() => handleToggleEvent(ev.id, ev.is_joined)}
+                        icon={
+                          joiningId === ev.id
+                            ? undefined
+                            : ev.is_joined
+                              ? <Check size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
+                              : undefined
+                        }
                       />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle}>{ev.title}</Text>
-                      <Text style={styles.hostText}>by {ev.host_name}{ev.is_live ? " · Live now" : ""}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.eventMeta}>
-                    <View style={styles.metaItem}>
-                      <Clock size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                      <Text style={styles.metaText}>{formatWhen(ev.starts_at)}</Text>
-                    </View>
-                    {!!ev.location_name && (
-                      <View style={styles.metaItem}>
-                        <MapPin size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                        <Text style={styles.metaText}>{ev.location_name}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.eventFooter}>
-                    <View style={styles.metaItem}>
-                      <Users size={13} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
-                      <Text style={styles.metaText}>
-                        {ev.participant_count}{ev.max_participants > 0 ? `/${ev.max_participants}` : ""} going
-                      </Text>
-                    </View>
-                    <CutCornerButton
-                      title={ev.is_joined ? "Going" : "RSVP"}
-                      variant={ev.is_joined ? "primary" : "outline"}
-                      size="sm"
-                      corners="topRight"
-                      disabled={joiningId === ev.id}
-                      onPress={() => handleToggleEvent(ev.id, ev.is_joined)}
-                      icon={
-                        joiningId === ev.id
-                          ? undefined
-                          : ev.is_joined
-                            ? <Check size={14} color={colors.voidBlack} strokeWidth={ICON_STROKE} />
-                            : undefined
-                      }
-                    />
-                  </View>
-                </CutCornerPressable>
+                  </CutCornerSurface>
+                </Pressable>
               ))
             )}
           </>

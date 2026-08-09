@@ -148,8 +148,6 @@ function QuestCard({ quest, onShare }: { quest: DailyQuest; onShare?: () => void
       borderWidth={borderWidth.hairline}
       cutSize={cut.md}
       corners="topRight"
-      edges
-      elevation="raised"
       contentStyle={styles.questCard}
     >
       <View style={styles.questHeader}>

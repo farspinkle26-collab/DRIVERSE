@@ -203,13 +203,8 @@ function CarCard({
           )}
         </View>
 
-        {/* Identity. The name is display type; make · year is one readout
-            line, so the year is mono.
-
-            No plate. Signup stopped asking for one, and rendering the field
-            anyway would show it to exactly the drivers who entered it before
-            that — the opposite of dropping it. The column still exists and
-            still holds those old values; nothing reads it. */}
+        {/* Identity. The name is display type; make · year · plate is one
+            readout line, so the year and the plate are mono. */}
         <Text style={styles.carName} numberOfLines={1}>
           {car.name}
         </Text>
@@ -221,6 +216,14 @@ function CarCard({
             <>
               <Text style={styles.carMetaSep}>·</Text>
               <Text style={styles.carMono}>{car.year}</Text>
+            </>
+          ) : null}
+          {car.license_plate ? (
+            <>
+              <Text style={styles.carMetaSep}>·</Text>
+              <Text style={styles.carMono} numberOfLines={1}>
+                {car.license_plate}
+              </Text>
             </>
           ) : null}
         </View>

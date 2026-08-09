@@ -76,9 +76,6 @@ export default function AppAlertHost() {
         <CutCornerCard
           corners="topRight"
           cutSize={cut.md}
-          // A dialog sits above a dimmed screen — the top of the elevation
-          // scale, not the standard card step.
-          elevation="floating"
           style={styles.card}
           contentStyle={styles.cardContent}
         >

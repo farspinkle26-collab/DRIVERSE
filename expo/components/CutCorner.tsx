@@ -26,7 +26,6 @@
 
 import React, { useCallback, useMemo, useState } from "react";
 import {
-  Animated,
   LayoutChangeEvent,
   Pressable,
   PressableProps,
@@ -37,26 +36,20 @@ import {
   View,
   ViewStyle,
 } from "react-native";
-import Svg, { Polygon, Polyline } from "react-native-svg";
+import Svg, { Polygon } from "react-native-svg";
 import {
-  cutCornerBottomEdge,
   cutCornerPoints,
-  cutCornerTopEdge,
   DEFAULT_CORNERS,
   type CutCornerName,
 } from "@/lib/cutCornerGeometry";
-import { usePressMotion, type PressMotionKind } from "@/hooks/usePressMotion";
 import {
   alpha,
   borderWidth as borderWidthTokens,
   colors,
   cut,
-  edge as edgeTokens,
-  elevation as elevationTokens,
   fontFamily,
   onRacingRed,
   spacing,
-  type ElevationToken,
 } from "@/constants/theme";
 
 /**
@@ -67,8 +60,6 @@ import {
 export {
   cutCornerPoints,
   cutCornerClipPath,
-  cutCornerTopEdge,
-  cutCornerBottomEdge,
   DEFAULT_CORNERS,
   type CutCornerName,
 } from "@/lib/cutCornerGeometry";
@@ -84,11 +75,6 @@ function toCornerList(
  * CutCornerSurface — the primitive everything else is built on
  * ------------------------------------------------------------------ */
 
-/** Serialises a point list for an SVG `points` attribute. */
-function toPointsAttr(points: [number, number][]): string {
-  return points.map(([x, y]) => `${x},${y}`).join(" ");
-}
-
 export interface CutCornerSurfaceProps {
   children?: React.ReactNode;
   /** Polygon fill. Defaults to the elevated surface colour. */
@@ -99,20 +85,6 @@ export interface CutCornerSurfaceProps {
   /** Length of the 45° cut in points. Keep to 12–16. */
   cutSize?: number;
   corners?: CutCornerName | CutCornerName[];
-  /**
-   * Draw the lit top edge and grounded bottom edge (`edge` in the theme).
-   * Off by default: this is reserved for primary surfaces, the same way the
-   * cut itself is. Do not switch it on for badges, list rows or inputs.
-   */
-  edges?: boolean;
-  /**
-   * Colour of the lit top edge. Defaults to `edge.highlight`, which is tuned
-   * for a dark surface — pass `edge.highlightOnAccent` on a racingRed slab,
-   * where a 9% white line disappears.
-   */
-  highlightColor?: string;
-  /** Outer shadow step. See `elevation` in the theme (iOS only, by design). */
-  elevation?: ElevationToken;
   /** Layout styles for the outer box (size, margin, flex). */
   style?: StyleProp<ViewStyle>;
   /** Styles for the content layer (padding, alignment). */
@@ -127,9 +99,6 @@ export function CutCornerSurface({
   borderWidth = borderWidthTokens.hairline,
   cutSize = cut.md,
   corners,
-  edges = false,
-  highlightColor = edgeTokens.highlight,
-  elevation = "flat",
   style,
   contentStyle,
   testID,
@@ -149,18 +118,18 @@ export function CutCornerSurface({
 
   const cornerList = useMemo(() => toCornerList(corners), [corners]);
 
-  const geometry = useMemo(() => {
+  const points = useMemo(() => {
     if (!size || size.width <= 0 || size.height <= 0) return null;
-    // Every path takes the same inset, so the edges land exactly on the
-    // outline rather than half a stroke inside or outside it.
-    const inset = borderWidth / 2;
-    const args = [size.width, size.height, cutSize, cornerList, inset] as const;
-    return {
-      outline: toPointsAttr(cutCornerPoints(...args)),
-      top: edges ? toPointsAttr(cutCornerTopEdge(...args)) : null,
-      bottom: edges ? toPointsAttr(cutCornerBottomEdge(...args)) : null,
-    };
-  }, [size, cutSize, cornerList, borderWidth, edges]);
+    return cutCornerPoints(
+      size.width,
+      size.height,
+      cutSize,
+      cornerList,
+      borderWidth / 2
+    )
+      .map(([x, y]) => `${x},${y}`)
+      .join(" ");
+  }, [size, cutSize, cornerList, borderWidth]);
 
   return (
     <View
@@ -168,13 +137,9 @@ export function CutCornerSurface({
       onLayout={onLayout}
       // Before the first measurement the polygon cannot be drawn, so fall
       // back to a plain rect in the fill colour rather than flashing empty.
-      style={[
-        !geometry && { backgroundColor: fill },
-        elevationTokens[elevation],
-        style,
-      ]}
+      style={[!points && { backgroundColor: fill }, style]}
     >
-      {geometry && size ? (
+      {points && size ? (
         <Svg
           width={size.width}
           height={size.height}
@@ -182,30 +147,11 @@ export function CutCornerSurface({
           pointerEvents="none"
         >
           <Polygon
-            points={geometry.outline}
+            points={points}
             fill={fill}
             stroke={borderWidth > 0 ? borderColor : "none"}
             strokeWidth={borderWidth}
           />
-          {/* Grounded edge first, lit edge last: where a surface is small
-              enough that the two meet at a shared diagonal, the light should
-              be the one that wins. */}
-          {geometry.bottom ? (
-            <Polyline
-              points={geometry.bottom}
-              fill="none"
-              stroke={edgeTokens.shade}
-              strokeWidth={borderWidthTokens.hairline}
-            />
-          ) : null}
-          {geometry.top ? (
-            <Polyline
-              points={geometry.top}
-              fill="none"
-              stroke={highlightColor}
-              strokeWidth={borderWidthTokens.hairline}
-            />
-          ) : null}
         </Svg>
       ) : null}
       <View style={contentStyle}>{children}</View>
@@ -223,125 +169,20 @@ export interface CutCornerCardProps extends CutCornerSurfaceProps {
 }
 
 /**
- * A raised brand surface: carbon fill, hairline outline, one cut corner, a lit
- * top edge and a grounded bottom one.
- *
- * The edges and the elevation are ON by default, which is what puts every
- * existing card on the dimensional treatment without each call site opting in
- * — the alternative is a long tail of cards that stayed flat because nobody
- * remembered them. A card that genuinely should not lift (one nested inside
- * another surface, where a second shadow just muddies the first) passes
- * `edges={false} elevation="flat"` and says so.
+ * A raised brand surface: carbon fill, hairline outline, one cut corner.
+ * Deliberately has no shadow — separation comes from the surface step and
+ * the hairline.
  */
 export function CutCornerCard({
   padding = spacing.spacingLg,
   contentStyle,
-  edges = true,
-  elevation = "raised",
   ...rest
 }: CutCornerCardProps) {
   return (
     <CutCornerSurface
       {...rest}
-      edges={edges}
-      elevation={elevation}
       contentStyle={[{ padding }, contentStyle]}
     />
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * CutCornerPressable — a card you can tap
- * ------------------------------------------------------------------ */
-
-export interface CutCornerPressableProps
-  extends Omit<PressableProps, "style" | "children"> {
-  children?: React.ReactNode;
-  /** Padding inside the card. Defaults to `spacingLg` (16). */
-  padding?: number;
-  fill?: string;
-  borderColor?: string;
-  borderWidth?: number;
-  cutSize?: number;
-  corners?: CutCornerName | CutCornerName[];
-  edges?: boolean;
-  highlightColor?: string;
-  elevation?: ElevationToken;
-  /**
-   * `scale` (default) for cards; `sink` for anything shaped like a button —
-   * the map's Drive slab, a tile in a grid of actions. See
-   * `hooks/usePressMotion.ts` for why the two differ.
-   */
-  motion?: PressMotionKind;
-  /** Layout styles for the outer box. */
-  style?: StyleProp<ViewStyle>;
-  contentStyle?: StyleProp<ViewStyle>;
-}
-
-/**
- * The tappable form of {@link CutCornerCard} — a trip in the log, a quest, a
- * car in the garage, an event.
- *
- * It scales rather than sinks (see `hooks/usePressMotion.ts`) and drops an
- * elevation step while held, so a card behaves like the thing it looks like
- * instead of like a link that happens to have a border. Use this anywhere a
- * `CutCornerCard` currently sits inside a bare `Pressable` or `TouchableOpacity`
- * — the opacity flash those give is the flat-era feedback this replaces.
- */
-export function CutCornerPressable({
-  children,
-  padding = spacing.spacingLg,
-  fill,
-  borderColor,
-  borderWidth,
-  cutSize,
-  corners,
-  edges = true,
-  highlightColor,
-  elevation = "raised",
-  motion: motionKind = "scale",
-  style,
-  contentStyle,
-  disabled,
-  onPressIn,
-  onPressOut,
-  ...rest
-}: CutCornerPressableProps) {
-  const [pressed, setPressed] = useState(false);
-  const motion = usePressMotion(motionKind);
-
-  return (
-    <Pressable
-      disabled={disabled}
-      onPressIn={(e) => {
-        setPressed(true);
-        motion.onPressIn();
-        onPressIn?.(e);
-      }}
-      onPressOut={(e) => {
-        setPressed(false);
-        motion.onPressOut();
-        onPressOut?.(e);
-      }}
-      style={[disabled ? styles.disabled : null, style]}
-      {...rest}
-    >
-      <Animated.View style={motion.style}>
-        <CutCornerSurface
-          fill={fill}
-          borderColor={borderColor}
-          borderWidth={borderWidth}
-          cutSize={cutSize}
-          corners={corners}
-          edges={edges}
-          highlightColor={highlightColor}
-          elevation={pressed ? "flat" : elevation}
-          contentStyle={[{ padding }, contentStyle]}
-        >
-          {children}
-        </CutCornerSurface>
-      </Animated.View>
-    </Pressable>
   );
 }
 
@@ -420,17 +261,13 @@ export function CutCornerButton({
   style,
   textStyle,
   disabled,
-  onPressIn,
-  onPressOut,
   ...rest
 }: CutCornerButtonProps) {
   const [pressed, setPressed] = useState(false);
-  const motion = usePressMotion("sink");
   const metrics = BUTTON_SIZES[size];
 
   const isPrimary = variant === "primary";
   const isGhost = variant === "ghost";
-  const isOutline = !isPrimary && !isGhost;
 
   const fill = isPrimary
     ? pressed
@@ -450,67 +287,42 @@ export function CutCornerButton({
       ? colors.textPrimary
       : colors.racingRed;
 
-  /**
-   * `outline` has no fill, so there is no surface for a light to fall on —
-   * an edge highlight on a transparent slab is just a stray line. It keeps
-   * the press depression and nothing else.
-   */
-  const hasEdges = !isOutline;
-
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
-      onPressIn={(e) => {
-        setPressed(true);
-        motion.onPressIn();
-        onPressIn?.(e);
-      }}
-      onPressOut={(e) => {
-        setPressed(false);
-        motion.onPressOut();
-        onPressOut?.(e);
-      }}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
       style={[disabled ? styles.disabled : null, style]}
       {...rest}
     >
-      <Animated.View style={motion.style}>
-        <CutCornerSurface
-          fill={fill}
-          borderColor={outlineColor}
-          borderWidth={borderWidthTokens.hairline}
-          cutSize={metrics.cut}
-          corners={corners}
-          edges={hasEdges}
-          highlightColor={
-            isPrimary ? edgeTokens.highlightOnAccent : edgeTokens.highlight
-          }
-          // Sinking into the surface means losing the gap that was casting
-          // the shadow, so the shadow goes with it rather than trailing a
-          // pressed button at full strength.
-          elevation={pressed || disabled ? "flat" : "floating"}
-          contentStyle={[
-            styles.buttonContent,
-            {
-              paddingVertical: metrics.paddingVertical,
-              paddingHorizontal: metrics.paddingHorizontal,
-            },
+      <CutCornerSurface
+        fill={fill}
+        borderColor={outlineColor}
+        borderWidth={borderWidthTokens.hairline}
+        cutSize={metrics.cut}
+        corners={corners}
+        contentStyle={[
+          styles.buttonContent,
+          {
+            paddingVertical: metrics.paddingVertical,
+            paddingHorizontal: metrics.paddingHorizontal,
+          },
+        ]}
+      >
+        {icon}
+        <Text
+          style={[
+            styles.buttonLabel,
+            { fontSize: metrics.fontSize, color: labelColor },
+            textStyle,
           ]}
+          numberOfLines={1}
         >
-          {icon}
-          <Text
-            style={[
-              styles.buttonLabel,
-              { fontSize: metrics.fontSize, color: labelColor },
-              textStyle,
-            ]}
-            numberOfLines={1}
-          >
-            {title.toUpperCase()}
-          </Text>
-          {trailingIcon}
-        </CutCornerSurface>
-      </Animated.View>
+          {title.toUpperCase()}
+        </Text>
+        {trailingIcon}
+      </CutCornerSurface>
     </Pressable>
   );
 }
@@ -627,8 +439,6 @@ export function CutCornerChip({
   corners = "topRight",
   style,
 }: CutCornerChipProps) {
-  const motion = usePressMotion("scale");
-
   return (
     <Pressable
       accessibilityRole={accessibilityRole}
@@ -641,36 +451,24 @@ export function CutCornerChip({
       }
       accessibilityLabel={accessibilityLabel ?? label}
       onPress={onPress}
-      onPressIn={motion.onPressIn}
-      onPressOut={motion.onPressOut}
-      style={[styles.chipHit, style]}
+      style={({ pressed }) => [styles.chipHit, pressed && styles.chipPressed, style]}
     >
-      <Animated.View style={motion.style}>
-        <CutCornerSurface
-          fill={active ? colors.racingRed : colors.carbonSurface}
-          borderColor={active ? colors.racingRed : colors.hairline}
-          borderWidth={borderWidthTokens.hairline}
-          cutSize={cut.sm}
-          corners={corners}
-          edges
-          highlightColor={
-            active ? edgeTokens.highlightOnAccent : edgeTokens.highlight
-          }
-          // Flat on purpose: chips come in rows of six to nine on the map's
-          // filter bar, and a shadow under each one is noise rather than
-          // depth. The edges alone carry it.
-          elevation="flat"
-          contentStyle={styles.chipContent}
+      <CutCornerSurface
+        fill={active ? colors.racingRed : colors.carbonSurface}
+        borderColor={active ? colors.racingRed : colors.hairline}
+        borderWidth={borderWidthTokens.hairline}
+        cutSize={cut.sm}
+        corners={corners}
+        contentStyle={styles.chipContent}
+      >
+        {icon}
+        <Text
+          style={[styles.chipLabel, { color: chipContentColor(active) }]}
+          numberOfLines={1}
         >
-          {icon}
-          <Text
-            style={[styles.chipLabel, { color: chipContentColor(active) }]}
-            numberOfLines={1}
-          >
-            {label.toUpperCase()}
-          </Text>
-        </CutCornerSurface>
-      </Animated.View>
+          {label.toUpperCase()}
+        </Text>
+      </CutCornerSurface>
     </Pressable>
   );
 }
@@ -709,6 +507,10 @@ const styles = StyleSheet.create({
   chipHit: {
     // Keeps the tap target on the chip itself; the surface draws inside it.
     minHeight: spacing.spacingXxl,
+  },
+  /** Press feedback, since Pressable has none by default. */
+  chipPressed: {
+    opacity: 0.7,
   },
   chipContent: {
     flexDirection: "row",
