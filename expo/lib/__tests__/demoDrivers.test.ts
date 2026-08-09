@@ -1,6 +1,8 @@
 import {
   DEMO_DRIVERS_ENABLED,
+  demoAvatarSource,
   demoDrivers,
+  isDemoDriver,
   withDemoDrivers,
 } from "@/lib/demoDrivers";
 import type { OnlineUser } from "@/hooks/onlineUsersMerge";
@@ -66,9 +68,32 @@ describe("demoDrivers", () => {
     }
   });
 
-  it("carries no avatar, so no real face is used", () => {
+  it("gives a portrait to some of the cast but not all of it", () => {
+    const cast = demoDrivers(CENTRE, 1_000_000);
+    const withPhoto = cast.filter((d) => d.avatar);
+    expect(withPhoto.length).toBeGreaterThan(0);
+    // The tell this guards against: a set where everyone has a portrait
+    // reads as a stock-photo grid rather than as an app.
+    expect(withPhoto.length).toBeLessThan(cast.length);
+  });
+
+  it("never repeats a name — two of the same is the most obvious tell", () => {
+    const names = demoDrivers(CENTRE, 1_000_000).map((d) => d.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("never repeats a face either", () => {
+    const avatars = demoDrivers(CENTRE, 1_000_000)
+      .map((d) => d.avatar)
+      .filter(Boolean);
+    expect(new Set(avatars).size).toBe(avatars.length);
+  });
+
+  it("resolves every portrait it hands out to a real bundled asset", () => {
     for (const d of demoDrivers(CENTRE, 1_000_000)) {
-      expect(d.avatar).toBeUndefined();
+      if (!d.avatar) continue;
+      // A sentinel that resolves to null would leave a hole in the footage.
+      expect(demoAvatarSource(d.avatar)).not.toBeNull();
     }
   });
 
@@ -136,5 +161,34 @@ describe("demoDrivers", () => {
       expect(Number.isFinite(d.latitude)).toBe(true);
       expect(Number.isFinite(d.longitude)).toBe(true);
     }
+  });
+});
+
+describe("isDemoDriver", () => {
+  it("recognises the cast, so the sheet can answer their actions locally", () => {
+    for (const d of demoDrivers(CENTRE, 1_000_000)) {
+      expect(isDemoDriver(d.user_id)).toBe(true);
+    }
+  });
+
+  it("does not claim a real driver", () => {
+    expect(isDemoDriver("real-1")).toBe(false);
+    expect(isDemoDriver("8f2c0e64-2b1a-4f0e-9c33-000000000000")).toBe(false);
+    expect(isDemoDriver(null)).toBe(false);
+    expect(isDemoDriver(undefined)).toBe(false);
+  });
+});
+
+describe("demoAvatarSource", () => {
+  it("passes a real driver's URL straight through as a uri source", () => {
+    expect(demoAvatarSource("https://example.com/a.jpg")).toEqual({
+      uri: "https://example.com/a.jpg",
+    });
+  });
+
+  it("returns null for no avatar, which is the letter-tile cue", () => {
+    expect(demoAvatarSource(null)).toBeNull();
+    expect(demoAvatarSource(undefined)).toBeNull();
+    expect(demoAvatarSource("")).toBeNull();
   });
 });
