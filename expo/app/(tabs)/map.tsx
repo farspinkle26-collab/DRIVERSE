@@ -166,7 +166,12 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
-import { DEMO_DRIVERS_ENABLED, withDemoDrivers } from "@/lib/demoDrivers";
+import {
+  DEMO_DRIVERS_ENABLED,
+  demoAvatarSource as avatarSource,
+  isDemoDriver,
+  withDemoDrivers,
+} from "@/lib/demoDrivers";
 import { useRouter } from "expo-router";
 import * as ImagePickerExpo from "expo-image-picker";
 import SaveRouteModal from "@/components/SaveRouteModal";
@@ -1501,6 +1506,19 @@ export default function MapScreen() {
   // --- Ask a meetup from map marker ---
   const handleAskMeetupFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!user) return;
+    // TEMPORARY: promo capture. A demo driver satisfies no foreign key, so the
+    // insert below would fail and the footage would show an error alert on the
+    // one action most worth filming. Answer it locally instead — the sheet
+    // behaves exactly as it does for a real driver, and still nothing is
+    // written. Delete with lib/demoDrivers.ts.
+    if (isDemoDriver(friendId)) {
+      setAskingMeetup(true);
+      setTimeout(() => {
+        setAskingMeetup(false);
+        appAlert("Meetup request sent", `${friendName} will see it in their inbox.`);
+      }, 600);
+      return;
+    }
     setAskingMeetup(true);
     try {
       const { error } = await supabase.from("direct_messages").insert({
@@ -1526,6 +1544,15 @@ export default function MapScreen() {
   // --- Add friend from map marker ---
   const handleAddFriendFromMap = useCallback(async (friendId: string, friendName: string) => {
     if (!user) return;
+    // TEMPORARY: promo capture — same reason as the meetup handler above.
+    if (isDemoDriver(friendId)) {
+      setAddingFriend(true);
+      setTimeout(() => {
+        setAddingFriend(false);
+        appAlert("Friend request sent", `${friendName} will get your request.`);
+      }, 600);
+      return;
+    }
     setAddingFriend(true);
     try {
       const { error } = await supabase.from("friends").insert({
@@ -2654,9 +2681,9 @@ export default function MapScreen() {
                     { borderColor: ringColor },
                     (isPartyMate || problem) && styles.playerRingParty,
                   ]}>
-                    {onlineUser.avatar ? (
+                    {avatarSource(onlineUser.avatar) ? (
                       <Image
-                        source={{ uri: onlineUser.avatar }}
+                        source={avatarSource(onlineUser.avatar)!}
                         style={styles.playerAvatarImg}
                         fadeDuration={0}
                         onLoadEnd={() => handleAvatarLoaded(onlineUser.user_id)}
@@ -4380,8 +4407,8 @@ export default function MapScreen() {
                   { borderColor: playerColor(selectedOnlineUser.user_id) },
                 ]}
               >
-                {selectedOnlineUser.avatar ? (
-                  <Image source={{ uri: selectedOnlineUser.avatar }} style={styles.driverSheetAvatarImg} />
+                {avatarSource(selectedOnlineUser.avatar) ? (
+                  <Image source={avatarSource(selectedOnlineUser.avatar)!} style={styles.driverSheetAvatarImg} />
                 ) : (
                   <Text style={styles.avatarInitial}>
                     {(selectedOnlineUser.name?.[0] ?? "D").toUpperCase()}

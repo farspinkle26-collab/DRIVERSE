@@ -5,32 +5,31 @@
  *  ⚠️  THIS IS CURRENTLY **ON**. IT SHIPS FAKE DRIVERS TO WHOEVER RUNS THE
  *      BUILD. Turn DEMO_DRIVERS_ENABLED off before any store upload.
  *
- *  This is scaffolding and is meant to be deleted: remove this file, its
- *  test, and the block marked `TEMPORARY: promo capture` in
- *  `app/(tabs)/map.tsx`. Nothing else references it.
+ *  Scaffolding, meant to be deleted: remove this file, its test,
+ *  `assets/images/demo/`, and the two blocks marked `TEMPORARY: promo
+ *  capture` in `app/(tabs)/map.tsx`. Nothing else references it.
  * ═══════════════════════════════════════════════════════════════════════
  *
  * WHY THIS IS CLIENT-SIDE AND NOT ROWS IN THE DATABASE
  *
- * The obvious way to populate the map for a screenshot is to insert fake
- * profiles and `user_locations` rows. Don't. Those rows are visible to every
- * real driver who opens the app, which turns a marketing prop into fake
- * people on strangers' maps — a driver could tap one, try to message it, or
- * count on it being someone nearby. It is also a cleanup job on live data,
- * against the exact tables presence reads, with no undo.
+ * Inserting fake profiles and `user_locations` rows would put imaginary
+ * people on every real driver's map — tappable, messageable, counted as
+ * someone nearby — and leave a cleanup job on live data against the exact
+ * tables presence reads. This layer is drawn on ONE device, in memory, at the
+ * render site. Nothing is written anywhere and turning it off is a boolean.
  *
- * This layer is drawn on ONE device, in memory, at the render site. Nothing
- * is written anywhere, no other user can see it, and turning it off is a
- * boolean. The recording looks identical either way.
+ * BECAUSE THESE DRIVERS DO NOT EXIST IN THE DATABASE, every action the driver
+ * sheet offers would fail against them — the `demo-driver-N` ids satisfy no
+ * foreign key. `isDemoDriver` is what the map uses to answer those locally
+ * instead (see `handleAskMeetupFromMap`), so tapping "Ask a meetup" on the
+ * footage behaves exactly like it does on a real driver.
  *
- * WHY THE CENTRE IS THE MAP'S `userLocation` AND NOT THE PRESENCE POSITION
+ * WHY THE CENTRE IS THE MAP'S `userLocation`
  *
- * The first version of this hung the centre off `publishPosition()` inside
- * `useOnlineUsers`, which only runs while the driver is broadcasting. With
- * VISIBILITY OFF — the default, and what the app opens on — that never fires,
- * so there was no centre and nothing appeared. `app/(tabs)/map.tsx` already
- * holds `userLocation` from its own location watcher, which is populated
- * whether or not you are sharing. That is the honest anchor for "around me".
+ * The first version hung it off `publishPosition()` in `useOnlineUsers`, which
+ * only runs while broadcasting. With VISIBILITY OFF — the state the app opens
+ * in — nothing appeared. `app/(tabs)/map.tsx` holds `userLocation` from its
+ * own watcher, filled whether or not you are sharing.
  */
 
 export type { OnlineUser } from "@/hooks/onlineUsersMerge";
@@ -41,8 +40,16 @@ import type { OnlineUser } from "@/hooks/onlineUsersMerge";
  */
 export const DEMO_DRIVERS_ENABLED = true;
 
-/** How many wander around you. Enough to look alive, not like a crowd. */
-const DEMO_COUNT = 7;
+/**
+ * Ids are namespaced so a demo driver is never mistaken for a real one — by
+ * the code, or by someone reading a log.
+ */
+const DEMO_ID_PREFIX = "demo-driver-";
+
+/** True for a synthetic driver. Used to answer sheet actions locally. */
+export function isDemoDriver(userId: string | null | undefined): boolean {
+  return typeof userId === "string" && userId.startsWith(DEMO_ID_PREFIX);
+}
 
 /**
  * Metres from you. Spread deliberately: a couple close enough to read as
@@ -60,27 +67,50 @@ export interface DemoCentre {
 }
 
 /**
- * The cast. Names are ordinary given names in the app's launch market rather
- * than "Test User 1" — the whole point is that a viewer cannot pick these out
- * of a real list.
+ * Photo avatars for the cast.
  *
- * No avatar URLs, on purpose: a real photo would be someone's actual face
- * used without their say-so, and a generated one is a face that does not
- * exist being passed off as a driver. The marker falls back to a letter tile,
- * which is what a large share of genuine accounts render as anyway — so it is
- * both the honest option and the realistic one.
+ * DELIBERATELY NOT EVERYONE — a set where every driver has a portrait reads
+ * as a stock-photo grid, not as an app. Three of the seven carry one; the
+ * rest fall back to the letter tile the marker already draws, which is what a
+ * large share of genuine accounts look like.
+ *
+ * The files in `assets/images/demo/` are neutral placeholder tiles. Replace
+ * them with the real portraits before capturing — same filenames, any square
+ * image. Left unreplaced they render as a plain dark tile, which looks like
+ * an ordinary empty avatar rather than a broken one.
+ *
+ * `require` is used rather than a URL so the images are bundled and load with
+ * no network, and so a missing file fails the build loudly instead of leaving
+ * a hole in the footage.
  */
-const CAST: { name: string; level: number }[] = [
-  { name: "Rizky", level: 12 },
-  { name: "Bagas P.", level: 4 },
-  { name: "Nadia", level: 27 },
-  { name: "Fajar", level: 8 },
-  { name: "Dimas A.", level: 19 },
-  { name: "Yoga", level: 3 },
-  { name: "Putri", level: 33 },
-  { name: "Arif", level: 15 },
-  { name: "Sena", level: 6 },
+const DEMO_AVATARS = [
+  require("@/assets/images/demo/driver-1.png"),
+  require("@/assets/images/demo/driver-2.png"),
+  require("@/assets/images/demo/driver-3.png"),
+] as const;
+
+/**
+ * The cast.
+ *
+ * Every name is distinct and every avatar slot is used at most once — a map
+ * with two "Marcus"es, or the same face twice, is the single most obvious
+ * tell there is. `demoDrivers.test.ts` pins both.
+ *
+ * Levels are spread 3–33 and weighted low, which is what a young app's
+ * population actually looks like.
+ */
+const CAST: { name: string; level: number; avatarIndex?: number }[] = [
+  { name: "Marcus", level: 12, avatarIndex: 0 },
+  { name: "Ellie", level: 4 },
+  { name: "Priya", level: 27, avatarIndex: 1 },
+  { name: "Jonah", level: 8 },
+  { name: "Tom H.", level: 19, avatarIndex: 2 },
+  { name: "Sofia", level: 3 },
+  { name: "Dean", level: 33 },
 ];
+
+/** How many wander around you. Enough to look alive, not like a crowd. */
+const DEMO_COUNT = CAST.length;
 
 /**
  * A cheap deterministic hash, so every driver's orbit is stable across
@@ -97,9 +127,7 @@ function seeded(i: number, salt: number): number {
  *
  * Two sine components at different periods rather than one, because a single
  * sine is a circle and nothing on a road moves in a circle. Summing two gives
- * a wandering, non-repeating-looking path that still never leaves the area —
- * close enough to "driving around the neighbourhood" at a glance, which is
- * all a marker on a map has to sell.
+ * a wandering, non-repeating-looking path that still never leaves the area.
  */
 function offsetAt(i: number, tSeconds: number): { east: number; north: number } {
   const radius = MIN_RADIUS_M + seeded(i, 1) * (MAX_RADIUS_M - MIN_RADIUS_M);
@@ -112,9 +140,7 @@ function offsetAt(i: number, tSeconds: number): { east: number; north: number } 
    * A fixed angular speed means the drivers on the wide orbits move fastest —
    * at 900 m and 0.15 rad/s that is 135 m/s, roughly 480 km/h. Fixing a target
    * *linear* speed and dividing by the radius keeps everyone at traffic pace
-   * wherever they are, which is the property the test pins.
-   *
-   * 5–13 m/s is 18–47 km/h: city driving.
+   * wherever they are. 5–13 m/s is 18–47 km/h: city driving.
    */
   const metresPerSecond = 5 + seeded(i, 3) * 8;
   const omega = metresPerSecond / radius;
@@ -145,6 +171,10 @@ function offsetToLatLng(
 /**
  * The synthetic drivers at a moment in time. Pure — same inputs, same output,
  * which is what makes the movement testable and the paths stable.
+ *
+ * `avatar` is typed `string` on `OnlineUser` because a real one is a URL from
+ * storage; a bundled asset is a module id, which `<Image source={{ uri }}>`
+ * does not take. The map resolves it — see `demoAvatarSource`.
  */
 export function demoDrivers(
   centre: DemoCentre,
@@ -154,7 +184,7 @@ export function demoDrivers(
   const updated_at = new Date(nowMs).toISOString();
 
   return Array.from({ length: DEMO_COUNT }, (_, i) => {
-    const person = CAST[i % CAST.length];
+    const person = CAST[i];
     const here = offsetAt(i, t);
     // Heading from where they were a second ago, so the car marker points the
     // way it is travelling instead of sitting at a fixed angle.
@@ -164,11 +194,16 @@ export function demoDrivers(
       Math.PI;
 
     return {
-      // Namespaced so nothing can mistake one of these for a real user id,
-      // and so a stray one is obvious in a log.
-      user_id: `demo-driver-${i}`,
+      user_id: `${DEMO_ID_PREFIX}${i}`,
       name: person.name,
       level: person.level,
+      // A marker sentinel rather than a URL, resolved by `demoAvatarSource`.
+      // Absent entirely for the cast members who carry no portrait, so the
+      // existing `onlineUser.avatar ? … : letterTile` branch is what decides.
+      avatar:
+        person.avatarIndex === undefined
+          ? undefined
+          : `${DEMO_ID_PREFIX}avatar-${person.avatarIndex}`,
       ...offsetToLatLng(centre, here.east, here.north),
       heading: (heading + 360) % 360,
       updated_at,
@@ -176,6 +211,23 @@ export function demoDrivers(
       source: "presence" as const,
     };
   });
+}
+
+/**
+ * Turn an avatar value into something `<Image source>` accepts.
+ *
+ * Real drivers carry a URL and get `{ uri }`; the demo cast carries a
+ * sentinel and gets the bundled module. Returns null when there is no avatar
+ * at all, which is the caller's cue to draw the letter tile.
+ */
+export function demoAvatarSource(
+  avatar: string | null | undefined
+): { uri: string } | number | null {
+  if (!avatar) return null;
+  const prefix = `${DEMO_ID_PREFIX}avatar-`;
+  if (!avatar.startsWith(prefix)) return { uri: avatar };
+  const index = Number(avatar.slice(prefix.length));
+  return DEMO_AVATARS[index] ?? null;
 }
 
 /**
