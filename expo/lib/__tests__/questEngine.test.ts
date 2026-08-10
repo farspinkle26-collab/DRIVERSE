@@ -9,8 +9,10 @@ import {
   computeReward,
   currentTimeWindow,
   DIFFICULTY_TIERS,
+  EVENT_FOR_OBJECTIVE,
   isComplete,
   levelBonus,
+  OBJECTIVES,
   pendingRewards,
   progressLabel,
   progressPercent,
@@ -18,6 +20,7 @@ import {
   questDay,
   sortByDifficulty,
   type DailyQuest,
+  type ObjectiveType,
 } from "@/lib/questEngine";
 
 // Minimal quest factory — only the fields the pure helpers read.
@@ -207,5 +210,38 @@ describe("questDay / currentTimeWindow — the daily reset boundary (UTC)", () =
     expect(currentTimeWindow(new Date("2026-07-31T16:00:00Z"))).toBe("afternoon");
     expect(currentTimeWindow(new Date("2026-07-31T20:00:00Z"))).toBe("evening");
     expect(currentTimeWindow(new Date("2026-07-31T02:00:00Z"))).toBe("night");
+  });
+});
+
+describe("attend_meetup — the convoy objective", () => {
+  it("is registered with a real-world indicator, same as every other objective", () => {
+    expect(EVENT_FOR_OBJECTIVE.attend_meetup).toBe("attend_meetup");
+    expect(OBJECTIVES.attend_meetup).toBeDefined();
+    expect(OBJECTIVES.attend_meetup.incremental).toBe(true);
+  });
+
+  it("every objective maps to an indicator event — no dangling entries either way", () => {
+    const objectiveKeys = Object.keys(OBJECTIVES) as ObjectiveType[];
+    const eventKeys = Object.keys(EVENT_FOR_OBJECTIVE) as ObjectiveType[];
+    expect(objectiveKeys.sort()).toEqual(eventKeys.sort());
+    objectiveKeys.forEach((key) => {
+      expect(EVENT_FOR_OBJECTIVE[key]).toBeTruthy();
+    });
+  });
+});
+
+describe("no location-based objective ever sneaks in", () => {
+  // This app has no reliable places API to verify a visit or a proximity
+  // against — every objective (including attend_meetup, verified by the
+  // convoy roster, never GPS) must stay describable without naming a place.
+  const LOCATION_WORDS = ["place", "location", "poi", "visit", "café", "gps", "proximity"];
+
+  it("no objective id, label or progress noun names a place", () => {
+    Object.values(OBJECTIVES).forEach((meta) => {
+      const haystack = `${meta.type} ${meta.label} ${meta.progressNoun}`.toLowerCase();
+      LOCATION_WORDS.forEach((word) => {
+        expect(haystack).not.toContain(word);
+      });
+    });
   });
 });

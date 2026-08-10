@@ -9,16 +9,17 @@
 //   • presentation helpers (labels, colours, progress formatting)
 //
 // The quests are **universal**: distance (km or m) and speed goals, plus
-// social/photo goals that make sense for a driver anywhere on Earth — not
-// tied to any one country. There are deliberately no place-based quests
-// ("visit a café", etc.) — that needs a places API this app doesn't have
-// a reliable one for yet. See EVENT_FOR_OBJECTIVE for the full list.
+// social goals — make a friend, meet another driver through a convoy — that
+// make sense for a driver anywhere on Earth — not tied to any one country.
+// There are deliberately no place-based quests ("visit a café", etc.) — that
+// needs a places API this app doesn't have a reliable one for yet. See
+// EVENT_FOR_OBJECTIVE for the full list.
 //
 // Quests are **auto-completed**. Progress is never set by the user; it is
 // driven only by real indicators (distance driven, top speed reached, a
-// friend made) via the `record_quest_event` RPC and database triggers. When
-// an indicator reaches the target the server grants the rewards. See
-// EVENT_FOR_OBJECTIVE for the objective → indicator routing.
+// friend made, a convoy joined) via the `record_quest_event` RPC and
+// database triggers. When an indicator reaches the target the server grants
+// the rewards. See EVENT_FOR_OBJECTIVE for the objective → indicator routing.
 //
 // Adding a future quest type is a two-step, additive change:
 //   1. add a row (or rows) to quest_templates with a new objective_type
@@ -48,6 +49,7 @@ export type ObjectiveType =
   | "night_drive"
   | "reach_speed"
   | "make_friend"
+  | "attend_meetup"
   | "photo_capture";
 
 // The indicator/event that drives each objective's progress. The client
@@ -56,6 +58,7 @@ export type QuestEventType =
   | "drive_distance"
   | "reach_speed"
   | "make_friend"
+  | "attend_meetup"
   | "photo_capture";
 
 export const EVENT_FOR_OBJECTIVE: Record<ObjectiveType, QuestEventType> = {
@@ -63,6 +66,7 @@ export const EVENT_FOR_OBJECTIVE: Record<ObjectiveType, QuestEventType> = {
   night_drive: "drive_distance",
   reach_speed: "reach_speed",
   make_friend: "make_friend",
+  attend_meetup: "attend_meetup",
   photo_capture: "photo_capture",
 };
 
@@ -207,6 +211,7 @@ export const OBJECTIVES: Record<ObjectiveType, ObjectiveMeta> = {
   night_drive: { type: "night_drive", label: "Night drive", progressNoun: "driven", incremental: true },
   reach_speed: { type: "reach_speed", label: "Reach a speed", progressNoun: "km/h reached", incremental: false },
   make_friend: { type: "make_friend", label: "Make friends", progressNoun: "friends made", incremental: true },
+  attend_meetup: { type: "attend_meetup", label: "Meet drivers", progressNoun: "drivers met", incremental: true },
   photo_capture: { type: "photo_capture", label: "Capture photos", progressNoun: "photos taken", incremental: true },
 };
 

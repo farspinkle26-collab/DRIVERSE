@@ -7,18 +7,20 @@ of parametric **templates**.
 Two principles define the system:
 
 1. **Universal / global.** Quests are worldwide by design. They describe generic
-   goals — *drive N km*, *drive N m*, *reach N km/h*, *make a new friend*, *take
-   a photo* — with no dependency on any specific, country-bound location. There
-   are deliberately **no place-based quests** ("visit a café", "visit a mall")
-   — the app has no reliable places API to verify a visit against, so that
-   objective type doesn't exist. One catalogue serves every user on Earth. The
-   "quest day" rolls over at **UTC** midnight so everyone refreshes at the same
-   instant.
+   goals — *drive N km*, *drive N m*, *reach N km/h*, *make a new friend*, *meet
+   a driver through a convoy*, *take a photo* — with no dependency on any
+   specific, country-bound location. There are deliberately **no place-based
+   quests** ("visit a café", "visit a mall") — the app has no reliable places
+   API to verify a visit against, so that objective type doesn't exist; a
+   convoy meetup is verified by the roster (`party_members`), never by GPS
+   proximity, for the same reason. One catalogue serves every user on Earth.
+   The "quest day" rolls over at **UTC** midnight so everyone refreshes at the
+   same instant.
 2. **Auto-completed — never self-marked.** A quest cannot be marked done by the
    user. It finishes **only when its real indicator/calculation reaches the
    target**: distance actually driven, a top speed actually reached, friends
-   actually made. Rewards (XP, coins, streak, badges) are granted automatically
-   at that moment.
+   actually made, another driver actually sharing a convoy. Rewards (XP, coins,
+   streak, badges) are granted automatically at that moment.
 
 Templates × numeric parameter ranges × time windows produce a large space of
 distinct quests without any generative model or location database.
@@ -55,6 +57,8 @@ distinct quests without any generative model or location database.
 │  Triggers             saved_routes / trips  → drive_distance progress   │
 │                                              → reach_speed progress      │
 │                       friends (accepted)    → make_friend progress      │
+│                       party_members         → attend_meetup progress    │
+│                       (2nd accepted member)                              │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,15 +92,18 @@ Objectives (`objective_type`) and the real indicator that drives each
 | `night_drive` | Distance, night-flavoured | `drive_distance` (km) | "Long Haul — 60 km" |
 | `reach_speed` | Reach a top speed of N km/h | `reach_speed` (km/h — tracks the best speed seen, not a sum) | "Reach 80 km/h today" |
 | `make_friend` | Make N new friends | `make_friend` (+1) | "Make a new friend" |
+| `attend_meetup` | Meet N drivers through a convoy | `attend_meetup` (+1, per driver per convoy) | "Meet a driver by joining a convoy" |
 
-These three are the *only* objectives the catalogue seeds or the generator
+These four are the *only* objectives the catalogue seeds or the generator
 will select — see §10. `photo_capture` still exists in `questEngine.ts`'s
 type union and `useQuestStore.ts`'s `recordPhoto()` (neither is wired to any
 UI flow — nothing calls `recordPhoto`), but no template produces one, so it
 is dead capability, not a live objective.
 
 There are deliberately **no place-based objectives** ("visit a café", "visit a
-mall") — the app has no reliable places API to verify a visit against.
+mall") — the app has no reliable places API to verify a visit against. A
+convoy meetup is not an exception to this: it is verified by
+`party_members`'s roster, never by comparing two drivers' GPS positions.
 
 The `points_of_interest` table and the `poi_category` / `place_label` /
 `{place}` template plumbing remain in the schema for an optional future
@@ -146,8 +153,14 @@ legacy `complete_quest` / `update_quest_progress` functions are dropped.
   `top_speed_kmh` from the same row. Fully automatic.
 - **Friends** — a DB trigger on `friends` fires `make_friend` for both users when
   a friendship becomes `accepted`. Fully automatic.
+- **Meetups** — a DB trigger on `party_members` (§14b of the migration) fires
+  `attend_meetup` the moment a convoy has its second accepted member — for
+  whichever driver's row just became `accepted` (an invite accepted, or a
+  direct join), and, the first time that happens for a given convoy, for the
+  driver who was already there too (the leader's own solo seat on party
+  creation never counts by itself). Fully automatic; no client call.
 
-All three of the catalogue's objectives are now trigger-driven — nothing calls
+All four of the catalogue's objectives are now trigger-driven — nothing calls
 `record_quest_event` from the client for any live objective. `recordDrive` /
 `recordSpeed` remain on the hook as manual escape hatches (harmless, since the
 triggers already cover the real path); `recordPhoto` still exists too, but
@@ -216,8 +229,9 @@ Adding a new quest type is **additive**:
 2. *(Optional)* enable `pg_cron` for the scheduled sweep.
 3. The client is already wired: `QuestsProvider` is mounted in `app/_layout.tsx`
    (inside `XPProvider`), and the **Drive → Quests** tab shows live, auto-tracking
-   quests. All three remaining objectives — distance, top speed, friends — progress
-   automatically via DB triggers; no client call is needed for any of them (see §5).
+   quests. All four remaining objectives — distance, top speed, friends, meetups
+   — progress automatically via DB triggers; no client call is needed for any of
+   them (see §5).
 
 ---
 
@@ -258,3 +272,37 @@ Two changes, both in `database_migration_daily_quests.sql`:
 `u_easy_photo` (`photo_capture`) is retired in the same pass — not a
 place-category quest, but outside the three objectives (distance, speed,
 friend) this app is meant to measure without a places API.
+
+---
+
+## 11. `attend_meetup` — a fourth non-location objective (10 Aug 2026)
+
+Adds "meet a driver" as a quest objective, driven by the convoy system
+(`parties` / `party_members`) rather than any location check — consistent
+with §3's rule that this catalogue has no way to verify a visit or a
+proximity against a real place. "Met" means shared a convoy roster; nothing
+about where either driver was.
+
+Three changes, all in `database_migration_daily_quests.sql`, and all three
+had to move together because §20's cleanup is not append-only — it deletes
+by trait every time the file runs, so extending the allowed objective set
+anywhere without extending it everywhere is a self-inflicted repeat of §10:
+
+- **§14b, new** — `quest_on_convoy_member_accepted()` on `party_members`.
+  Fires when a member's own row transitions to `accepted` (an invite
+  accepted, or a direct join). A party's leader is seated by
+  `handle_new_party()` with a plain `INSERT ... status = 'accepted'`, so
+  that alone must not grant credit — the trigger only fires while there is
+  at least one *other* accepted member already in the party. The first time
+  a party crosses from one accepted member to two, the driver who was
+  already there (usually the leader, who never transitions their own row)
+  is credited retroactively in the same trigger firing; every member after
+  that only credits the newcomer, so a driver gets exactly one meetup credit
+  per convoy, not one per membership change after them.
+- **`ensure_daily_quests()`'s `eligible` CTE** and **`_record_quest_event_for()`**
+  both extended to recognise `attend_meetup`, mirroring how `make_friend` is
+  wired.
+- **§19 and §20's allowlists**, both updated together — `u_med_meetup` /
+  `u_hard_meetup` added to the seed, and the same two ids added to §20's
+  `objective_type NOT IN (...)` filters in the same edit, so the seed can't
+  delete itself the next time this file is re-run.
