@@ -25,10 +25,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import Svg, { Circle } from "react-native-svg";
 import {
   Calendar,
   Car,
   ChevronRight,
+  Flag,
+  Flame,
+  Gauge,
+  Handshake,
   Route as RouteIcon,
   Share2,
   Swords,
@@ -57,11 +62,13 @@ import {
   textStyle,
 } from "@/constants/theme";
 import {
+  DIFFICULTY_TIERS,
   isComplete,
   progressLabel,
   progressPercent,
   type DailyQuest,
 } from "@/lib/questEngine";
+import { questSymbolName, ringGeometry, type QuestSymbol } from "@/lib/questRing";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -130,16 +137,93 @@ const FEATURES: Feature[] = [
  * ------------------------------------------------------------------ */
 
 /**
- * Quest cards carry the same shape and red budget as trip cards: one cut
- * corner, hairline outline, and exactly one red element — the progress
- * fill. The per-quest `accent_color` stored on the template is ignored;
- * it predates the palette and is where the purple and blue on this screen
- * used to come from.
+ * The lucide component for each name `questSymbolName()` can return. The
+ * resolution itself is pure and tested in `lib/questRing.ts`; this map is
+ * only the name → component half, which cannot live there without pulling
+ * React into a module the tests deliberately keep free of it.
+ */
+const SYMBOL_COMPONENTS: Record<
+  QuestSymbol,
+  React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>
+> = { Car, Gauge, Route: RouteIcon, Flame, Users, Handshake, Flag };
+
+/** Medallion diameter and the weight of the arc drawn around it. */
+const MEDALLION = 64;
+const RING_STROKE = 3;
+
+/**
+ * The symbol medallion: the quest's own icon inside a ring whose red arc is
+ * the same progress the bar below reports, drawn twice because the card is
+ * scanned twice — once down the left edge for "what and how far", once
+ * across for the detail.
+ *
+ * SVG, not a rotated View: an arc is the one shape a border cannot make.
+ * This is a plain stroked circle with a dash pattern — no `Mask`, no
+ * `#RRGGBBAA` fill, so it steers clear of both react-native-svg traps this
+ * codebase has hit (`MapPolyline.tsx`'s header is the account).
+ */
+function QuestMedallion({ symbol, pct }: { symbol: QuestSymbol; pct: number }) {
+  const Symbol = SYMBOL_COMPONENTS[symbol];
+  const { radius, dash, gap } = ringGeometry(MEDALLION, RING_STROKE, pct);
+  const centre = MEDALLION / 2;
+
+  return (
+    <View style={styles.medallion}>
+      <Svg width={MEDALLION} height={MEDALLION} pointerEvents="none">
+        {/* Track first, arc over it — same order as the bar below. */}
+        <Circle
+          cx={centre}
+          cy={centre}
+          r={radius}
+          stroke={colors.hairline}
+          strokeWidth={RING_STROKE}
+          fill="none"
+        />
+        {dash > 0 ? (
+          <Circle
+            cx={centre}
+            cy={centre}
+            r={radius}
+            stroke={colors.racingRed}
+            strokeWidth={RING_STROKE}
+            strokeLinecap="round"
+            fill="none"
+            strokeDasharray={`${dash} ${gap}`}
+            // SVG starts an arc at 3 o'clock; progress reads from 12.
+            transform={`rotate(-90 ${centre} ${centre})`}
+          />
+        ) : null}
+      </Svg>
+      <View style={styles.medallionGlyph} pointerEvents="none">
+        <Symbol
+          size={spacing.spacingXxl}
+          color={colors.textPrimary}
+          strokeWidth={ICON_STROKE}
+        />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Quest cards carry the same shape as trip cards — one cut corner, hairline
+ * outline — with the symbol medallion on the left and the readout on the
+ * right. The per-quest `accent_color` stored on the template is still
+ * ignored; it predates the palette and is where the purple and blue on this
+ * screen used to come from.
+ *
+ * The difficulty badge is the one sanctioned exception to the six-colour
+ * palette on this screen, and it takes its green/amber/red from
+ * `DIFFICULTY_TIERS` rather than inventing hexes here — the tier colour is
+ * already the shared model's, mirrored in SQL. Difficulty is the one thing
+ * on the card a driver sorts by at a glance, and three identical grey
+ * badges cannot be sorted by at a glance.
  */
 function QuestCard({ quest, onShare }: { quest: DailyQuest; onShare?: () => void }) {
   const done = quest.status === "completed";
   const ready = quest.status === "active" && isComplete(quest);
   const pct = done ? 100 : progressPercent(quest);
+  const tier = DIFFICULTY_TIERS[quest.difficulty];
 
   return (
     <CutCornerSurface
@@ -150,47 +234,60 @@ function QuestCard({ quest, onShare }: { quest: DailyQuest; onShare?: () => void
       corners="topRight"
       contentStyle={styles.questCard}
     >
-      <View style={styles.questHeader}>
-        <Text style={styles.questTitle} numberOfLines={1}>
-          {quest.title}
-        </Text>
-        <CutCornerBadge
-          label={quest.difficulty}
-          color={colors.textSecondary}
-          corners="topRight"
-        />
-      </View>
+      {/* Edge marker. Full-height on the straight side, so it never meets
+          the cut corner and never has to be mitred to it. */}
+      <View style={styles.questEdge} pointerEvents="none" />
 
-      <Text style={styles.questDesc} numberOfLines={2}>
-        {quest.description}
-      </Text>
+      <QuestMedallion symbol={questSymbolName(quest)} pct={pct} />
 
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${Math.round(pct)}%` }]} />
-      </View>
-
-      <View style={styles.questFooter}>
-        {done && onShare ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Share ${quest.title}`}
-            onPress={onShare}
-            hitSlop={spacing.spacingSm}
-            style={styles.questShare}
-          >
-            <Share2 size={spacing.spacingLg} color={colors.racingRed} strokeWidth={ICON_STROKE} />
-            <Text style={styles.questShareText}>SHARE</Text>
-          </Pressable>
-        ) : (
-          <Text style={styles.questProgress}>
-            {done ? "Completed" : ready ? "Finishing…" : progressLabel(quest)}
+      <View style={styles.questBody}>
+        <View style={styles.questHeader}>
+          <Text style={styles.questTitle} numberOfLines={1}>
+            {quest.title}
           </Text>
-        )}
-        <View style={styles.questRewards}>
-          <Text style={styles.rewardValue}>+{quest.xp_reward}</Text>
-          <Text style={styles.rewardUnit}>XP</Text>
-          <Text style={styles.rewardValue}>+{quest.coin_reward}</Text>
-          <Text style={styles.rewardUnit}>coins</Text>
+          <CutCornerBadge
+            label={quest.difficulty}
+            color={tier.color}
+            corners="topRight"
+          />
+        </View>
+
+        <Text style={styles.questDesc} numberOfLines={2}>
+          {quest.description}
+        </Text>
+
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.round(pct)}%` }]} />
+        </View>
+
+        <View style={styles.questFooter}>
+          {done && onShare ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${quest.title}`}
+              onPress={onShare}
+              hitSlop={spacing.spacingSm}
+              style={styles.questShare}
+            >
+              <Share2 size={spacing.spacingLg} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+              <Text style={styles.questShareText}>SHARE</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.questProgress} numberOfLines={1}>
+              {done ? "Completed" : ready ? "Finishing…" : progressLabel(quest)}
+            </Text>
+          )}
+          <View style={styles.questRewards}>
+            <Text style={styles.rewardValue}>
+              +{quest.xp_reward.toLocaleString("en-US")}
+            </Text>
+            <Text style={styles.rewardUnitXp}>XP</Text>
+            <View style={styles.rewardDivider} />
+            <Text style={styles.rewardValue}>
+              +{quest.coin_reward.toLocaleString("en-US")}
+            </Text>
+            <Text style={styles.rewardUnit}>coins</Text>
+          </View>
         </View>
       </View>
     </CutCornerSurface>
@@ -549,8 +646,34 @@ const styles = StyleSheet.create({
   },
   // Quest card
   questCard: {
+    flexDirection: "row",
+    alignItems: "center",
     padding: spacing.spacingLg,
-    gap: spacing.spacingMd,
+    paddingLeft: spacing.spacingLg + spacing.spacingXs,
+    gap: spacing.spacingLg,
+  },
+  questEdge: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: borderWidth.emphasis,
+    backgroundColor: colors.racingRed,
+  },
+  medallion: {
+    width: MEDALLION,
+    height: MEDALLION,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medallionGlyph: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  questBody: {
+    flex: 1,
+    gap: spacing.spacingSm,
   },
   questHeader: {
     flexDirection: "row",
@@ -565,7 +688,6 @@ const styles = StyleSheet.create({
   questDesc: {
     ...textStyle("caption"),
     color: colors.textSecondary,
-    marginTop: -spacing.spacingSm,
   },
   progressTrack: {
     height: spacing.spacingXs,
@@ -601,7 +723,7 @@ const styles = StyleSheet.create({
   },
   questRewards: {
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "center",
     gap: spacing.spacingXs,
   },
   rewardValue: {
@@ -611,7 +733,18 @@ const styles = StyleSheet.create({
   rewardUnit: {
     ...textStyle("caption"),
     color: colors.textSecondary,
-    marginRight: spacing.spacingSm,
+  },
+  /** XP is the quest's headline reward, so its unit carries the accent. */
+  rewardUnitXp: {
+    ...textStyle("caption"),
+    color: colors.racingRed,
+  },
+  rewardDivider: {
+    width: borderWidth.hairline,
+    alignSelf: "stretch",
+    marginVertical: spacing.spacingXs,
+    marginHorizontal: spacing.spacingXs,
+    backgroundColor: colors.hairline,
   },
   // Explore grid
   grid: {
