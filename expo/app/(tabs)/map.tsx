@@ -643,35 +643,34 @@ function ActionRow({
  * reserved for the sheets, cards and primary actions.
  */
 function MapChromeButton({
-  label,
   accessibilityLabel,
   active = false,
   onPress,
   children,
 }: {
-  label: string;
+  /**
+   * The only name this button has. There is no visible caption any more, so
+   * this is not a nicety — it is the sole label a screen reader can read.
+   */
   accessibilityLabel: string;
   active?: boolean;
   onPress: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <View style={styles.labeledBtn}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        accessibilityState={{ selected: active }}
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.actionBtn,
-          active && styles.actionBtnActive,
-          pressed && styles.pressed,
-        ]}
-      >
-        {children}
-      </Pressable>
-      <Text style={styles.actionBtnLabel} numberOfLines={1}>{label}</Text>
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionBtn,
+        active && styles.actionBtnActive,
+        pressed && styles.chromePressed,
+      ]}
+    >
+      {children}
+    </Pressable>
   );
 }
 
@@ -3408,13 +3407,12 @@ export default function MapScreen() {
             </Pressable>
 
             {/* Signal a problem to every driver on the map. Neutral until my
-                own signal is up, then it takes the accent border and label —
-                the one live-state that earns red here — so standing it down
-                is one obvious tap. Sits under the greeting card so it's the
+                own signal is up, then it takes the accent border — the one
+                live-state that earns red here — so standing it down is one
+                obvious tap. Sits under the greeting card so it's the
                 first thing reachable from the upper-left, not buried in the
                 bottom-right action stack. */}
             <MapChromeButton
-              label={myProblem ? "Clear" : "Signal"}
               accessibilityLabel={myProblem ? "Stand down your problem signal" : "Signal a problem to nearby drivers"}
               active={!!myProblem}
               onPress={handleSignalPress}
@@ -3486,7 +3484,6 @@ export default function MapScreen() {
       {!isRecording && !searchOpen && (
         <Animated.View style={[styles.rightButtons, { top: insets.top + spacing.spacingMd, opacity: fadeIn }]}>
           <MapChromeButton
-            label="Search"
             active={searchOpen}
             accessibilityLabel="Search places"
             onPress={() => {
@@ -3506,7 +3503,6 @@ export default function MapScreen() {
           </MapChromeButton>
 
           <MapChromeButton
-            label="My Location"
             accessibilityLabel="Centre the map on me"
             onPress={centerOnUser}
           >
@@ -3518,7 +3514,6 @@ export default function MapScreen() {
           </MapChromeButton>
 
           <MapChromeButton
-            label="Filters"
             active={filtersOpen}
             accessibilityLabel="Map layers and style"
             onPress={() => { setFiltersOpen((v) => !v); if (searchOpen) closeSearch(); }}
@@ -3531,7 +3526,6 @@ export default function MapScreen() {
           </MapChromeButton>
 
           <MapChromeButton
-            label="Event"
             accessibilityLabel="Create an event"
             onPress={openCreateEvent}
           >
@@ -3544,8 +3538,7 @@ export default function MapScreen() {
 
           {routeInfo && (
             <MapChromeButton
-              label="Clear"
-              accessibilityLabel="Clear the route"
+                accessibilityLabel="Clear the route"
               onPress={clearRoute}
             >
               <X
@@ -3774,33 +3767,27 @@ export default function MapScreen() {
         <Animated.View
           style={[styles.actionStack, { bottom: insets.bottom + BOTTOM_STACK_OFFSET, opacity: fadeIn }]}
         >
-          {/* DRIVE is the screen's primary action, so it is the one solid
-              red slab in the idle viewport. */}
-          <View style={styles.labeledBtn}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: showDropPinHint }}
-              accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
-              onPress={toggleDrive}
-            >
-              <CutCornerSurface
-                fill={showDropPinHint ? colors.carbonSurface : colors.racingRed}
-                borderColor={colors.racingRed}
-                borderWidth={showDropPinHint ? borderWidth.emphasis : borderWidth.hairline}
-                cutSize={cut.md}
-                corners="topRight"
-                style={styles.driveBtn}
-                contentStyle={styles.driveBtnContent}
-              >
-                <Car
-                  size={spacing.spacingXl}
-                  color={showDropPinHint ? colors.racingRed : onRacingRed}
-                  strokeWidth={MAP_GLYPH_STROKE}
-                />
-              </CutCornerSurface>
-            </Pressable>
-            <Text style={styles.actionBtnLabel}>{showDropPinHint ? "Tap Map" : "Drive"}</Text>
-          </View>
+          {/* DRIVE is the screen's primary action: the one solid red disc in
+              the idle viewport, and the largest of the circles. Armed ("tap
+              the map to drop a pin") inverts it to carbon with a red rim —
+              the only state cue left now that the caption is gone. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: showDropPinHint }}
+            accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
+            onPress={toggleDrive}
+            style={({ pressed }) => [
+              styles.driveBtn,
+              showDropPinHint && styles.driveBtnArmed,
+              pressed && styles.chromePressed,
+            ]}
+          >
+            <Car
+              size={spacing.spacingXl}
+              color={showDropPinHint ? colors.racingRed : onRacingRed}
+              strokeWidth={MAP_GLYPH_STROKE}
+            />
+          </Pressable>
 
           {/* Same slot, two different menus. Not in a convoy: the button is
               a shortcut to browsing/creating one, same as it always was.
@@ -3810,7 +3797,6 @@ export default function MapScreen() {
               away to ask. `active` borrows the same on-state
               `MapChromeButton` already uses for Filters. */}
           <MapChromeButton
-            label="Convoy"
             active={!!party}
             accessibilityLabel={party ? `${party.name} — open convoy menu` : "Open convoys"}
             onPress={() =>
@@ -3831,7 +3817,6 @@ export default function MapScreen() {
           </MapChromeButton>
 
           <MapChromeButton
-            label="Chat"
             accessibilityLabel="Open messages"
             onPress={() => router.push("/messages" as any)}
           >
@@ -5049,31 +5034,53 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.7,
   },
+  /**
+   * The map's floating controls are circles, not the brand's corner cut.
+   *
+   * `constants/theme.ts` reserves the cut for brand surfaces and says there
+   * is no pill token on purpose — this is a deliberate exception for map
+   * chrome specifically, and it is the one place in the app where it holds:
+   * these buttons float over live tiles rather than sitting on an app
+   * surface, so they read as instruments on top of the map rather than as
+   * part of the page. The cut stays everywhere else.
+   *
+   * They are also the one place a drop shadow does real work. Elsewhere the
+   * background is `voidBlack` and a black shadow over it is worth about four
+   * values of luminance (see the note on `elevation` in theme.ts); over map
+   * tiles — which are frequently light — the same shadow is what lifts the
+   * control off the ground and makes the circle read as a physical object.
+   * Both platforms render it here, since these are plain views with a
+   * background colour and so have an outline for Android to work from.
+   */
   actionBtn: {
     width: spacing.spacingXxl + spacing.spacingSm,
     height: spacing.spacingXxl + spacing.spacingSm,
-    borderRadius: radius.sharp,
+    borderRadius: radius.circle,
     backgroundColor: colors.carbonSurface,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: borderWidth.hairline,
     borderColor: colors.hairline,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.45,
+    shadowRadius: 6,
+    elevation: 6,
   },
   actionBtnActive: {
     borderColor: colors.racingRed,
   },
-  labeledBtn: {
-    alignItems: "center",
-    width: spacing.spacingXxxl + spacing.spacingLg,
-    gap: spacing.spacingXs,
-  },
-  actionBtnLabel: {
-    ...textStyle("caption"),
-    ...mapLabelShadow,
-    fontSize: 10,
-    lineHeight: 13,
-    color: colors.textSecondary,
-    textAlign: "center",
+  /**
+   * Press feedback for a raised control. Dimming alone read as "disabled"
+   * once the buttons had a shadow, so the circle sinks a little and the
+   * shadow tightens with it — the same event the finger is doing.
+   */
+  chromePressed: {
+    opacity: 0.85,
+    transform: [{ translateY: 1 }],
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 2,
   },
   actionStack: {
     position: "absolute",
@@ -5082,14 +5089,31 @@ const styles = StyleSheet.create({
     gap: spacing.spacingMd,
     zIndex: 130,
   },
+  /**
+   * The primary disc. Larger than the chrome circles and solid red, so the
+   * size and the fill carry the hierarchy the removed caption used to.
+   * Its shadow is deeper for the same reason — it sits highest.
+   */
   driveBtn: {
     width: spacing.spacingXxxl + spacing.spacingSm,
     height: spacing.spacingXxxl + spacing.spacingSm,
-  },
-  driveBtnContent: {
-    flex: 1,
+    borderRadius: radius.circle,
+    backgroundColor: colors.racingRed,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.racingRed,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  /** Waiting for the driver to tap a destination. */
+  driveBtnArmed: {
+    backgroundColor: colors.carbonSurface,
+    borderWidth: borderWidth.emphasis,
+    borderColor: colors.racingRed,
   },
 
   /* ---------------- Top chrome: greeting + featured event ---------------- */
