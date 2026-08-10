@@ -55,6 +55,7 @@ import {
   Flame,
   Globe2,
   HelpCircle,
+  PlayCircle,
   LogOut,
   Info,
   Lock,
@@ -361,7 +362,7 @@ function Sheet({
 export default function ProfileScreen({ userId }: { userId?: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, isAuthenticated, updateProfilePicture, logout } = useAuth();
+  const { user, isAuthenticated, updateProfilePicture, resetTutorial, logout } = useAuth();
   // Trips shown here may belong to whoever's profile this is, but the unit
   // they render in always follows the signed-in viewer's own country — see
   // lib/speedUnits.ts's header for why.
@@ -840,6 +841,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
    * frame of the wrong thing; replacing the route removes it from the history
    * so Back cannot return to a signed-out profile either.
    */
+  // "Replay tutorial" only re-opens the gate the map screen's own
+  // tutorial_completed_at check watches — see resetTutorial's header in
+  // useAuthStore.ts. It does not run the walkthrough itself.
+  const handleReplayTutorial = useCallback(async () => {
+    const ok = await resetTutorial();
+    if (ok) {
+      router.push("/(tabs)/map" as any);
+    } else {
+      appAlert("Couldn't restart the tutorial", "Check your connection and try again.");
+    }
+  }, [resetTutorial, router]);
+
   const handleLogout = useCallback(() => {
     appAlert("Sign Out", "Sign out of Driveverse? You'll need to sign in again to drive.", [
       { text: "Cancel", style: "cancel" },
@@ -1982,6 +1995,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               icon={<Trophy size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
               label="Levels & Ranks"
               onPress={() => router.push("/ranks" as any)}
+            />
+            <SettingRow
+              icon={<PlayCircle size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}
+              label="Replay Tutorial"
+              onPress={handleReplayTutorial}
             />
             <SettingRow
               icon={<Shield size={ICON_MD} color={colors.textSecondary} strokeWidth={ICON_STROKE} />}

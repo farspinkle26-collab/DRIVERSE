@@ -15,6 +15,8 @@ export interface User {
   registrationCompletedAt?: number;
   verifiedAt?: number;
   country?: string;
+  /** When this driver finished (or skipped) the first-launch map tutorial. */
+  tutorialCompletedAt?: number;
 
 }
 

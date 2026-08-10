@@ -183,6 +183,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         registrationCompletedAt: profile.registration_completed_at,
         verifiedAt: profile.verified_at,
         country: profile.country ?? undefined,
+        tutorialCompletedAt: profile.tutorial_completed_at,
       };
 
       setUser(loadedUser);
@@ -383,6 +384,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           canSwitchRoles: false,
           registrationCompletedAt: existingProfile.registration_completed_at,
           verifiedAt: existingProfile.verified_at,
+          tutorialCompletedAt: existingProfile.tutorial_completed_at,
         };
         setUser(updatedUser);
       } else {
@@ -531,6 +533,64 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, [user, session]);
 
+  // ================================================================
+  // FIRST-LAUNCH TUTORIAL — see database_migration_tutorial.sql
+  //
+  // One write, on completion or on an explicit skip; the caller (the map
+  // screen's tutorial overlay) does not distinguish the two here — a skip is
+  // still a decision, not "still pending", so it gets the same timestamp.
+  // ================================================================
+  const completeTutorial = useCallback(async () => {
+    if (!user || !session?.user) return false;
+    try {
+      const now = new Date().toISOString();
+      const { error: updErr } = await supabase
+        .from("profiles")
+        .update({ tutorial_completed_at: now })
+        .eq("id", session.user.id);
+
+      if (updErr) {
+        setError(updErr.message);
+        return false;
+      }
+
+      setUser((prev) =>
+        prev ? { ...prev, tutorialCompletedAt: now as unknown as number } : prev
+      );
+      return true;
+    } catch (err) {
+      console.error("Tutorial completion error:", err);
+      return false;
+    }
+  }, [user, session]);
+
+  /**
+   * "Replay tutorial" in Profile settings. Clears the column back to NULL so
+   * the map screen's own `tutorial_completed_at`-gated effect picks it back
+   * up on the next visit — the replay entry point does not run the tutorial
+   * itself, it only re-opens the gate the map screen already watches.
+   */
+  const resetTutorial = useCallback(async () => {
+    if (!user || !session?.user) return false;
+    try {
+      const { error: updErr } = await supabase
+        .from("profiles")
+        .update({ tutorial_completed_at: null })
+        .eq("id", session.user.id);
+
+      if (updErr) {
+        setError(updErr.message);
+        return false;
+      }
+
+      setUser((prev) => (prev ? { ...prev, tutorialCompletedAt: undefined } : prev));
+      return true;
+    } catch (err) {
+      console.error("Tutorial reset error:", err);
+      return false;
+    }
+  }, [user, session]);
+
   // alias for simplified signup
   const signUp = useCallback(async (email: string, password: string) => {
     return signup(email, password, email.split("@")[0]);
@@ -555,6 +615,8 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     updateProfilePicture,
     updateCountry,
     completeProfileCustomization,
+    completeTutorial,
+    resetTutorial,
     loadUserProfile,
     getTitleForLevel,
     isAuthenticated: !!user && user.id !== GUEST_USER.id,
@@ -566,5 +628,5 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     isAccountActive: user?.accountStatus === "active",
     requiresDocuments: user?.verificationStatus === "requires_documents",
     isVerifiedCustomer: user?.role === "customer",
-  }), [user, session, loading, error, needsRoleSelection, needsProfileCustomization, login, signup, signUp, signInWithGoogle, signInWithApple, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, completeProfileCustomization, loadUserProfile]);
+  }), [user, session, loading, error, needsRoleSelection, needsProfileCustomization, login, signup, signUp, signInWithGoogle, signInWithApple, logout, setRole, setCustomerRole, switchAccountType, updateProfilePicture, updateCountry, completeProfileCustomization, completeTutorial, resetTutorial, loadUserProfile]);
 });

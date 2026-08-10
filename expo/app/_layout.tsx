@@ -21,6 +21,7 @@ import { RoutesProvider } from "@/hooks/useRoutesStore";
 import { PlatinumProvider } from "@/hooks/usePlatinumStore";
 import { SavedPlacesProvider } from "@/hooks/useSavedPlacesStore";
 import { CosmeticsProvider } from "@/hooks/useCosmeticsStore";
+import { TutorialTargetsProvider } from "@/hooks/useTutorialTargets";
 import LoadingScreen from "@/components/LoadingScreen";
 import NotificationBanner from "@/components/NotificationBanner";
 import AppAlertHost from "@/components/AppAlertHost";
@@ -238,7 +239,9 @@ function RootLayoutContent() {
                                   <ActiveCarProvider>
                                     <SavedPlacesProvider>
                                       <CosmeticsProvider>
-                                        <RootLayoutNav />
+                                        <TutorialTargetsProvider>
+                                          <RootLayoutNav />
+                                        </TutorialTargetsProvider>
                                         <NotificationBanner />
                                         <FriendRequestsListener />
                                         <AppAlertHost />
