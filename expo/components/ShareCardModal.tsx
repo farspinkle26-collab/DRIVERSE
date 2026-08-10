@@ -57,8 +57,8 @@ import {
 import {
   CARD_HEIGHT,
   CARD_WIDTH,
-  MAP_SNAPSHOT_HEIGHT,
   MAP_SNAPSHOT_WIDTH,
+  mapSnapshotHeight,
   ShareableCard,
   type ShareableCardProps,
   type TripRouteStyle,
@@ -171,12 +171,14 @@ export default function ShareCardModal(props: ShareCardModalProps) {
     if (!mapAvailable) setRouteStyle((prev) => (prev === "map" ? "trace" : prev));
   }, [mapAvailable]);
 
-  // The heat toggle changes the colours *on the map*, so the still has to be
-  // taken again. Clearing both here is what re-mounts the snapshot stage.
+  // The heat toggle changes the colours *on the map*, and the car toggle
+  // changes the height the still is captured at (`mapSnapshotHeight` — the
+  // capture matches the frame so the route is never cropped), so either one
+  // means taking it again. Clearing both here is what re-mounts the stage.
   useEffect(() => {
     setMapUri(null);
     setMapDone(false);
-  }, [speedHeat, points]);
+  }, [speedHeat, showCar, points]);
 
   const handleSnapshot = useCallback((uri: string | null) => {
     setMapUri(uri);
@@ -287,13 +289,13 @@ export default function ShareCardModal(props: ShareCardModalProps) {
           contain a MapView, and why the stage is not parked offscreen. */}
       {visible && isTrip && routeStyle === "map" && mapAvailable && !mapDone ? (
         <TripMapSnapshot
-          key={`snapshot-${speedHeat ? "heat" : "flat"}`}
+          key={`snapshot-${speedHeat ? "heat" : "flat"}-${showCar ? "car" : "nocar"}`}
           points={points}
           speeds={profile.speeds}
           domain={domain}
           flat={!(speedHeat && heatAvailable)}
           width={MAP_SNAPSHOT_WIDTH}
-          height={MAP_SNAPSHOT_HEIGHT}
+          height={mapSnapshotHeight(showCar)}
           onSnapshot={handleSnapshot}
         />
       ) : null}

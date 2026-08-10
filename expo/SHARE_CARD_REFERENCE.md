@@ -205,18 +205,19 @@ permission surfaces as an actionable message, not a silent no-op.
 ## 6. Layout budget
 
 The card is a fixed 360×640, so the trip variant's blocks are sized against it
-rather than flexed. Two route heights exist — `ROUTE_HEIGHT_WITH_CAR` (200) and
-`ROUTE_HEIGHT_NO_CAR` (244) — because dropping the car strip frees 60pt, and a
+rather than flexed. Two route heights exist — `ROUTE_HEIGHT_WITH_CAR` (192) and
+`ROUTE_HEIGHT_NO_CAR` (244) — because dropping the car strip frees 52pt, and a
 card that leaves that as a hole above the brand mark looks like a bug rather
 than a choice. `tripVariant`'s gap is `spacingLg`, not the `spacingXl` the
 other variants use: every combination of the toggles has been sized at that
 value, and the fullest card (map + heat + car) overflows the frame at the
 wider gap.
 
-The map still is captured once at `MAP_SNAPSHOT_WIDTH × MAP_SNAPSHOT_HEIGHT`
-(the block's exact width, its taller height) and cropped by `resizeMode:
-"cover"` in the shorter layout. Re-capturing on every car toggle would be a
-second and a half of blank map for a crop nobody can see.
+The map still is captured at `MAP_SNAPSHOT_WIDTH × mapSnapshotHeight(showCar)`
+— the block's exact width **and the exact height it will be displayed at**, so
+`resizeMode: "cover"` has nothing to crop. It used to capture once at the
+taller height and let the shorter layout crop the difference; see §8 for why
+that turned out to cut the route.
 
 ---
 
@@ -247,3 +248,50 @@ of it is verified yet:
 8. **Overflow.** Longest possible title, longest endpoint names, a 3-digit top
    speed and a car with a long name — nothing should clip or push the brand
    mark off the frame.
+
+---
+
+## 8. Everything-on looked messy, and the route was cut (10 Aug 2026)
+
+Reported against an export with map + speed heat + car all on — the fullest
+layout, and the only one where all four of these show up at once.
+
+**The route had its ends clipped.** Two causes that compounded, both invisible
+in the source and obvious in the export:
+
+- The still was captured at `ROUTE_HEIGHT_NO_CAR` (244) and `cover`-cropped
+  into the shorter with-car frame, discarding ~26pt top and bottom.
+- `TripMapSnapshot` renders its stage at `scale`× (2), and `fitTo`'s
+  `edgePadding` is measured in *stage* points. A padding of 36, written to
+  read as ~15% of the frame, was ~7% of a 488pt-tall stage.
+
+The inset was smaller than the crop, so the start dot and the tail of the line
+fell outside the visible band — and the taller the route relative to its width,
+the more of it went. The fix is both halves: `mapSnapshotHeight(showCar)`
+captures at the displayed height so there is no crop, and the padding is
+multiplied by `scale`. The cost is a re-capture when the car strip is toggled,
+which is what the heat toggle already did.
+
+**The corner accent ran through the timestamp.** It is absolutely positioned at
+`right: 16` and is 32 wide, so it covers the last 48pt of the card, while the
+header row — inside `FRAME_PADDING` — ran to 24pt from the edge. Nothing yields
+to an absolutely positioned element automatically, so the red cut-corner
+outline sat on top of the date. `CORNER_ACCENT_RESERVE` now derives the header's
+right inset from the accent's own geometry, so the two cannot drift apart.
+
+**The car strip was crushed.** Its label column was `flex: 1` (basis 0) against
+a spec line sized to its own text, so the spec claimed the row and left the
+column ~48pt: "DRIVEN IN" wrapped onto two lines and the car's name clipped to
+"Whit…". A full spec is ~170pt of the ~248pt available — it was never going to
+share a row — so it now sits under the name. `ROUTE_HEIGHT_WITH_CAR` gives up
+8pt toward the extra line; the rest comes from slack that was already sitting
+between the strip and the brand mark.
+
+**"Other" was printing as a marque.** `CAR_MAKES` in `app/customize-profile.tsx`
+ends in a literal `"Other"`, so a driver whose make is not on the list picks it
+and types the real car into `model` — and the card rendered "Other VINFAST
+VF 6". The old guard compared the *joined* make-and-model string to `"custom"`,
+which only ever caught a car whose entire make and model was the one word
+"Custom". `lib/shareCarSpec.ts` now filters each field against a placeholder set
+on its own, and is tested — this is public output, so a placeholder reaching it
+is a real defect rather than a cosmetic one.

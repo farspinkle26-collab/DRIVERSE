@@ -106,6 +106,16 @@ const SETTLE_MS = 1200;
 /** One retry, because the first snapshot after a cold start can come back empty. */
 const RETRY_MS = 1400;
 
+/**
+ * How far the route is inset from the capture's edges, in *design* points —
+ * multiplied by `scale` at the call site, since `edgePadding` is measured on
+ * the scaled-up stage. Vertical is the larger of the two: a route is usually
+ * taller than it is wide, so the vertical fit is the constrained one and the
+ * one whose ends show clipping first.
+ */
+const EDGE_PADDING_Y = 36;
+const EDGE_PADDING_X = 32;
+
 /** Casing under the heat/flat line, and the two circle radii for the endpoints. */
 const CASING_WIDTH = 9;
 const ROUTE_WIDTH = 5;
@@ -161,12 +171,22 @@ export default function TripMapSnapshot({
       fitToCoordinates(points, {
         // Generous padding: a route that touches the frame edge reads as
         // cropped, which is the single clearest "screenshot" tell on a card.
-        edgePadding: { top: 36, right: 32, bottom: 36, left: 32 },
+        //
+        // Scaled by `scale`, because the stage is rendered at `scale`× and
+        // `edgePadding` is in *stage* points. Unscaled, a 36 that was meant
+        // to be ~15% of the frame was ~7% of a 2× stage — half the inset it
+        // reads as, and the reason routes came out with their ends clipped.
+        edgePadding: {
+          top: EDGE_PADDING_Y * scale,
+          right: EDGE_PADDING_X * scale,
+          bottom: EDGE_PADDING_Y * scale,
+          left: EDGE_PADDING_X * scale,
+        },
         duration: 0,
       });
     }
     setReady(true);
-  }, [points, fitToCoordinates]);
+  }, [points, fitToCoordinates, scale]);
 
   const capture = useCallback(async () => {
     if (doneRef.current || !mapRef.current) return;
