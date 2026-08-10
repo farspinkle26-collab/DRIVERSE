@@ -93,11 +93,10 @@ const ICON_MD = spacing.spacingLg; // 16 — spec cells, chrome, list rows
 const ICON_LG = spacing.spacingXl; // 24 — empty-state marks
 
 /**
- * The showcase glyph inside the photo circle, at the profile's featured-car
- * size (PROFILE_SCREEN_REFERENCE §7). Not an icon in the 12/16/24 sense —
- * it is standing in for a photograph.
+ * The showcase glyph standing in for a photograph when the car has none.
+ * Sized against PHOTO_HEIGHT below, not the 12/16/24 icon scale.
  */
-const CAR_GLYPH = 64;
+const CAR_GLYPH = 96;
 
 /** Carousel geometry. Unchanged from the original screen. */
 const CARD_WIDTH = Math.round(SCREEN_WIDTH * 0.76);
@@ -108,12 +107,18 @@ const SIDE_PADDING = (SCREEN_WIDTH - CARD_WIDTH) / 2;
 /**
  * A floor, not a fixed height: every card is at least this tall so the
  * carousel keeps one baseline, and a card with drive data grows past it
- * rather than clipping its own name. 400 = 4 × 100.
+ * rather than clipping its own name. 480 = 4 × 120 — raised alongside
+ * PHOTO_HEIGHT below so the near-fullscreen photo doesn't crowd the spec
+ * bar into the card's floor.
  */
-const CARD_MIN_HEIGHT = 400;
+const CARD_MIN_HEIGHT = 480;
 
-/** Circular photo mask. Round because it frames a photo, not by shape policy. */
-const PHOTO_SIZE = 140;
+/**
+ * The showcase photo is the card's dominant element — near-fullscreen within
+ * the card, not a small circular thumbnail — so the driver recognises the
+ * car before reading a word of the spec sheet.
+ */
+const PHOTO_HEIGHT = 220;
 
 /** Pagination marks: 4pt bars, not pills. Active is wider as well as red. */
 const DOT_HEIGHT = spacing.spacingXs;
@@ -186,7 +191,9 @@ function CarCard({
           </Pressable>
         </View>
 
-        {/* Photo mask — circular because it frames a photograph. */}
+        {/* Showcase photo — near-fullscreen within the card, not a small
+            circular thumbnail, so the car is the first thing the driver
+            recognises. */}
         <View style={styles.photo}>
           {car.photo_url ? (
             <Image
@@ -585,7 +592,7 @@ export default function SelectCarScreen() {
               <Text style={styles.link}>Garage Stats</Text>
             </Pressable>
           </View>
-          <Text style={styles.title}>Choose your ride</Text>
+          <Text style={styles.title}>CHOOSE YOUR RIDE</Text>
           <Text style={styles.subtitle}>
             {user?.name ? `Welcome back, ${user.name.split(" ")[0]}. ` : ""}
             Swipe to pick the car you&apos;re driving today.
@@ -781,11 +788,11 @@ const styles = StyleSheet.create({
     borderColor: colors.hairline,
   },
 
-  // Photo mask
+  // Showcase photo — large and rectangular, not a small circular thumbnail.
   photo: {
-    width: PHOTO_SIZE,
-    height: PHOTO_SIZE,
-    borderRadius: radius.circle,
+    alignSelf: "stretch",
+    height: PHOTO_HEIGHT,
+    borderRadius: radius.sharp,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
