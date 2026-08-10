@@ -143,6 +143,9 @@ import {
   CutCornerButton,
   CutCornerSurface,
 } from "@/components/CutCorner";
+import TutorialTarget from "@/components/TutorialTarget";
+import MapTutorial from "@/components/MapTutorial";
+import { TUTORIAL_COMPLETION_XP } from "@/lib/tutorialSteps";
 import {
   CHROME_ICON_STROKE,
   DestinationMark,
@@ -884,7 +887,32 @@ export default function MapScreen() {
     raiseProblem,
     clearProblem,
   } = useOnlineUsers();
-  const { user } = useAuth();
+  const { user, completeTutorial } = useAuth();
+
+  // ─── First-launch tutorial ────────────────────────────────
+  // `tutorial_completed_at` is unset for every account until this fires —
+  // once, on this driver's first arrival at the live map (see
+  // database_migration_tutorial.sql). Set true here and never reset to
+  // false: leaving the screen mid-tutorial and coming back replays it from
+  // the top, which is fine — the alternative, tracking a mid-tour resume
+  // point, is not worth it for a six-step walkthrough.
+  const [tutorialVisible, setTutorialVisible] = useState(false);
+  useEffect(() => {
+    if (!user || user.tutorialCompletedAt) return;
+    setTutorialVisible(true);
+  }, [user?.id, user?.tutorialCompletedAt]);
+
+  const handleTutorialDone = useCallback(
+    (outcome: "completed" | "skipped") => {
+      setTutorialVisible(false);
+      completeTutorial();
+      // No XP for skipping — this is meant to feel like the first thing you
+      // did in the game, not a toll for entry.
+      if (outcome === "completed") addXP(TUTORIAL_COMPLETION_XP);
+    },
+    [completeTutorial, addXP]
+  );
+
   // Every raw km/h reading on this screen — the live speedometer, the
   // recording HUD, the trip summary — renders through this. See
   // lib/speedUnits.ts's header for why it always follows the signed-in
@@ -3483,6 +3511,10 @@ export default function MapScreen() {
       {/* ===================================================== */}
       {!isRecording && !searchOpen && (
         <Animated.View style={[styles.rightButtons, { top: insets.top + spacing.spacingMd, opacity: fadeIn }]}>
+          {/* The tutorial's "chrome" target covers just these four — Clear
+              only exists once a route is up, and is never on screen during
+              the tutorial's first-launch moment. */}
+          <TutorialTarget id="chrome" style={styles.chromeGroup}>
           <MapChromeButton
             active={searchOpen}
             accessibilityLabel="Search places"
@@ -3535,6 +3567,7 @@ export default function MapScreen() {
               strokeWidth={CHROME_ICON_STROKE}
             />
           </MapChromeButton>
+          </TutorialTarget>
 
           {routeInfo && (
             <MapChromeButton
@@ -3771,23 +3804,25 @@ export default function MapScreen() {
               the idle viewport, and the largest of the circles. Armed ("tap
               the map to drop a pin") inverts it to carbon with a red rim —
               the only state cue left now that the caption is gone. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: showDropPinHint }}
-            accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
-            onPress={toggleDrive}
-            style={({ pressed }) => [
-              styles.driveBtn,
-              showDropPinHint && styles.driveBtnArmed,
-              pressed && styles.chromePressed,
-            ]}
-          >
-            <Car
-              size={spacing.spacingXl}
-              color={showDropPinHint ? colors.racingRed : onRacingRed}
-              strokeWidth={MAP_GLYPH_STROKE}
-            />
-          </Pressable>
+          <TutorialTarget id="drive">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: showDropPinHint }}
+              accessibilityLabel={showDropPinHint ? "Cancel dropping a pin" : "Start a drive"}
+              onPress={toggleDrive}
+              style={({ pressed }) => [
+                styles.driveBtn,
+                showDropPinHint && styles.driveBtnArmed,
+                pressed && styles.chromePressed,
+              ]}
+            >
+              <Car
+                size={spacing.spacingXl}
+                color={showDropPinHint ? colors.racingRed : onRacingRed}
+                strokeWidth={MAP_GLYPH_STROKE}
+              />
+            </Pressable>
+          </TutorialTarget>
 
           {/* Same slot, two different menus. Not in a convoy: the button is
               a shortcut to browsing/creating one, same as it always was.
@@ -3796,6 +3831,7 @@ export default function MapScreen() {
               are questions a driver mid-drive shouldn't have to navigate
               away to ask. `active` borrows the same on-state
               `MapChromeButton` already uses for Filters. */}
+          <TutorialTarget id="social" style={styles.chromeGroup}>
           <MapChromeButton
             active={!!party}
             accessibilityLabel={party ? `${party.name} — open convoy menu` : "Open convoys"}
@@ -3822,6 +3858,7 @@ export default function MapScreen() {
           >
             <MessageCircle size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
           </MapChromeButton>
+          </TutorialTarget>
         </Animated.View>
       )}
 
@@ -4828,6 +4865,8 @@ export default function MapScreen() {
         payload={{ rank: rankForLevel(level), level, totalXp }}
         caption={`Just reached ${rankForLevel(level).name} on Driveverse`}
       />
+
+      <MapTutorial visible={tutorialVisible} onDone={handleTutorialDone} />
     </View>
   );
 }
@@ -5027,6 +5066,11 @@ const styles = StyleSheet.create({
     gap: spacing.spacingMd,
     zIndex: 100,
     alignItems: "center",
+  },
+  /** The tutorial's "chrome" spotlight target — see the comment at its use site. */
+  chromeGroup: {
+    alignItems: "center",
+    gap: spacing.spacingMd,
   },
   // Utility surface: square, `radius.sharp`. The corner cut is reserved
   // for brand surfaces (sheets, cards, the primary action).

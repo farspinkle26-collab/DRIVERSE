@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Tabs } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { CutCornerSurface } from "@/components/CutCorner";
+import TutorialTarget from "@/components/TutorialTarget";
 import { DriveIcon, MapIcon, ProfileIcon } from "@/components/TabIcons";
 import {
   borderWidth,
@@ -48,7 +49,10 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
   const activeRouteName = state.routes[state.index]?.name;
 
   return (
-    <View style={[styles.bar, { paddingBottom: insets.bottom + spacing.spacingSm }]}>
+    <TutorialTarget
+      id="tabs"
+      style={[styles.bar, { paddingBottom: insets.bottom + spacing.spacingSm }]}
+    >
       <CutCornerSurface
         fill={colors.carbonSurface}
         borderColor={colors.hairline}
@@ -97,7 +101,7 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
           );
         })}
       </CutCornerSurface>
-    </View>
+    </TutorialTarget>
   );
 }
 
