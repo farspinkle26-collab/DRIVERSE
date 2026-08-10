@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AppState } from "react-native";
 import { supabase } from "@/lib/supabase";
 import * as Location from "expo-location";
+import { useXP } from "@/hooks/useXPStore";
 import {
   mergeOnlineUsers,
   pruneRecentlyOffline,
@@ -81,6 +82,13 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   const [userId, setUserId] = useState<string | null>(null);
   const [myProblem, setMyProblem] = useState<ProblemSignal | null>(null);
 
+  // The level this driver broadcasts to everyone else. Read from the XP store
+  // rather than kept locally so it is the same number the profile screen and
+  // the map's own "You · Lv." label show — one source, no third copy to drift.
+  // `XPProvider` wraps `OnlineUsersProvider` in `app/_layout.tsx`, which is
+  // what makes this consumable here.
+  const { level: myLevel, loading: xpLoading } = useXP();
+
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const directoryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -105,6 +113,23 @@ export const [OnlineUsersProvider, useOnlineUsers] = createContextHook(() => {
   const rejoinRef = useRef<(uid: string) => void>(() => {});
 
   useEffect(() => { userIdRef.current = userId; }, [userId]);
+
+  // Keep the broadcast level current for the whole session.
+  //
+  // It used to be read once, inside `goOnline`, and never again — so a driver
+  // who levelled up while the app was open kept broadcasting the level they
+  // joined at. Their own profile and their own "You · Lv." label updated
+  // immediately (both read the XP store, which the quest engine's server-side
+  // grants reach over realtime); every *other* driver's map disagreed until
+  // they toggled visibility off and on.
+  //
+  // Guarded on `loading` because the store reports level 1 until its first
+  // read resolves, and writing that over the value `goOnline` just fetched
+  // would trade a stale level for a wrong one.
+  useEffect(() => {
+    if (xpLoading) return;
+    profileRef.current = { ...profileRef.current, level: myLevel };
+  }, [myLevel, xpLoading]);
 
   // ─── The map's view of everyone else ─────────────────────
   const onlineUsers = useMemo(

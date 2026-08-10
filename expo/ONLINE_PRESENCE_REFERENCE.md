@@ -194,3 +194,57 @@ Net effect: even in the worst case — `untrack()` silently lost, presence
 never independently notices — a driver who turns visibility off is gone from
 every other device within one poll interval, not "eventually, maybe." Tested
 in `hooks/__tests__/onlineUsersMerge.test.ts`.
+
+---
+
+## 7. Every other driver showed "Lv. 1" (10 Aug 2026)
+
+Reported as: the level under a driver on the map not matching the level that
+driver's profile page shows.
+
+Two independent causes, one in the database and one in this file.
+
+### 7a. The database one — an RLS policy, not a bug in this code
+
+`user_xp` is created by `database_migration_profile_v2.sql` with SELECT
+restricted to `auth.uid() = user_id` — **your own row only**. Both paths that
+resolve another driver's level read that table (`resolveProfiles` on the
+fallback path; `goOnline` for the level you broadcast), so on a database where
+only that migration has run, the query returns *no row* for anybody else and
+the `?? 1` fallback renders every other driver at level 1 — while your own
+profile, reading your own row, is correct. Nothing errors; RLS filters rows,
+it does not fail loudly.
+
+`database_migration_garage_and_public_profiles.sql` is what opens it:
+
+```sql
+CREATE POLICY "XP is viewable by any signed-in driver" ON public.user_xp
+  FOR SELECT USING (auth.role() = 'authenticated');
+```
+
+Postgres RLS policies are permissive and OR'd together, so the own-row policy
+staying in place is harmless. The same migration does this for `profiles`,
+`car_collections` and `user_quest_stats` — which is why a database missing it
+also shows other drivers as "Driver" with an empty garage. **If levels on the
+map are wrong, check this policy before reading any of the code below.**
+
+### 7b. The code one — the broadcast level was read once per session
+
+`goOnline` loaded `profileRef.current.level` from `user_xp` and nothing ever
+refreshed it. A driver who levelled up while the app was open kept
+broadcasting the level they joined at: their own profile and their own
+"You · Lv." label both updated at once (both read the XP store, which the
+quest engine's server-side grants reach over realtime), but every *other*
+device kept the joined-at value until that driver toggled visibility off and
+on.
+
+`useOnlineUsers` now consumes `useXP()` directly — `XPProvider` wraps
+`OnlineUsersProvider` in `app/_layout.tsx` — and syncs `profileRef` whenever
+the store changes, so the number on the wire is the same one the profile
+screen renders. The sync is guarded on the store's `loading` flag, because it
+reports level 1 until its first read resolves and writing that over the value
+`goOnline` just fetched would trade a stale level for a wrong one.
+
+Note this is the *own-level* path only. Another driver's level still comes
+from `resolveProfiles`' five-minute cache (§2), which is a deliberate bound on
+how often the map re-reads other people's rows, not a bug.
