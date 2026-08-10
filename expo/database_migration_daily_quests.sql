@@ -3,19 +3,20 @@
 -- A modular quest engine that generates 3 personalised daily quests per
 -- user (1 Easy, 1 Medium, 1 Hard) from a catalogue of templates. Quests
 -- are **global / universal** — they describe generic, worldwide goals
--- ("drive 10 km", "drive 500 m", "reach 80 km/h", "make a new friend")
--- rather than referencing any specific country or named location — so the
--- system works for every user anywhere on the planet. There are
--- deliberately no place-based quests ("visit a café", etc.) — that needs a
--- places API this app doesn't have a reliable one for yet.
+-- ("drive 10 km", "drive 500 m", "reach 80 km/h", "make a new friend",
+-- "meet a driver through a convoy") rather than referencing any specific
+-- country or named location — so the system works for every user anywhere
+-- on the planet. There are deliberately no place-based quests ("visit a
+-- café", etc.) — that needs a places API this app doesn't have a reliable
+-- one for yet.
 --
 -- Quests are **auto-completed**. A quest can never be marked done by the
 -- user. It finishes only when its real-world indicator/calculation reaches
 -- the target: distance actually driven (from saved routes/trips), a top
--- speed actually reached, friends actually made. Real signals flow in
--- through database triggers and the record_quest_event() RPC; rewards (XP,
--- coins, streak, badges) are granted automatically the moment the target
--- is met.
+-- speed actually reached, friends actually made, another driver actually
+-- shared a convoy with them. Real signals flow in through database triggers
+-- and the record_quest_event() RPC; rewards (XP, coins, streak, badges) are
+-- granted automatically the moment the target is met.
 --
 -- Run this whole file in your Supabase SQL Editor. It is idempotent
 -- (safe to re-run) — tables use IF NOT EXISTS, policies/functions are
@@ -402,7 +403,7 @@ BEGIN
         -- section below for why a row like this could exist in the first
         -- place — this filter is what makes it harmless either way.
         AND t.poi_category IS NULL
-        AND t.objective_type IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend')
+        AND t.objective_type IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend', 'attend_meetup')
         AND v_level >= t.min_level
         AND (t.max_level IS NULL OR v_level <= t.max_level)
         AND (t.time_windows IS NULL OR v_time_bucket = ANY(t.time_windows))
@@ -680,9 +681,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- 13. INDICATOR INTAKE — record_quest_event()
 -- =====================================================================
 -- The ONE and ONLY way quest progress advances. A real-world indicator
--- fires (distance driven, a top speed reached, a friend made) and every
--- matching active quest advances. Any quest that reaches its target
--- auto-completes and its rewards are granted immediately.
+-- fires (distance driven, a top speed reached, a friend made, a convoy
+-- joined) and every matching active quest advances. Any quest that reaches
+-- its target auto-completes and its rewards are granted immediately.
 --
 -- Event → objective routing:
 --   'drive_distance'  → objective_type in (drive_distance, night_drive)   [amount = km driven;
@@ -690,6 +691,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 --   'reach_speed'     → objective_type = reach_speed                      [amount = km/h reached;
 --                        progress tracks the BEST speed seen, not a sum]
 --   'make_friend'     → objective_type = make_friend                       [amount = friends]
+--   'attend_meetup'   → objective_type = attend_meetup                     [amount = drivers met;
+--                        fires per driver, per convoy — see §14b]
 --   'photo_capture'   → objective_type = photo_capture                     [amount = photos]
 --
 -- Returns one row per quest touched: whether it just completed and what it
@@ -728,6 +731,7 @@ BEGIN
         (p_event_type = 'drive_distance' AND objective_type IN ('drive_distance','night_drive'))
         OR (p_event_type = 'reach_speed'   AND objective_type = 'reach_speed')
         OR (p_event_type = 'make_friend'   AND objective_type = 'make_friend')
+        OR (p_event_type = 'attend_meetup' AND objective_type = 'attend_meetup')
         OR (p_event_type = 'photo_capture' AND objective_type = 'photo_capture')
       )
     FOR UPDATE
@@ -864,6 +868,71 @@ BEGIN
   END IF;
 END $$;
 
+-- =====================================================================
+-- 14b. CONVOY MEETUP → attend_meetup quests
+-- =====================================================================
+-- 'attend_meetup' rides the same real-world-indicator model as
+-- 'make_friend': a driver actually being in a convoy with someone else
+-- (`party_members`, database_migration_parties.sql /
+-- database_migration_convoy_shared_nav.sql), not a GPS proximity check —
+-- this app has no reliable places/proximity API, the same reason there are
+-- no location-based quests at all (see §9, §19, §20). "Met" means shared a
+-- convoy roster, nothing about where.
+--
+-- A party's leader is seated by `handle_new_party()` with an INSERT straight
+-- to status = 'accepted' — that must NOT count alone, or every solo convoy
+-- creation would silently grant a meetup. So credit only fires once there is
+-- at least one OTHER accepted member in the party:
+--   • the driver whose own row just became 'accepted' (join, or an invite
+--     accepted) is credited for the drivers already there;
+--   • the moment a party crosses from solo to its second accepted member,
+--     the one who was already there (the leader, most often) is credited
+--     too — otherwise they never trigger their own row and would never get
+--     credit for the very meetup that just happened to them.
+-- Every accepted member beyond the second has already been credited once
+-- the party had company, so only the newcomer is touched — one credit per
+-- driver per convoy, not one per membership change.
+CREATE OR REPLACE FUNCTION public.quest_on_convoy_member_accepted()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_prior_accepted INTEGER;
+  v_other_uid      UUID;
+BEGIN
+  IF NEW.status = 'accepted'
+     AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'accepted') THEN
+    SELECT COUNT(*) INTO v_prior_accepted
+    FROM public.party_members
+    WHERE party_id = NEW.party_id AND status = 'accepted' AND user_id <> NEW.user_id;
+
+    IF v_prior_accepted >= 1 THEN
+      PERFORM public._record_quest_event_for(NEW.user_id, 'attend_meetup', 1, NULL);
+
+      IF v_prior_accepted = 1 THEN
+        SELECT user_id INTO v_other_uid
+        FROM public.party_members
+        WHERE party_id = NEW.party_id AND status = 'accepted' AND user_id <> NEW.user_id
+        LIMIT 1;
+        IF v_other_uid IS NOT NULL THEN
+          PERFORM public._record_quest_event_for(v_other_uid, 'attend_meetup', 1, NULL);
+        END IF;
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_quest_convoy_member ON public.party_members;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'party_members') THEN
+    CREATE TRIGGER trg_quest_convoy_member
+      AFTER INSERT OR UPDATE ON public.party_members
+      FOR EACH ROW EXECUTE FUNCTION public.quest_on_convoy_member_accepted();
+  END IF;
+END $$;
+
 
 -- =====================================================================
 -- 15. SCHEDULED REFRESH (optional but recommended)
@@ -989,12 +1058,12 @@ ON CONFLICT (id) DO UPDATE SET
 -- 19. SEED — UNIVERSAL QUEST TEMPLATES
 -- =====================================================================
 -- Location-agnostic blueprints: drive a distance (km or m), reach a top
--- speed, or make a new friend — valid for a driver anywhere in the world.
--- Deliberately only these three: no place-based quests (no places API to
--- verify a visit against) and no photo quests either — kept to exactly the
--- three indicators this app can measure without either. Targets roll
--- across ranges and combine with time buckets to yield a large,
--- non-repeating combination space.
+-- speed, make a new friend, or meet another driver through a convoy —
+-- valid for a driver anywhere in the world. Deliberately only these four:
+-- no place-based quests (no places API to verify a visit against) and no
+-- photo quests either — kept to exactly the four indicators this app can
+-- measure without either. Targets roll across ranges and combine with time
+-- buckets to yield a large, non-repeating combination space.
 INSERT INTO public.quest_templates (
   id, difficulty, category, objective_type, title_template, description_template,
   icon, accent_color, poi_category, place_label, param_min, param_max, param_step, unit,
@@ -1028,6 +1097,10 @@ INSERT INTO public.quest_templates (
     'New Connection', 'Make {target} new {unit} on Driveverse.',
     'Users', '#FF3B6F', NULL, NULL, 1, NULL, 1, 'friend',
     1, NULL, NULL, NULL, NULL, 1.2, NULL, 1.2),
+  ('u_med_meetup', 'medium', 'social', 'attend_meetup',
+    'Convoy Up', 'Meet {target} new {unit} by joining a convoy today.',
+    'Handshake', '#FF3B6F', NULL, NULL, 1, NULL, 1, 'driver',
+    1, NULL, NULL, NULL, NULL, 1.2, NULL, 1.2),
 
   -- ── HARD ────────────────────────────────────────────────────────
   ('u_hard_grand_tour', 'hard', 'driving', 'drive_distance',
@@ -1045,6 +1118,10 @@ INSERT INTO public.quest_templates (
   ('u_hard_friends', 'hard', 'social', 'make_friend',
     'Social Butterfly', 'Make {target} new {unit} today.',
     'Users', '#FF3B6F', NULL, NULL, 2, 3, 1, 'friends',
+    1, NULL, NULL, NULL, NULL, 1.4, 'social_5', 1.1),
+  ('u_hard_meetup', 'hard', 'social', 'attend_meetup',
+    'Convoy Captain', 'Meet {target} new {unit} through convoys today.',
+    'Handshake', '#FF3B6F', NULL, NULL, 2, 3, 1, 'drivers',
     1, NULL, NULL, NULL, NULL, 1.4, 'social_5', 1.1)
 ON CONFLICT (id) DO UPDATE SET
   difficulty = EXCLUDED.difficulty, category = EXCLUDED.category,
@@ -1073,15 +1150,21 @@ ON CONFLICT (id) DO UPDATE SET
 --
 -- So this section does not delete by id at all. It deletes by the trait
 -- that actually defines a place-category quest — a set `poi_category`, or
--- an `objective_type` outside the three this app measures without a places
--- API (drive_distance, night_drive, reach_speed, make_friend; photo_capture
--- is retired too — see section 19's header). That catches every stray row
--- regardless of its name, past or future, which is the same reasoning
--- behind the `ensure_daily_quests()` filter above — this is the same rule
--- applied to what is already sitting in the table.
+-- an `objective_type` outside the four this app measures without a places
+-- API (drive_distance, night_drive, reach_speed, make_friend, attend_meetup;
+-- photo_capture is retired too — see section 19's header). That catches
+-- every stray row regardless of its name, past or future, which is the same
+-- reasoning behind the `ensure_daily_quests()` filter above — this is the
+-- same rule applied to what is already sitting in the table.
+--
+-- This allowlist has to move in lockstep with section 19's INSERT and
+-- `ensure_daily_quests()`'s `eligible` CTE: this file is re-run in place
+-- (idempotent, not append-only — see the git history on this file), so a
+-- new objective_type seeded above and left out of this DELETE's allowlist
+-- would delete itself the moment this very file runs.
 DELETE FROM public.quest_templates
 WHERE poi_category IS NOT NULL
-   OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend');
+   OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend', 'attend_meetup');
 
 -- A deleted template does not retract a quest already generated from it —
 -- `daily_quests.template_id` is ON DELETE SET NULL, so a driver looking at
@@ -1098,7 +1181,7 @@ WHERE status = 'active'
   AND (
     poi_id IS NOT NULL
     OR objective_category IS NOT NULL
-    OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend')
+    OR objective_type NOT IN ('drive_distance', 'night_drive', 'reach_speed', 'make_friend', 'attend_meetup')
   );
 
 -- Done. See DAILY_QUEST_SYSTEM.md for architecture and client usage.
