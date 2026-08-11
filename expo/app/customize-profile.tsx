@@ -408,7 +408,14 @@ export default function CustomizeProfileScreen() {
 
       const success = await completeProfileCustomization(selectedCountry?.name);
       if (success) {
-        router.replace("/select-car" as any);
+        // Straight into the Platinum paywall, not the garage — this is the
+        // one guaranteed moment before a driver can churn out silently (see
+        // lib/storeReview.ts's header for the same reasoning applied to the
+        // store-review prompt). `?onboarding=1` is what tells app/platinum.tsx
+        // to replace forward into the app instead of the usual `router.back()`
+        // a friction-point paywall uses, and to offer a real "Skip" rather
+        // than assuming there is somewhere to go back to.
+        router.replace("/platinum?onboarding=1" as any);
       } else {
         setLocalError("Couldn't save your profile. Please try again.");
       }
