@@ -29,6 +29,24 @@
  *   is deliberately a complete one: Expo Go, web, and a RevenueCat project with
  *   no paywall attached yet all land here, and none of them may leave a driver
  *   without a way to subscribe.
+ *
+ * ONBOARDING ENTRY (`?onboarding=1`)
+ *   `app/customize-profile.tsx` raises this screen once, right after
+ *   onboarding finishes and before the driver ever reaches the map — the one
+ *   moment every driver is guaranteed to pass through, unlike a friction-point
+ *   trigger that only a driver who stays long enough ever hits. It changes two
+ *   things, both about how the screen is LEFT rather than what it shows:
+ *     - the header's back arrow becomes an explicit "Skip"/"Continue" control
+ *       (labelled by whether the driver is Platinum by the time they tap it),
+ *       because there is no meaningful screen to go back to — every step of
+ *       onboarding got here via `router.replace`, not `push`.
+ *     - a successful purchase, a pending one, and an already-owned one all
+ *       replace forward into the app (`/select-car`) instead of `router.back()`.
+ *   Neither the pricing, the benefits list, nor the free-trial detection below
+ *   changes for this entry point — a driver mid-onboarding sees the exact same
+ *   store-reported offer everyone else does. `ctaTitle()` already reads "Start
+ *   Free Trial" the moment the selected product carries a real $0 intro price
+ *   from the store; nothing here invents one.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -139,10 +157,18 @@ function ctaTitle(
   return "Upgrade to Platinum";
 }
 
+/** Where onboarding continues to once this screen is done with the driver. */
+const ONBOARDING_CONTINUE_TARGET = "/select-car" as const;
+
 export default function PlatinumPaywallScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ trigger?: string }>();
+  const params = useLocalSearchParams<{ trigger?: string; onboarding?: string }>();
+  const isOnboarding = params.onboarding === "1";
+  const continueOnboarding = useCallback(
+    () => router.replace(ONBOARDING_CONTINUE_TARGET as any),
+    [router]
+  );
   const {
     isPlatinum,
     entitlement,
@@ -229,9 +255,11 @@ export default function PlatinumPaywallScreen() {
     setBusy(null);
 
     if (result.status === "purchased") {
-      // Straight back to whatever they were doing — the cap that sent them
-      // here is lifted by the time the previous screen re-renders.
-      router.back();
+      // Onboarding replaces forward into the app; a friction-point paywall
+      // goes back to whatever they were doing — the cap that sent them here
+      // is lifted by the time that previous screen re-renders.
+      if (isOnboarding) continueOnboarding();
+      else router.back();
       return;
     }
     // A cancelled purchase is the driver's decision, not an error.
@@ -244,7 +272,8 @@ export default function PlatinumPaywallScreen() {
         "Waiting on payment",
         "Your payment is still being processed. Platinum unlocks automatically as soon as it goes through."
       );
-      router.back();
+      if (isOnboarding) continueOnboarding();
+      else router.back();
       return;
     }
     if (result.status === "already_owned") {
@@ -254,7 +283,8 @@ export default function PlatinumPaywallScreen() {
         "Already yours",
         "This store account already owns Platinum, so it's been restored rather than charged again."
       );
-      router.back();
+      if (isOnboarding) continueOnboarding();
+      else router.back();
       return;
     }
     if (result.status === "unavailable") {
@@ -265,7 +295,7 @@ export default function PlatinumPaywallScreen() {
       return;
     }
     appAlert("Purchase failed", result.message);
-  }, [selected, purchase, router]);
+  }, [selected, purchase, router, isOnboarding, continueOnboarding]);
 
   const handleRestore = useCallback(async () => {
     setBusy("restore");
@@ -294,18 +324,41 @@ export default function PlatinumPaywallScreen() {
 
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen
+        options={{
+          headerShown: false,
+          // The iOS swipe-to-dismiss gesture is the same "go back" action as
+          // the arrow below, and equally wrong here: every step of onboarding
+          // reached this screen via `router.replace`, so there is nothing
+          // behind it to swipe back to. Android's hardware back button is not
+          // caught by this option — the explicit control below is the one
+          // guaranteed way through for both platforms.
+          gestureEnabled: !isOnboarding,
+        }}
+      />
 
       <View style={[styles.chrome, { paddingTop: insets.top + spacing.spacingSm }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={() => router.back()}
-          hitSlop={spacing.spacingSm}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <ArrowLeft size={spacing.spacingXl} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
-        </Pressable>
+        {isOnboarding ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isPlatinum ? "Continue" : "Skip"}
+            onPress={continueOnboarding}
+            hitSlop={spacing.spacingSm}
+            style={({ pressed }) => [styles.skipHit, pressed && styles.pressed]}
+          >
+            <Text style={styles.skipText}>{isPlatinum ? "Continue" : "Skip"}</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={() => router.back()}
+            hitSlop={spacing.spacingSm}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <ArrowLeft size={spacing.spacingXl} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+          </Pressable>
+        )}
       </View>
 
       <ScrollView
@@ -630,6 +683,15 @@ const styles = StyleSheet.create({
   chrome: {
     paddingHorizontal: spacing.spacingLg,
     paddingBottom: spacing.spacingSm,
+  },
+  skipHit: {
+    paddingVertical: spacing.spacingXs,
+    paddingRight: spacing.spacingSm,
+    alignSelf: "flex-start",
+  },
+  skipText: {
+    ...textStyle("body"),
+    color: colors.textSecondary,
   },
   content: {
     paddingHorizontal: spacing.spacingLg,
