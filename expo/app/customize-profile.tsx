@@ -35,6 +35,7 @@ import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countrie
 import { CutCornerButton, CutCornerChip, CutCornerSurface } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
 import { appAlert } from "@/lib/appAlert";
+import { isOnboardingReviewPrompt, requestStoreReview } from "@/lib/storeReview";
 import {
   borderWidth,
   colors,
@@ -147,6 +148,9 @@ export default function CustomizeProfileScreen() {
   const [step, setStep] = useState<Step>("photo");
   const stepIndex = STEPS.indexOf(step);
   const progress = useRef(new Animated.Value((stepIndex + 1) / STEPS.length)).current;
+  // Guards the store-review prompt to once per screen mount — a driver who
+  // steps back to "nation" and forward again must not see it twice.
+  const reviewPromptedRef = useRef(false);
 
   // Step 1: Profile photo. Local URI only — the upload happens on finish, so
   // a driver who backs out of signup has not written anything to storage.
@@ -261,6 +265,19 @@ export default function CustomizeProfileScreen() {
       setStep(STEPS[nextIdx]);
       animateProgress((nextIdx + 1) / STEPS.length);
       scrollRef.current?.scrollTo({ y: 0, animated: true });
+
+      // The midpoint of onboarding — mid-flow, not mid-app. A driver who has
+      // stayed for two steps of four is already invested and has not yet had
+      // the chance to churn out silently; asking here, rather than after a
+      // trip or a rank-up, is what puts brand-new drivers in the review pool
+      // at all, not just the ones who stuck around. See lib/storeReview.ts.
+      if (
+        !reviewPromptedRef.current &&
+        isOnboardingReviewPrompt(nextIdx, STEPS.length)
+      ) {
+        reviewPromptedRef.current = true;
+        void requestStoreReview();
+      }
     }
   };
 
