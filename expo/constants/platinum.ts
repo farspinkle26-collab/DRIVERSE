@@ -136,6 +136,7 @@ export type LimitedFeature =
   | "savedPlaces"
   | "convoyMembers"
   | "savedRoutes"
+  | "drivesPerMonth"
   | "aiShowcasesPerMonth";
 
 export const TIER_LIMITS: Record<
@@ -156,6 +157,18 @@ export const TIER_LIMITS: Record<
      * "Route Discovery". See PLATINUM_REFERENCE.md §"Route Discovery".
      */
     savedRoutes: 10,
+    /**
+     * Recorded drives per calendar month.
+     *
+     * The only cap in this table that gates the app's *core* action rather
+     * than a peripheral one, so it is the one to be most careful with: 5 is
+     * meant to be enough to know whether the app is worth paying for, and it
+     * resets monthly rather than being a lifetime allowance. Counted from
+     * `trips` rows (written when a drive ENDS), and checked before a drive is
+     * allowed to START — see `lib/driveQuota.ts` for why that asymmetry
+     * matters.
+     */
+    drivesPerMonth: 5,
     /** Regular drivers have no access at all; the cap is moot. */
     aiShowcasesPerMonth: 0,
   },
@@ -165,6 +178,7 @@ export const TIER_LIMITS: Record<
     savedPlaces: null,
     convoyMembers: 8,
     savedRoutes: null,
+    drivesPerMonth: null,
     /**
      * Deliberately NOT unlimited. Each generation is a real per-image API
      * spend, so an uncapped perk is an uncapped bill. 5/month is generous
@@ -209,6 +223,7 @@ export function isAtLimit(
  */
 export type PlatinumBenefitId =
   | "badge"
+  | "drives"
   | "events"
   | "garage"
   | "showcase"
@@ -231,6 +246,19 @@ export interface PlatinumBenefit {
 }
 
 export const PLATINUM_BENEFITS: PlatinumBenefit[] = [
+  /**
+   * First in the list on purpose. Every other benefit lifts a cap on
+   * something peripheral; this one lifts the cap on the thing the app is
+   * for, so it is the one a driver deciding whether to pay is actually
+   * weighing. See `drivesPerMonth` in TIER_LIMITS.
+   */
+  {
+    id: "drives",
+    title: "Unlimited Drives",
+    description: "Record every drive you take. Regular drivers get 5 a month.",
+    icon: "Navigation",
+    triggerHeadline: "You've used all 5 drives this month",
+  },
   {
     id: "badge",
     title: "Platinum Badge",
@@ -313,5 +341,6 @@ export const FEATURE_BENEFIT: Record<LimitedFeature, PlatinumBenefitId> = {
   savedPlaces: "places",
   convoyMembers: "convoy",
   savedRoutes: "routes",
+  drivesPerMonth: "drives",
   aiShowcasesPerMonth: "showcase",
 };

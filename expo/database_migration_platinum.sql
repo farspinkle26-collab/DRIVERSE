@@ -135,6 +135,14 @@ grant execute on function public.are_platinum(uuid[]) to authenticated, service_
 -- changed in a single place. They must stay in step with `TIER_LIMITS` in
 -- `constants/platinum.ts`; the client shows the cap, the database enforces it.
 -- NULL means unlimited.
+--
+-- LOCKSTEP WARNING — this function is `create or replace`d by TWO files:
+-- this one and `database_migration_drive_limit.sql`, which added
+-- 'drives_per_month'. Whichever runs last wins, so the two definitions must
+-- stay byte-identical in their feature list. Adding a feature to only one of
+-- them means re-running the other silently drops the cap — and a dropped cap
+-- returns NULL here, which every caller reads as "unlimited". Add new
+-- features to both, in the same commit.
 
 create or replace function public.platinum_limit(feature text, uid uuid)
 returns integer
@@ -150,6 +158,7 @@ as $$
         when 'active_events'    then null
         when 'saved_places'     then null
         when 'saved_routes'     then null
+        when 'drives_per_month' then null
         when 'convoy_members'   then 8
         when 'ai_showcases'     then 5
       end
@@ -159,6 +168,7 @@ as $$
         when 'active_events'    then 1
         when 'saved_places'     then 10
         when 'saved_routes'     then 10
+        when 'drives_per_month' then 5
         when 'convoy_members'   then 2
         when 'ai_showcases'     then 0
       end

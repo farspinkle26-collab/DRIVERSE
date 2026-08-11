@@ -68,6 +68,7 @@ import {
   Car,
   Frame,
   MapPin,
+  Navigation,
   Rocket,
   Route as RouteIcon,
   Sparkles,
@@ -125,6 +126,7 @@ const BENEFIT_ICONS: Record<string, React.FC<{ size: number; color: string; stro
   Route: RouteIcon,
   MapPin,
   Frame,
+  Navigation,
   Rocket,
   Users,
 };

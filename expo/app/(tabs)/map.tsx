@@ -198,6 +198,15 @@ import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUn
 import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 import { appAlert } from "@/lib/appAlert";
+import { parseLimitRejection } from "@/lib/platinumLimits";
+import { usePlatinum } from "@/hooks/usePlatinumStore";
+import { FEATURE_BENEFIT } from "@/constants/platinum";
+import {
+  driveQuotaLabel,
+  fetchDriveQuota,
+  isOutOfDrives,
+  type DriveQuota,
+} from "@/lib/driveQuota";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -901,6 +910,33 @@ export default function MapScreen() {
     if (!user || user.tutorialCompletedAt) return;
     setTutorialVisible(true);
   }, [user?.id, user?.tutorialCompletedAt]);
+
+  /* ─── Monthly drive allowance ─────────────────────────────
+   *
+   * Regular drivers record 5 drives per calendar month. The gate is here —
+   * at the point DRIVE is pressed — rather than on the `trips` insert at the
+   * end, because refusing the insert would throw away a drive the driver has
+   * already taken. `lib/driveQuota.ts` explains that split; the database
+   * trigger still refuses the insert as the backstop against a modified
+   * client.
+   *
+   * Refetched whenever a drive is recorded (`lastTripId`) so the counter
+   * reflects the drive that just finished without needing a screen reload.
+   */
+  const { openPaywall } = usePlatinum();
+  const [driveQuota, setDriveQuota] = useState<DriveQuota | null>(null);
+
+  const refreshDriveQuota = useCallback(async () => {
+    if (!user) {
+      setDriveQuota(null);
+      return;
+    }
+    setDriveQuota(await fetchDriveQuota());
+  }, [user?.id]);
+
+  useEffect(() => {
+    void refreshDriveQuota();
+  }, [refreshDriveQuota, lastTripId]);
 
   const handleTutorialDone = useCallback(
     (outcome: "completed" | "skipped") => {
@@ -1744,8 +1780,17 @@ export default function MapScreen() {
       );
       return;
     }
+    // Out of drives for the month: raise the paywall rather than arming a
+    // drive whose `trips` insert the database is going to refuse. Only ever
+    // blocks on a quota we actually have — `isOutOfDrives(null)` is false, so
+    // an unreachable server or an unmigrated database does not lock the
+    // app's main action (see lib/driveQuota.ts).
+    if (isOutOfDrives(driveQuota)) {
+      openPaywall(FEATURE_BENEFIT.drivesPerMonth);
+      return;
+    }
     setShowDropPinHint((v) => !v);
-  }, [user]);
+  }, [user, driveQuota, openPaywall]);
 
   /**
    * Ask Mapbox what the driver just tapped on, and hang the answer off the
@@ -2043,15 +2088,26 @@ export default function MapScreen() {
         ({ data, error }) => {
           // A failed trip write used to be console-only, so the driver was
           // told the drive was recorded while nothing had been stored.
-          if (error) setTripSaveError(describeSaveFailure(error));
-          else setLastTripId((data as { id: string } | null)?.id ?? null);
+          if (error) {
+            // The monthly-drive trigger refusing the insert is the one
+            // failure here that is not a bug — it means the start-time check
+            // was bypassed or lost a race. Say what it is and offer the way
+            // past it, rather than reporting it as a save error.
+            const rejection = parseLimitRejection(error);
+            if (rejection) {
+              setTripSaveError(rejection.message);
+              openPaywall(rejection.benefit);
+            } else {
+              setTripSaveError(describeSaveFailure(error));
+            }
+          } else setLastTripId((data as { id: string } | null)?.id ?? null);
         },
         (err: unknown) => setTripSaveError(describeSaveFailure(err))
       );
     }
 
     // Keep path visible after stopping
-  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, destinationStoredName, originLabel, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar]);
+  }, [recordedPath, tripDistance, tripStartMs, level, addXP, user, destinationStoredName, originLabel, destCoords, currentSpeed, tripTopSpeed, xpEarned, wasFaster, activeCar, openPaywall]);
 
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
@@ -3824,6 +3880,24 @@ export default function MapScreen() {
             </Pressable>
           </TutorialTarget>
 
+          {/* How many drives are left this month. Regular drivers only —
+              `driveQuotaLabel` returns null for unlimited and for an unknown
+              quota, so this row simply does not exist for a Platinum driver
+              or on a database without the migration. Shown ahead of time on
+              purpose: a cap a driver only discovers by hitting it reads as
+              the app breaking, not as a tier. */}
+          {driveQuotaLabel(driveQuota) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${driveQuotaLabel(driveQuota)}. Upgrade for unlimited drives.`}
+              onPress={() => openPaywall(FEATURE_BENEFIT.drivesPerMonth)}
+              hitSlop={spacing.spacingSm}
+              style={({ pressed }) => pressed && styles.chromePressed}
+            >
+              <Text style={styles.driveQuotaText}>{driveQuotaLabel(driveQuota)}</Text>
+            </Pressable>
+          ) : null}
+
           {/* Same slot, two different menus. Not in a convoy: the button is
               a shortcut to browsing/creating one, same as it always was.
               In a convoy: it opens a quick menu right here instead of
@@ -5158,6 +5232,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.carbonSurface,
     borderWidth: borderWidth.emphasis,
     borderColor: colors.racingRed,
+  },
+  /**
+   * "3 of 5 drives left this month", under the DRIVE disc. A caption, not a
+   * warning: it sits in `textSecondary` and does not compete with the red
+   * disc above it, because it is information for later, not an alert now.
+   * `mapLabelShadow` because it can land over pale map tiles — the
+   * sanctioned exception documented in `constants/theme.ts`.
+   */
+  driveQuotaText: {
+    ...textStyle("caption"),
+    ...mapLabelShadow,
+    color: colors.textSecondary,
+    textAlign: "center",
   },
 
   /* ---------------- Top chrome: greeting + featured event ---------------- */

@@ -98,6 +98,7 @@ Numbers live in `TIER_LIMITS` (`constants/platinum.ts`) and are mirrored in
 | Saved places | 10 | ∞ | `useSavedPlacesStore.savePlace` | `enforce_saved_place_limit` |
 | Convoy members | 2 | 8 | `usePartyStore.inviteFriend` / `createParty` | `enforce_convoy_limit` |
 | Saved routes | 10 | ∞ | `useRoutesStore.saveRoute` | `enforce_saved_route_limit` |
+| **Recorded drives / month** | **5** | **∞** | `map.tsx` `toggleDrive` via `lib/driveQuota.ts` | `enforce_drive_limit` |
 | AI showcases / month | — | 5 | `ShowcaseModal` | `generate-showcase` edge function |
 
 Both layers matter and they do different jobs. The client check is what makes
@@ -110,6 +111,33 @@ When the trigger wins a race the client lost (two devices, same moment), the
 store parses the `PLATINUM_LIMIT:<feature>:<cap>` marker via
 `lib/platinumLimits.ts` and still raises the right paywall, rather than
 surfacing a Postgres error.
+
+### The drive cap is checked at START, counted at END
+
+Every other cap in the table is checked against the same write it guards. The
+drive cap cannot be: a `trips` row is written when a drive *ends*, so counting
+is only possible at the end — but refusing the insert there would throw away
+a drive the driver has already taken, along with its XP and quest progress.
+
+So the client checks `drive_quota()` when DRIVE is *pressed*, before anything
+is invested, and the trigger still refuses the insert as the backstop against
+a modified client. A legitimate client never reaches the trigger. Both halves
+are documented in `lib/driveQuota.ts` and
+`database_migration_drive_limit.sql`.
+
+Two consequences worth knowing:
+
+- `platinum_limit()` is `create or replace`d by **two** files now —
+  `database_migration_platinum.sql` and `database_migration_drive_limit.sql`.
+  Whichever runs last wins, so their feature lists must stay identical. A
+  feature present in only one of them vanishes the moment the other is
+  re-run, and a missing feature returns NULL, which every caller reads as
+  *unlimited*. Both files carry a lockstep warning at that function.
+- `drive_quota()` returns `allowance` as **NULL for unlimited**, unlike
+  `ai_showcase_quota()` which coalesces to 0. For showcases a Regular
+  driver's allowance genuinely is 0; for drives, 0 and unlimited are opposite
+  answers, and collapsing them would lock every Platinum driver out of
+  driving.
 
 ### Convoy capacity follows the ORGANISER
 

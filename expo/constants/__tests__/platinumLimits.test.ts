@@ -29,6 +29,8 @@ describe("limitFor — the cap that applies to a driver", () => {
     expect(limitFor("savedPlaces", REGULAR)).toBe(10);
     expect(limitFor("convoyMembers", REGULAR)).toBe(2);
     expect(limitFor("savedRoutes", REGULAR)).toBe(10);
+    // The core action: 5 recorded drives per calendar month.
+    expect(limitFor("drivesPerMonth", REGULAR)).toBe(5);
     // Regular drivers have no AI-showcase access at all.
     expect(limitFor("aiShowcasesPerMonth", REGULAR)).toBe(0);
   });
@@ -38,6 +40,7 @@ describe("limitFor — the cap that applies to a driver", () => {
     expect(limitFor("activeEvents", PLATINUM)).toBeNull();
     expect(limitFor("savedPlaces", PLATINUM)).toBeNull();
     expect(limitFor("savedRoutes", PLATINUM)).toBeNull();
+    expect(limitFor("drivesPerMonth", PLATINUM)).toBeNull();
   });
 
   it("keeps convoy and AI showcase bounded even for Platinum (deliberate)", () => {
@@ -129,15 +132,28 @@ describe("isAtLimit — AI showcase enforcement", () => {
   });
 });
 
+describe("isAtLimit — monthly drive enforcement", () => {
+  it("blocks a Regular driver only once 5 drives are recorded this month", () => {
+    expect(isAtLimit("drivesPerMonth", 0, REGULAR)).toBe(false);
+    expect(isAtLimit("drivesPerMonth", 4, REGULAR)).toBe(false);
+    // The 6th drive is refused.
+    expect(isAtLimit("drivesPerMonth", 5, REGULAR)).toBe(true);
+    expect(isAtLimit("drivesPerMonth", 6, REGULAR)).toBe(true);
+  });
+
+  it("never blocks a Platinum driver, however many drives", () => {
+    expect(isAtLimit("drivesPerMonth", 5, PLATINUM)).toBe(false);
+    expect(isAtLimit("drivesPerMonth", 500, PLATINUM)).toBe(false);
+  });
+});
+
 describe("cap ↔ benefit wiring", () => {
-  const features: LimitedFeature[] = [
-    "garageCars",
-    "activeEvents",
-    "savedPlaces",
-    "convoyMembers",
-    "savedRoutes",
-    "aiShowcasesPerMonth",
-  ];
+  /**
+   * Derived from TIER_LIMITS rather than hand-listed, so a cap added to the
+   * table without a paywall benefit fails here instead of shipping as a
+   * block with no way past it.
+   */
+  const features = Object.keys(TIER_LIMITS.regular) as LimitedFeature[];
 
   it("maps every capped feature to a real paywall benefit id", () => {
     for (const f of features) {
