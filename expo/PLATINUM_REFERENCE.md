@@ -167,7 +167,7 @@ the values shipped; all four are one-line changes in `TIER_LIMITS` +
 | Saved places cap | **10** | Suggested in the brief. Enough for a driver's real regular spots; low enough that an enthusiast hits it. |
 | Convoy capacity | **2 → 8** | Top of the suggested 6–8. 8 is a plausible weekend convoy and makes the 4× jump legible. |
 | AI showcase allowance | **5 / month** | Real per-image cost. Uncapped is an uncapped bill; 5 covers a typical garage and bounds the worst case. |
-| Pricing | **Rp 49.000 / month, Rp 449.000 / year** (~24% off) | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store. **Wants your confirmation.** |
+| Pricing | **$5 / month, $50 / year** (~17% off) | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store; the "SAVE n%" badge is computed from those, not from these. Keep `PLATINUM_FALLBACK_PRICE` in step with the stores by hand — nothing verifies it. |
 
 ### "Route Discovery" — needs your confirmation
 

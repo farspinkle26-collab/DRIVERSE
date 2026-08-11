@@ -54,6 +54,16 @@ export const PLATINUM_OFFERING_ID = "platinum";
  * plan, which is what makes monthly→yearly a plan change rather than a
  * second concurrent subscription. RevenueCat surfaces each base plan as a
  * distinct product under that compound id.
+ *
+ * ⚠️ THE NUMBERS IN THESE IDS ARE NOT THE PRICE. `…_monthly_10` and
+ * `…_yearly_100` were named after the prices at the time they were created;
+ * the products now sell at $5 and $50. A store product id is permanent —
+ * neither App Store Connect nor Play Console lets you rename one, and
+ * changing these strings here would simply stop the app finding the
+ * products at all. So they stay as they are, and the price they imply is
+ * historical. The only prices that mean anything are the ones the store
+ * reports at runtime (`product.priceString`) and, as a last-resort
+ * placeholder, `PLATINUM_FALLBACK_PRICE` below.
  */
 export const PLATINUM_PRODUCTS = {
   monthly: {
@@ -82,10 +92,16 @@ export const PLATINUM_PACKAGE_IDS = {
  * (offline, sandbox misconfiguration, or the native module is absent in
  * Expo Go). Real prices always come from `product.priceString`, which is
  * already localised and store-authoritative — never charge off these.
+ *
+ * These must be kept in step with what is actually configured in App Store
+ * Connect and Play Console by hand: nothing verifies them, and a stale
+ * fallback shows a price the driver will not be charged. They are also NOT
+ * localised — a driver in another currency briefly sees USD before the
+ * store answers, which is the accepted cost of having any fallback at all.
  */
 export const PLATINUM_FALLBACK_PRICE = {
-  monthly: "Rp 49.000",
-  yearly: "Rp 449.000",
+  monthly: "$5",
+  yearly: "$50",
   /** Only used when the Test Store lifetime product is configured. */
   lifetime: "—",
 } as const;

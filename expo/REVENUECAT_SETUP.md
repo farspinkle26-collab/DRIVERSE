@@ -97,6 +97,16 @@ base plan, so upgrading is a plan change, not a second subscription:
 | Monthly | `driverse_monthly_10` | `driverse_platinum:driverse-monthly-10` | Auto-renewable subscription | Subscription, monthly base plan |
 | Yearly | `driverse_yearly_100` | `driverse_platinum:driverse-yearly-100` | Auto-renewable subscription | Subscription, annual base plan |
 
+> **The `_10` / `_100` in those ids is not the price.** They were named after
+> the prices in force when the products were created; the current prices are
+> **$5 / month and $50 / year**, set in App Store Connect and Play Console.
+> Store product ids are permanent — neither console lets you rename one — so
+> the ids stay and the price they imply is historical. Change a price in the
+> consoles, not here; the app reads `product.priceString` at runtime. The
+> only thing in this repo that needs updating alongside a price change is
+> `PLATINUM_FALLBACK_PRICE` in `constants/platinum.ts`, which is the
+> placeholder shown before the store answers.
+
 As of the current setup, all four store products exist. The iOS pair
 (`driverse_yearly_100`, `driverse_monthly_10`) is **Waiting for Review** and
 attached to the `platinum` entitlement; the Android pair
