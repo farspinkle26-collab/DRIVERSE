@@ -24,8 +24,11 @@ import {
   CheckCircle2,
   Search,
   Navigation,
+  Route as RouteIcon,
   Sparkles,
+  Trophy,
   User as UserIcon,
+  Users,
 } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { uploadCarPhoto } from "@/lib/uploadCarPhoto";
@@ -35,6 +38,10 @@ import { COUNTRIES, findCountryByCode, type Country } from "@/constants/countrie
 import { CutCornerButton, CutCornerChip, CutCornerSurface } from "@/components/CutCorner";
 import { ICON_STROKE } from "@/components/TripCard";
 import { appAlert } from "@/lib/appAlert";
+import {
+  ONBOARDING_BENEFITS,
+  STAT_PROOF_POINTS,
+} from "@/constants/onboardingValue";
 import { isOnboardingReviewPrompt, requestStoreReview } from "@/lib/storeReview";
 import {
   borderWidth,
@@ -46,7 +53,19 @@ import {
 } from "@/constants/theme";
 
 /**
- * Four steps, and the first one is skippable on purpose.
+ * Six steps: two that show what the app is for, then four that ask for
+ * something.
+ *
+ * `welcome` and `benefits` come first because this flow is the only moment
+ * every new driver passes through, and asking for a photo and a car before
+ * saying what any of it is for is how an onboarding gets abandoned halfway.
+ * Neither collects anything, so both are pure "Continue" — and `benefits`
+ * reads from `constants/onboardingValue.ts`, which is also where the rule
+ * about never inventing a statistic for this screen is written down.
+ *
+ * Adding steps here moves the store-review prompt automatically: it fires at
+ * `floor(STEPS.length / 2)` (`lib/storeReview.ts`), which is derived from
+ * this array rather than hardcoded, so it stays at the flow's midpoint.
  *
  * `photo` leads because a driver's face is what every other driver sees on
  * the map, in a convoy and in chat — an account that reaches the map with the
@@ -59,10 +78,19 @@ import {
  * the garage migration and nothing has ever written to it — the make alone
  * turns every Toyota in the app into the same car.
  */
-const STEPS = ["photo", "nation", "car", "identity"] as const;
+const STEPS = ["welcome", "benefits", "photo", "nation", "car", "identity"] as const;
 type Step = (typeof STEPS)[number];
 
 const STEP_COPY: Record<Step, { title: string; subtitle: string }> = {
+  welcome: {
+    title: "Let's get you set up",
+    subtitle:
+      "A few details to set up your driver profile. It takes about a minute.",
+  },
+  benefits: {
+    title: "What you get",
+    subtitle: "What Driveverse does once you're in.",
+  },
   photo: {
     title: "Your Face",
     subtitle: "This is what other drivers see on the map. You can add it later.",
@@ -80,6 +108,13 @@ const STEP_COPY: Record<Step, { title: string; subtitle: string }> = {
     subtitle: "Give your ride an identity",
   },
 };
+
+/** Benefit icon names resolved to components — same split as the paywall's
+ *  `BENEFIT_ICONS`, so `constants/onboardingValue.ts` stays free of React. */
+const BENEFIT_ICONS: Record<
+  string,
+  React.FC<{ size: number; color: string; strokeWidth?: number }>
+> = { Route: RouteIcon, Users, Trophy, Car, Sparkles };
 
 const CAR_COLORS = [
   { name: "Racing Red", hex: "#EF4444" },
@@ -145,7 +180,7 @@ export default function CustomizeProfileScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const [step, setStep] = useState<Step>("photo");
+  const [step, setStep] = useState<Step>(STEPS[0]);
   const stepIndex = STEPS.indexOf(step);
   const progress = useRef(new Animated.Value((stepIndex + 1) / STEPS.length)).current;
   // Guards the store-review prompt to once per screen mount — a driver who
@@ -336,6 +371,10 @@ export default function CustomizeProfileScreen() {
 
   const canGoNext = (): boolean => {
     switch (step) {
+      // Nothing to fill in — these two exist to say what the app is for.
+      case "welcome":
+      case "benefits":
+        return true;
       // Deliberately always true: the photo is optional, and the button
       // reads "Skip for now" until one is picked rather than sitting there
       // disabled with nothing explaining why.
@@ -435,36 +474,30 @@ export default function CustomizeProfileScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1, paddingTop: insets.top + spacing.spacingLg }}
       >
-        {/* Header */}
+        {/* Progress.
+            One continuous line across the top, on its own row — not the
+            numbered 1-2-3-4 chips that used to sit under it. Six steps of
+            numbered chips is a wall of furniture above every screen, and the
+            count is not information a driver needs: "how much is left" is
+            what the bar already says, more quietly. */}
+        <View style={styles.progressRow}>
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+          </View>
+        </View>
+
+        {/* Back sits below the bar rather than beside it, so the bar can run
+            the full width the way the rest of the screen's content does. */}
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel={stepIndex === 0 ? "Cancel setup and sign out" : "Back"}
             onPress={() => (stepIndex === 0 ? handleAbandon() : prevStep())}
             activeOpacity={0.7}
           >
             <ArrowLeft size={22} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
           </TouchableOpacity>
-
-          <View style={styles.progressWrap}>
-            <View style={styles.progressTrack}>
-              <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
-            </View>
-            <View style={styles.stepDots}>
-              {STEPS.map((s, i) => {
-                const done = i < stepIndex;
-                const active = i === stepIndex;
-                return (
-                  <View key={s} style={[styles.stepDot, done && styles.stepDotDone, active && styles.stepDotActive]}>
-                    {done ? (
-                      <CheckCircle2 size={12} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
-                    ) : (
-                      <Text style={[styles.stepDotText, active && styles.stepDotTextActive]}>{i + 1}</Text>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          </View>
         </View>
 
         <ScrollView
@@ -487,7 +520,60 @@ export default function CustomizeProfileScreen() {
           </View>
 
           <View style={styles.formContent}>
-            {/* ============ STEP 1: PROFILE PHOTO ============
+            {/* ============ STEP 1: WELCOME ============
+                Says what is about to happen and roughly how long it takes.
+                Collects nothing. */}
+            {step === "welcome" && (
+              <View style={styles.introStage}>
+                <View style={styles.introMark}>
+                  <Car size={48} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                </View>
+              </View>
+            )}
+
+            {/* ============ STEP 2: WHAT YOU GET ============
+                Capability claims, each checkable by using the app. The
+                statistics block below renders only if someone has put a
+                CITED figure in `STAT_PROOF_POINTS` — it ships empty, and
+                `constants/onboardingValue.ts` explains at length why there
+                is no invented research here. */}
+            {step === "benefits" && (
+              <View style={styles.stepForm}>
+                {ONBOARDING_BENEFITS.map((benefit) => {
+                  const Icon = BENEFIT_ICONS[benefit.icon] ?? Sparkles;
+                  return (
+                    <View key={benefit.id} style={styles.valueRow}>
+                      <View style={styles.valueIcon}>
+                        <Icon size={20} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                      </View>
+                      <View style={styles.valueText}>
+                        <Text style={styles.valueTitle}>{benefit.title}</Text>
+                        <Text style={styles.valueDescription}>{benefit.description}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                {STAT_PROOF_POINTS.length > 0 && (
+                  <View style={styles.statBlock}>
+                    {STAT_PROOF_POINTS.map((stat) => (
+                      <View key={stat.id} style={styles.statRow}>
+                        <Text style={styles.statFigure}>{stat.figure}</Text>
+                        <View style={styles.valueText}>
+                          <Text style={styles.valueDescription}>{stat.claim}</Text>
+                          {/* The source is not optional decoration — it is
+                              what makes the figure above it a claim rather
+                              than an advertisement. */}
+                          <Text style={styles.statSource}>{stat.source}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* ============ STEP 3: PROFILE PHOTO ============
                 Optional, and the screen says so rather than implying it with
                 a greyed-out button. The preview is the same circle the map
                 marker and the profile header use, so what the driver picks
@@ -777,9 +863,11 @@ export default function CustomizeProfileScreen() {
               title={
                 step === "identity"
                   ? "Enter the Garage"
-                  : step === "photo" && !avatarUri
-                    ? "Skip for now"
-                    : "Next"
+                  : step === "welcome" || step === "benefits"
+                    ? "Continue"
+                    : step === "photo" && !avatarUri
+                      ? "Skip for now"
+                      : "Next"
               }
               onPress={step === "identity" ? handleFinish : nextStep}
               disabled={submitting || loadingCars || !canGoNext()}
@@ -814,22 +902,87 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.spacingSm,
     paddingRight: spacing.spacingXs,
   },
-  progressWrap: {
-    flex: 1,
-    gap: spacing.spacingSm,
+  /** The bar's own row, full width inside the screen gutter. */
+  progressRow: {
+    paddingHorizontal: spacing.spacingLg,
+    marginBottom: spacing.spacingMd,
   },
   progressTrack: {
-    height: borderWidth.hairline * 3,
+    height: spacing.spacingXs,
+    borderRadius: radius.circle,
     backgroundColor: colors.hairline,
+    overflow: "hidden",
   },
   progressFill: {
     height: "100%",
+    borderRadius: radius.circle,
     backgroundColor: colors.racingRed,
   },
-  stepDots: {
-    flexDirection: "row",
-    gap: spacing.spacingSm,
+
+  /* ---- Welcome + benefits (the two steps that ask for nothing) ---- */
+
+  introStage: {
+    alignItems: "center",
+    paddingVertical: spacing.spacingXxl,
   },
+  /** Same square-with-a-hairline mark the empty states use, not a circle. */
+  introMark: {
+    width: 96,
+    height: 96,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    backgroundColor: colors.carbonSurface,
+  },
+  valueRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.spacingMd,
+    paddingVertical: spacing.spacingMd,
+    borderBottomWidth: borderWidth.hairline,
+    borderBottomColor: colors.hairline,
+  },
+  valueIcon: {
+    width: spacing.spacingXl,
+    alignItems: "center",
+    paddingTop: spacing.spacingXs / 2,
+  },
+  valueText: {
+    flex: 1,
+    gap: spacing.spacingXs / 2,
+  },
+  valueTitle: {
+    ...textStyle("body"),
+    fontFamily: fontFamily.bodySemiBold,
+    color: colors.textPrimary,
+  },
+  valueDescription: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+  },
+  /** Only rendered when a CITED stat exists — see constants/onboardingValue.ts. */
+  statBlock: {
+    marginTop: spacing.spacingLg,
+    gap: spacing.spacingMd,
+  },
+  statRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.spacingMd,
+  },
+  statFigure: {
+    ...textStyle("dataLg"),
+    color: colors.racingRed,
+  },
+  statSource: {
+    ...textStyle("caption"),
+    fontSize: 10,
+    color: colors.textSecondary,
+    opacity: 0.8,
+  },
+
   stepDot: {
     width: spacing.spacingXl,
     height: spacing.spacingXl,
