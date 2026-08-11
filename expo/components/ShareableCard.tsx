@@ -35,6 +35,7 @@ import SpeedTrace, { SpeedLegend } from "@/components/SpeedTrace";
 import RankBadge from "@/components/RankBadge";
 import type { Trip } from "@/components/TripCard";
 import { endpointLabels, shareTripTitle } from "@/lib/tripEndpoints";
+import { carSpecParts } from "@/lib/shareCarSpec";
 import type { Rank } from "@/constants/ranks";
 import { rankLevelLabel } from "@/constants/ranks";
 import type { QuestDifficulty } from "@/lib/questEngine";
@@ -72,6 +73,23 @@ export const CARD_HEIGHT = 640;
 
 const FRAME_PADDING = spacing.spacingXl;
 const CONTENT_WIDTH = CARD_WIDTH - FRAME_PADDING * 2;
+
+/** Corner accent: its own box, and where it sits from the card's edges. */
+const CORNER_ACCENT_SIZE = spacing.spacingXxl;
+const CORNER_ACCENT_INSET = spacing.spacingLg;
+
+/**
+ * How far a header row must stay clear of the corner accent.
+ *
+ * The accent is absolutely positioned over the frame, so it does not
+ * participate in layout and nothing yields to it automatically. It reaches
+ * `CORNER_ACCENT_INSET + CORNER_ACCENT_SIZE` in from the card's right edge;
+ * a row already inset by `FRAME_PADDING` therefore has to give up the
+ * difference, plus one step of breathing room so text does not touch the
+ * outline it is avoiding.
+ */
+const CORNER_ACCENT_RESERVE =
+  CORNER_ACCENT_INSET + CORNER_ACCENT_SIZE - FRAME_PADDING + spacing.spacingSm;
 
 /* ------------------------------------------------------------------ *
  * Payloads
@@ -293,18 +311,44 @@ function BigStat({
  * its size and the map still is captured at a known aspect. Two values, not
  * one: dropping the car strip frees 60pt, and a card that leaves that as a
  * hole above the brand mark looks like a layout bug rather than a choice.
+ *
+ * The with-car value gives up 8pt to help pay for the car strip's third line
+ * (the spec, moved under the name — see `CarStrip`); the rest comes out of
+ * the slack that already sat between the strip and the brand mark.
  */
-const ROUTE_HEIGHT_WITH_CAR = 200;
+export const ROUTE_HEIGHT_WITH_CAR = 192;
 export const ROUTE_HEIGHT_NO_CAR = 244;
 
-/**
- * Size the map still should be captured at: the block's exact width, and its
- * taller height. One capture serves both layouts — the shorter one crops it
- * vertically (`resizeMode="cover"`), which is invisible, where re-capturing on
- * every car toggle would be a second and a half of blank map.
- */
+/** Width of the map still. Always the block's exact width. */
 export const MAP_SNAPSHOT_WIDTH = CONTENT_WIDTH;
-export const MAP_SNAPSHOT_HEIGHT = ROUTE_HEIGHT_NO_CAR;
+
+/**
+ * Height to capture the map still at — **the height it will be displayed at**,
+ * which is why this takes the car toggle rather than being a constant.
+ *
+ * It used to always capture at the taller height and let the shorter layout
+ * crop the difference with `resizeMode="cover"`, on the reasoning that the
+ * crop was invisible and re-capturing on every car toggle was not worth a
+ * second of blank map. The crop was not invisible: it cut the ends off the
+ * route.
+ *
+ * The arithmetic, because it is the kind that hides. `TripMapSnapshot` renders
+ * its stage at `scale`× (2 by default) — 624×488 for a 312×244 capture — and
+ * fits the route with an `edgePadding` given in stage points. A padding meant
+ * to read as ~15% of the frame is therefore ~7% of a 2× stage. The card then
+ * covers a 244-tall image into a 192-tall frame, discarding 26pt top and
+ * bottom, or 52px of the 488 — comfortably more than the ~36px the route had
+ * been inset by. The start and end of every route were being clipped, and the
+ * taller the route relative to its width, the more of it went.
+ *
+ * Matching the capture's aspect to the frame's removes the crop entirely, and
+ * `TripMapSnapshot` now scales its padding with the stage so the inset means
+ * what it says. The cost is a re-capture when the car strip is toggled, which
+ * is what the heat toggle already does (`ShareCardModal`).
+ */
+export function mapSnapshotHeight(showCar: boolean): number {
+  return showCar ? ROUTE_HEIGHT_WITH_CAR : ROUTE_HEIGHT_NO_CAR;
+}
 
 /**
  * A compact mono readout in the stat row under the hero. Three of these fit
@@ -344,16 +388,19 @@ function SmallStat({
  *
  * A photo where the garage has one, a colour swatch where it does not — never
  * a placeholder car icon, which is the single most template-looking element a
- * card like this can carry. The spec line is assembled from whatever the
- * garage actually knows, so a car entered as just a name renders as just a
- * name rather than as "Custom · 2024 · 300 hp" boilerplate.
+ * card like this can carry. The spec line is assembled by `lib/shareCarSpec`
+ * from whatever the garage actually knows, so a car entered as just a name
+ * renders as just a name rather than as "Other · 2024 · 300 HP" boilerplate.
+ *
+ * The spec sits UNDER the name, not beside it. Beside it, the two competed for
+ * one row: the label column was `flex: 1` (basis 0) against a spec sized to
+ * its own text, so a spec of any length took the row and squeezed the column
+ * to ~48pt — which wrapped "DRIVEN IN" onto two lines and clipped the car's
+ * name to "Whit…". A full spec line is ~170pt of the ~248pt available; it was
+ * never going to share a row with the name, so it no longer tries.
  */
 function CarStrip({ car }: { car: ShareTripCar }) {
-  const specs = [
-    [car.make, car.model].filter(Boolean).join(" ").trim(),
-    car.year ? String(car.year).trim() : "",
-    car.hp && car.hp > 0 ? `${Math.round(car.hp)} HP` : "",
-  ].filter((part) => part.length > 0 && part.toLowerCase() !== "custom");
+  const specs = carSpecParts(car);
 
   return (
     <View style={styles.carStrip}>
@@ -368,16 +415,18 @@ function CarStrip({ car }: { car: ShareTripCar }) {
         />
       )}
       <View style={styles.carLabels}>
-        <Text style={styles.carLabel}>DRIVEN IN</Text>
+        <Text style={styles.carLabel} numberOfLines={1}>
+          DRIVEN IN
+        </Text>
         <Text style={styles.carName} numberOfLines={1}>
           {car.name}
         </Text>
+        {specs.length > 0 ? (
+          <Text style={styles.carSpec} numberOfLines={1}>
+            {specs.join(" · ")}
+          </Text>
+        ) : null}
       </View>
-      {specs.length > 0 ? (
-        <Text style={styles.carSpec} numberOfLines={1}>
-          {specs.join(" · ")}
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -718,14 +767,14 @@ const styles = StyleSheet.create({
   },
   cornerAccent: {
     position: "absolute",
-    top: spacing.spacingLg,
-    right: spacing.spacingLg,
-    width: spacing.spacingXxl,
-    height: spacing.spacingXxl,
+    top: CORNER_ACCENT_INSET,
+    right: CORNER_ACCENT_INSET,
+    width: CORNER_ACCENT_SIZE,
+    height: CORNER_ACCENT_SIZE,
   },
   cornerAccentSurface: {
-    width: spacing.spacingXxl,
-    height: spacing.spacingXxl,
+    width: CORNER_ACCENT_SIZE,
+    height: CORNER_ACCENT_SIZE,
   },
   cornerAccentContent: {
     flex: 1,
@@ -807,6 +856,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    /**
+     * Keeps the date clear of the corner accent.
+     *
+     * That accent is absolutely positioned over the frame at `right: 16` and
+     * is 32 wide, so it occupies the last 48pt of the card — while this row,
+     * inside `FRAME_PADDING`, ran to 24pt from the edge. The overlap put the
+     * red cut-corner outline straight through the timestamp, which read as a
+     * rendering fault rather than a frame detail. `CORNER_ACCENT_RESERVE`
+     * derives the gap from the accent's own geometry so the two cannot drift
+     * apart.
+     */
+    paddingRight: CORNER_ACCENT_RESERVE,
   },
   /** The drive's own date. Mono, so it reads as a record, not a caption. */
   stamp: {
@@ -981,11 +1042,15 @@ const styles = StyleSheet.create({
   },
   carLabels: {
     flex: 1,
+    // `minWidth: 0` so a long name or spec truncates inside this column
+    // instead of widening it past the strip and pushing the swatch off-card.
+    minWidth: 0,
     gap: 2,
   },
   carLabel: {
     fontFamily: fontFamily.bodyMedium,
     fontSize: 9,
+    lineHeight: 12,
     letterSpacing: 1.5,
     color: colors.textSecondary,
   },
@@ -999,9 +1064,11 @@ const styles = StyleSheet.create({
   carSpec: {
     fontFamily: fontFamily.dataRegular,
     fontSize: 10,
+    // Explicit, because this line is what the route block's height was
+    // reduced to pay for — see ROUTE_HEIGHT_WITH_CAR.
+    lineHeight: 13,
     letterSpacing: 0,
     color: colors.textSecondary,
-    flexShrink: 1,
   },
 
   // Big stat (rank / quest rows)
