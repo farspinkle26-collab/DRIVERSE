@@ -26,6 +26,7 @@ const DB_FEATURE: Record<string, LimitedFeature> = {
   saved_places: "savedPlaces",
   convoy_members: "convoyMembers",
   saved_routes: "savedRoutes",
+  drives_per_month: "drivesPerMonth",
   ai_showcases: "aiShowcasesPerMonth",
 };
 
