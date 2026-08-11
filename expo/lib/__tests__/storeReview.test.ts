@@ -7,13 +7,22 @@
 import { isOnboardingReviewPrompt } from "@/lib/storeReview";
 
 describe("isOnboardingReviewPrompt", () => {
-  it("fires on the midpoint of customize-profile's real 4-step flow", () => {
-    // STEPS = ["photo", "nation", "car", "identity"] — the prompt fires
-    // advancing from "nation" (index 1) into "car" (index 2).
+  it("fires on the midpoint of customize-profile's real 6-step flow", () => {
+    // STEPS = ["welcome", "benefits", "photo", "nation", "car", "identity"]
+    // — the prompt fires advancing from "photo" (index 2) into "nation"
+    // (index 3), i.e. once the driver is halfway and has entered something.
+    expect(isOnboardingReviewPrompt(3, 6)).toBe(true);
+    [0, 1, 2, 4, 5].forEach((i) =>
+      expect(isOnboardingReviewPrompt(i, 6)).toBe(false)
+    );
+  });
+
+  it("tracks the flow's length rather than a hardcoded step", () => {
+    // The whole point of deriving from STEPS.length: the two value screens
+    // were added later, and the prompt moved with them instead of staying
+    // pinned to what used to be the middle.
     expect(isOnboardingReviewPrompt(2, 4)).toBe(true);
-    expect(isOnboardingReviewPrompt(0, 4)).toBe(false);
-    expect(isOnboardingReviewPrompt(1, 4)).toBe(false);
-    expect(isOnboardingReviewPrompt(3, 4)).toBe(false);
+    expect(isOnboardingReviewPrompt(2, 6)).toBe(false);
   });
 
   it("rounds down for an odd step count, landing on a real step", () => {
