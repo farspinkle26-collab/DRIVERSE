@@ -23,7 +23,7 @@
  *   settings   a utility list: hairline dividers, no cards
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -124,6 +124,7 @@ import {
 import { tripCode, formatSpeed } from "@/lib/tripStats";
 import { speedUnitForCountry, type SpeedUnit } from "@/lib/speedUnits";
 import { supabase } from "@/lib/supabase";
+import { instanceTopic, logChannelStatus } from "@/lib/realtimeTopic";
 import { generateCarImage } from "@/lib/generateCarImage";
 import { resizeForUpload } from "@/lib/resizeForUpload";
 import { parseLimitRejection } from "@/lib/platinumLimits";
@@ -367,6 +368,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   // they render in always follows the signed-in viewer's own country — see
   // lib/speedUnits.ts's header for why.
   const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
+  /**
+   * Distinguishes this mounted ProfileScreen from any other one.
+   *
+   * This component is rendered by BOTH `app/(tabs)/profile.tsx` and
+   * `app/user/[id].tsx`, and pushing a driver's profile over your own tab
+   * leaves two of them mounted at once. Their realtime topics were keyed on
+   * the signed-in viewer, so both produced the identical string — and
+   * `supabase.channel()` returns the channel it already has for a topic
+   * rather than making a second one. See `lib/realtimeTopic.ts`.
+   */
+  const instanceId = useId();
   const selfXP = useXP();
   const { streak: selfStreak } = useQuests();
   const { events } = useEvents();
@@ -636,7 +648,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     const channel = supabase
-      .channel(`dm_${user.id}_${targetId}`)
+      .channel(instanceTopic("dm", user.id, targetId, instanceId))
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "direct_messages" },
@@ -646,18 +658,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           setMessages((prev) => [msg, ...prev]);
         }
       )
-      .subscribe();
+      .subscribe(logChannelStatus);
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, user, targetId]);
+  }, [isAuthenticated, user, targetId, instanceId]);
 
   // Live-update the notifications bell as friend requests arrive/resolve,
   // so a new request lands in the inbox without needing a manual refresh.
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     const channel = supabase
-      .channel(`friends_${user.id}`)
+      .channel(instanceTopic("friends", user.id, instanceId))
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "friends" },
@@ -675,11 +687,11 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           loadFriendState();
         }
       )
-      .subscribe();
+      .subscribe(logChannelStatus);
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, user, loadInboxes, loadFriends, loadFriendState]);
+  }, [isAuthenticated, user, instanceId, loadInboxes, loadFriends, loadFriendState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
