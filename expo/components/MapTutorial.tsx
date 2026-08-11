@@ -29,15 +29,36 @@
  *   card — and reflows to the real spotlight the instant the rect arrives.
  *   The worst case is one extra frame that reads as "the intro card," never
  *   a flash at (0,0).
+ *
+ * WHY EVERY STEP FORCES A REMEASURE (10 Aug 2026)
+ *   Reported: the ring landed near the Drive button, not on it. The registry
+ *   used to only ever measure on `onLayout`, and trusted that value forever.
+ *   That is wrong on this screen specifically, because the map's chrome sits
+ *   under `useSafeAreaInsets()` padding, and on Android those insets can
+ *   still read their zero default on the first layout pass and settle to the
+ *   real device values a frame or two later — after `onLayout` has already
+ *   fired and registered a rect against the wrong padding. From the layout
+ *   engine's point of view the target's own flex box never changed shape, so
+ *   nothing makes `onLayout` fire again to correct it.
+ *   Screen width/height had the same shape of bug: `Dimensions.get("window")`
+ *   was read once into a `useMemo([])` on this component's first render,
+ *   which on Android can be exactly the moment those values are least
+ *   trustworthy — right after a cold launch, which is the only time this
+ *   tutorial ever shows. `useWindowDimensions()` stays live instead.
+ *   Fix: `useTutorialTargets().remeasure()` re-reads the *currently mounted*
+ *   node's real on-screen position, and this component calls it the instant
+ *   a step becomes active — immediately, then once more a beat later to
+ *   catch a still-settling layout — rather than trusting a rect that may
+ *   have been captured several steps and several seconds ago.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Dimensions,
   Modal,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -68,7 +89,7 @@ export interface MapTutorialProps {
 
 export default function MapTutorial({ visible, onDone }: MapTutorialProps) {
   const [stepIndex, setStepIndex] = useState(0);
-  const { rects } = useTutorialTargets();
+  const { rects, remeasure } = useTutorialTargets();
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
 
@@ -76,10 +97,18 @@ export default function MapTutorial({ visible, onDone }: MapTutorialProps) {
   const isLast = stepIndex === TUTORIAL_STEPS.length - 1;
   const rect = step.target ? rects[step.target] ?? null : null;
 
-  const { width: screenW, height: screenH } = useMemo(
-    () => Dimensions.get("window"),
-    []
-  );
+  const { width: screenW, height: screenH } = useWindowDimensions();
+
+  // Force a fresh measurement the moment a step becomes the active one,
+  // rather than trusting whatever `onLayout` last captured — see the header.
+  // A second pass a beat later catches a layout that was still settling
+  // (safe-area insets resolving late) on the first one.
+  useEffect(() => {
+    if (!visible || !step.target) return;
+    remeasure(step.target);
+    const settle = setTimeout(() => remeasure(step.target!), 250);
+    return () => clearTimeout(settle);
+  }, [visible, stepIndex, step.target, remeasure]);
 
   if (!visible) return null;
 
