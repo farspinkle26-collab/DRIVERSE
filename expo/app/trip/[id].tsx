@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { decodePolyline } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
 import { useAuth } from "@/hooks/useAuthStore";
+import { useMainQuest } from "@/hooks/useMainQuestStore";
 import { speedUnitForCountry } from "@/lib/speedUnits";
 import RenameModal from "@/components/RenameModal";
 import ShareCardModal from "@/components/ShareCardModal";
@@ -44,6 +45,8 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 interface TripDetail {
   id: string;
+  /** Whose drive this is — the First Mile's "Check the Damage" only counts your own. */
+  user_id: string;
   name: string | null;
   origin_name: string;
   origin_lat: number;
@@ -83,6 +86,7 @@ export default function TripDetailScreen() {
   const router = useRouter();
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const { completeStep } = useMainQuest();
   const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [car, setCar] = useState<TripCar | null>(null);
@@ -134,6 +138,20 @@ export default function TripDetailScreen() {
       cancelled = true;
     };
   }, [id]);
+
+  /**
+   * First Mile step 2, "Check the Damage" — one of the three steps no
+   * database trigger can see, because reading a screen writes no row
+   * (`constants/mainQuests.ts`). Fires once the trip has actually loaded,
+   * and only for the driver's own drive: opening a friend's shared trip is
+   * not "check your damage". `completeStep` is idempotent and skips the
+   * round trip when the step is already done, so this is safe on remount.
+   */
+  useEffect(() => {
+    if (!trip || !user?.id) return;
+    if (trip.user_id !== user.id) return;
+    void completeStep("inspect_trip");
+  }, [trip, user?.id, completeStep]);
 
   const defaultTripName = trip
     ? trip.destination_name && trip.destination_name !== "Unknown"

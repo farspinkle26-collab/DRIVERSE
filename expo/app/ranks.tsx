@@ -9,12 +9,13 @@
  * this screen adds the full ladder underneath.
  */
 
-import React from "react";
+import React, { useEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, Stack } from "expo-router";
 import { ArrowLeft, Check, ChevronRight, Lock } from "lucide-react-native";
 import { useXP } from "@/hooks/useXPStore";
+import { useMainQuest } from "@/hooks/useMainQuestStore";
 import {
   RANKS,
   rankForLevel,
@@ -60,6 +61,17 @@ export default function RanksScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { level, xpCurrentLevel, xpRequired, xpProgress } = useXP();
+  const { completeStep } = useMainQuest();
+
+  /**
+   * First Mile step 4, "Know Your Rank". Reaching this screen IS the step —
+   * there is no row written when a driver reads their rank, which is why
+   * this one is client-reported rather than trigger-driven
+   * (`constants/mainQuests.ts`). Idempotent, so a remount costs nothing.
+   */
+  useEffect(() => {
+    void completeStep("know_rank");
+  }, [completeStep]);
 
   const current = rankForLevel(level);
   const currentIdx = rankIndex(current);

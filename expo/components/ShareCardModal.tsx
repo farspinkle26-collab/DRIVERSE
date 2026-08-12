@@ -65,6 +65,7 @@ import {
   type TripSharePayload,
 } from "@/components/ShareableCard";
 import TripMapSnapshot, { canSnapshotMap } from "@/components/TripMapSnapshot";
+import { useMainQuest } from "@/hooks/useMainQuestStore";
 import {
   captureCard,
   isInstagramInstalled,
@@ -107,6 +108,7 @@ export default function ShareCardModal(props: ShareCardModalProps) {
   const { visible, onClose, caption, ...cardProps } = props;
   const insets = useSafeAreaInsets();
   const cardRef = useRef<View>(null);
+  const { completeStep } = useMainQuest();
 
   const [igInstalled, setIgInstalled] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
@@ -191,6 +193,14 @@ export default function ShareCardModal(props: ShareCardModalProps) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
           () => {}
         );
+        // First Mile step 5, "Prove It". Only on a card that actually went
+        // somewhere, and only the trip variant — the chain's step is about
+        // sharing a *drive*, not a rank or a quest card. Saving the PNG
+        // counts too: the driver has the image and posts it on their own
+        // time, and the app has no way to watch that happen. This is one of
+        // the three steps no trigger can see; see constants/mainQuests.ts.
+        if (isTrip) void completeStep("share_trip");
+
         // A save is not a hand-off: the user stays here, because the next
         // thing they usually want is to post the card they just kept.
         if (outcome.channel === "photos" || outcome.channel === "files") {
@@ -208,7 +218,7 @@ export default function ShareCardModal(props: ShareCardModalProps) {
       // the user can pick another destination.
       setBusy(null);
     },
-    [onClose]
+    [onClose, isTrip, completeStep]
   );
 
   const handleInstagram = useCallback(async () => {

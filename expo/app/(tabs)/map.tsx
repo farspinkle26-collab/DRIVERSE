@@ -208,6 +208,7 @@ import {
   type DriveQuota,
 } from "@/lib/driveQuota";
 import RenameModal from "@/components/RenameModal";
+import MainQuestNudge from "@/components/MainQuestNudge";
 import { useSavedPlaces } from "@/hooks/useSavedPlacesStore";
 import {
   CUSTOM_PLACE_CATEGORY,
@@ -3906,6 +3907,10 @@ export default function MapScreen() {
         <Animated.View
           style={[styles.liveFeedSlot, { bottom: insets.bottom + BOTTOM_STACK_OFFSET, opacity: fadeIn }]}
         >
+          {/* The First Mile nudge, above the feed. Renders itself away the
+              moment the chain is finished — see components/MainQuestNudge. */}
+          <MainQuestNudge />
+
           <CutCornerSurface
             fill={colors.carbonSurface}
             borderColor={colors.hairline}
@@ -5698,6 +5703,9 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH * 0.62,
     maxWidth: spacing.spacingXxxl * 6 + spacing.spacingMd,
     zIndex: 130,
+    // The slot is bottom-anchored, so the main-quest nudge added above the
+    // feed grows upward and the feed itself does not move.
+    gap: spacing.spacingSm,
   },
   liveFeedContent: {
     paddingHorizontal: spacing.spacingMd,
