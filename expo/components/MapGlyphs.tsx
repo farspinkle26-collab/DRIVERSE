@@ -398,6 +398,24 @@ export function ProblemGlyph(props: GlyphProps) {
   );
 }
 
+/**
+ * Territory — a planted flag, for a driver's own dropped-and-named pin
+ * (`hooks/useSavedPlacesStore.ts`'s `category: "custom"`). Deliberately not
+ * one of the nine category glyphs above and not in `MAP_GLYPHS`/
+ * `MapGlyphKey`: those mirror the map's togglable *layer* vocabulary
+ * (`constants/mapLayers.ts`), and a territory pin is never a layer — it is
+ * always shown on the owner's own map, un-toggleable, the same as
+ * `DestinationMark` below.
+ */
+export function TerritoryGlyph(props: GlyphProps) {
+  return (
+    <Glyph {...props}>
+      <Path d="M6 21V4" />
+      <Path d="M6 4 L18 7.5 L6 11 Z" />
+    </Glyph>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Registry
  * ------------------------------------------------------------------ */

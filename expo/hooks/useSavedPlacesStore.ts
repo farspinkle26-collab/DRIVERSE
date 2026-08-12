@@ -2,13 +2,17 @@
  * Driveverse — saved places.
  *
  * A driver's own bookmarks over the places layer (cafes, gas stations,
- * workshops, hangouts). The places layer itself already existed — see
- * `lib/placesApi.ts` and `components/PlacesLayer.tsx` — but there was no way
- * to keep one, so this store is the feature and its Regular cap ships
- * together rather than a limit being retrofitted onto existing behaviour.
+ * workshops, hangouts), plus "territory" pins: a place the driver dropped and
+ * named themselves, with no provider category behind it
+ * (`category: "custom"`, `source: "user"` — see `lib/savedPlaceDisplay.ts`
+ * and `database_migration_saved_places_territory.sql`). Both share this one
+ * table and this one store; a territory pin is simply a bookmark whose
+ * `place_id` the client generated instead of a provider handing one over.
  *
  * Regular drivers keep 10; Platinum is uncapped. `TIER_LIMITS` in
- * `constants/platinum.ts` owns the number.
+ * `constants/platinum.ts` owns the number, and the cap counts every row
+ * regardless of category — a territory pin and a starred cafe compete for
+ * the same ten slots.
  *
  * A bookmark denormalises name/lat/lng/category on purpose: an OSM result is
  * only an id into a cache that expires, so a bookmark that stored just the id
@@ -17,10 +21,10 @@
 
 import createContextHook from "@nkzw/create-context-hook";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PlaceCategory } from "@/constants/placesCategories";
 import { supabase } from "@/lib/supabase";
 import { parseLimitRejection } from "@/lib/platinumLimits";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
+import type { SavedPlaceCategory } from "@/lib/savedPlaceDisplay";
 
 export interface SavedPlace {
   id: string;
@@ -28,11 +32,13 @@ export interface SavedPlace {
   /**
    * Widened when the POI provider moved from Overpass to Mapbox. `osm` stays
    * in the union because rows saved before that swap are still in the table —
-   * this is persisted data, so the old value has to remain readable.
+   * this is persisted data, so the old value has to remain readable. `user`
+   * covers both a territory pin and (server-side, unrelated to this store) a
+   * community place submission.
    */
   source: "mapbox" | "osm" | "user";
   name: string;
-  category: PlaceCategory;
+  category: SavedPlaceCategory;
   lat: number;
   lng: number;
   note: string;
@@ -44,7 +50,7 @@ export interface SavePlaceInput {
   place_id: string;
   source?: "mapbox" | "osm" | "user";
   name: string;
-  category: PlaceCategory;
+  category: SavedPlaceCategory;
   lat: number;
   lng: number;
   note?: string;

@@ -17,6 +17,7 @@ import { ArrowLeft, Search, SquarePen, MessageCircle, X, Send, Users } from "luc
 import { useAuth } from "@/hooks/useAuthStore";
 import { useGroupChat } from "@/hooks/useGroupChatStore";
 import { supabase } from "@/lib/supabase";
+import { fetchAcceptedFriends } from "@/lib/friends";
 import { CutCornerBadge, CutCornerButton } from "@/components/CutCorner";
 import { PlatinumNameBadge } from "@/components/platinum/PlatinumBadge";
 import { ListAvatarFrame } from "@/components/frames/AvatarFrame";
@@ -224,33 +225,7 @@ export default function MessagesScreen() {
     setComposeOpen(true);
     if (!user || friends.length > 0) return;
     setFriendsLoading(true);
-    // `friends.user_id`/`friend_id` reference `auth.users`, not
-    // `public.profiles` — no FK PostgREST can embed through, so profiles are
-    // fetched separately and joined client-side.
-    const { data: sent } = await supabase
-      .from("friends")
-      .select("friend_id, status")
-      .eq("user_id", user.id)
-      .eq("status", "accepted");
-    const { data: received } = await supabase
-      .from("friends")
-      .select("user_id, status")
-      .eq("friend_id", user.id)
-      .eq("status", "accepted");
-    const otherIds = [
-      ...new Set([
-        ...(sent ?? []).map((r) => r.friend_id),
-        ...(received ?? []).map((r) => r.user_id),
-      ]),
-    ];
-    const { data: profs } = otherIds.length
-      ? await supabase.from("profiles").select("id, name, avatar").in("id", otherIds)
-      : { data: [] as { id: string; name: string; avatar: string | null }[] };
-    const profMap = new Map((profs ?? []).map((p) => [p.id, p]));
-    const list: Contact[] = [
-      ...(sent ?? []).map((r) => ({ id: r.friend_id, name: profMap.get(r.friend_id)?.name ?? "Driver", avatar: profMap.get(r.friend_id)?.avatar })),
-      ...(received ?? []).map((r) => ({ id: r.user_id, name: profMap.get(r.user_id)?.name ?? "Driver", avatar: profMap.get(r.user_id)?.avatar })),
-    ];
+    const list = await fetchAcceptedFriends(user.id);
     setFriends(list);
     setFriendsLoading(false);
   }, [user, friends.length]);

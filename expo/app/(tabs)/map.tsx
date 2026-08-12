@@ -154,6 +154,7 @@ import {
   MAP_GLYPHS,
   MAP_GLYPH_STROKE,
   ProblemGlyph,
+  TerritoryGlyph,
   VisibilityGlyph,
   type MapGlyphComponent,
 } from "@/components/MapGlyphs";
@@ -206,6 +207,12 @@ import {
   isOutOfDrives,
   type DriveQuota,
 } from "@/lib/driveQuota";
+import RenameModal from "@/components/RenameModal";
+import { useSavedPlaces } from "@/hooks/useSavedPlacesStore";
+import {
+  CUSTOM_PLACE_CATEGORY,
+  generateCustomPlaceId,
+} from "@/lib/savedPlaceDisplay";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -936,6 +943,101 @@ export default function MapScreen() {
   useEffect(() => {
     void refreshDriveQuota();
   }, [refreshDriveQuota, lastTripId]);
+
+  /**
+   * "Territory" pins — a driver long-presses the map, names the spot, and it
+   * is theirs from then on: private (RLS scopes `saved_places` to
+   * `user_id = auth.uid()`) and always shown on their own map, never subject
+   * to any layer toggle. `lib/savedPlaceDisplay.ts` and
+   * `database_migration_saved_places_territory.sql` cover the rest.
+   *
+   * Reuses `saved_places` / `useSavedPlaces()` rather than a parallel store —
+   * a territory pin is a bookmark with a client-generated `place_id` instead
+   * of a provider one, and it competes for the same tier cap as every other
+   * saved place.
+   */
+  const { places: savedPlaces, savePlace: saveTerritoryPlace, removePlace: removeTerritoryPlace } = useSavedPlaces();
+  const territoryPlaces = useMemo(
+    () => savedPlaces.filter((p) => p.category === CUSTOM_PLACE_CATEGORY),
+    [savedPlaces]
+  );
+  const [pendingTerritory, setPendingTerritory] = useState<{ lat: number; lng: number } | null>(null);
+  const [territorySuggestedName, setTerritorySuggestedName] = useState("");
+  const [savingTerritory, setSavingTerritory] = useState(false);
+
+  // Long-press drops a pin right where the finger is — the map's own idiom
+  // for "mark this spot" — independent of `showDropPinHint`, which is a
+  // single *tap* while armed for a route destination. Guarded against it
+  // anyway so the two gestures never fight over the same press.
+  const handleMapLongPress = useCallback(
+    (feature: GeoJSON.Feature<GeoJSON.Point>) => {
+      if (showDropPinHint) return;
+      if (!user) {
+        appAlert(
+          "Saved places need an account",
+          "Sign in to keep your own pins on the map."
+        );
+        return;
+      }
+      const [longitude, latitude] = feature.geometry.coordinates;
+      setPendingTerritory({ lat: latitude, lng: longitude });
+      setTerritorySuggestedName("");
+      // Best-effort, same as the route drop-pin's own naming: a slow or
+      // tokenless geocoder costs the sheet nothing but a blank suggestion —
+      // the driver can still type their own name either way.
+      reverseGeocodePlace(latitude, longitude).then((place) => {
+        const label = shortPlaceLabel(place?.name) ?? shortPlaceLabel(place?.address);
+        // Only fill an empty suggestion — never overwrite a name the driver
+        // has already started typing while the geocoder was still working.
+        if (label) setTerritorySuggestedName((prevName) => prevName || label);
+      });
+    },
+    [showDropPinHint, user]
+  );
+
+  const handleCancelTerritory = useCallback(() => {
+    setPendingTerritory(null);
+    setTerritorySuggestedName("");
+  }, []);
+
+  const handleSaveTerritory = useCallback(
+    async (name: string) => {
+      if (!pendingTerritory) return;
+      setSavingTerritory(true);
+      const result = await saveTerritoryPlace({
+        place_id: generateCustomPlaceId(),
+        source: "user",
+        category: CUSTOM_PLACE_CATEGORY,
+        name,
+        lat: pendingTerritory.lat,
+        lng: pendingTerritory.lng,
+      });
+      setSavingTerritory(false);
+      if (result.status === "error") {
+        appAlert("Couldn't save that place", result.message);
+        return;
+      }
+      // "limit_reached" already opened the paywall inside the store; nothing
+      // else to say here. "saved" / "already_saved" both close the sheet.
+      setPendingTerritory(null);
+      setTerritorySuggestedName("");
+    },
+    [pendingTerritory, saveTerritoryPlace]
+  );
+
+  const handleTerritoryPress = useCallback(
+    (place: (typeof territoryPlaces)[number]) => {
+      appAlert(place.name, "Remove this saved place from your map?", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => void removeTerritoryPlace(place.place_id),
+        },
+      ]);
+    },
+    [removeTerritoryPlace]
+  );
 
   const handleTutorialDone = useCallback(
     (outcome: "completed" | "skipped") => {
@@ -2426,6 +2528,7 @@ export default function MapScreen() {
         logoEnabled
         attributionEnabled
         onPress={handleMapPress}
+        onLongPress={handleMapLongPress}
         onMapIdle={handlePlacesRegionChange}
       >
         <Mapbox.Camera ref={cameraRef} defaultSettings={initialCamera} />
@@ -2490,6 +2593,43 @@ export default function MapScreen() {
             </Mapbox.MarkerView>
           );
         })}
+
+        {/* Territory — the driver's own dropped-and-named pins. Always
+            rendered, regardless of any filter: unlike the nine POI
+            categories these are never fetched from a provider and never
+            toggled off, the same way the "You" label always renders. Only
+            this driver can ever see them (RLS on `saved_places`), so this
+            list is never anyone else's. */}
+        {territoryPlaces.map((place) => (
+          <Mapbox.MarkerView
+            key={place.id}
+            coordinate={toPosition({ latitude: place.lat, longitude: place.lng })}
+            anchor={{ x: 0.22, y: 1 }}
+            allowOverlap
+          >
+            <Pressable
+              onPress={() => handleTerritoryPress(place)}
+              accessibilityRole="button"
+              accessibilityLabel={`${place.name} — your saved place. Tap to remove.`}
+              style={styles.poiMarkerWrap}
+            >
+              <View style={styles.poiBadgeBox}>
+                <CutCornerSurface
+                  fill={colors.carbonSurface}
+                  borderColor={colors.racingRed}
+                  borderWidth={borderWidth.emphasis}
+                  cutSize={spacing.spacingSm}
+                  corners="topRight"
+                  style={styles.landmarkMarker}
+                  contentStyle={styles.landmarkMarkerContent}
+                >
+                  <TerritoryGlyph size={spacing.spacingMd} color={colors.racingRed} />
+                </CutCornerSurface>
+              </View>
+              <Text style={styles.poiMarkerName} numberOfLines={1}>{place.name}</Text>
+            </Pressable>
+          </Mapbox.MarkerView>
+        ))}
 
         {/* Recorded path — the trace of where the driver actually went.
             One casing plus one core, both racingRed, matching the trip-card
@@ -4922,6 +5062,16 @@ export default function MapScreen() {
       />
 
       <MapTutorial visible={tutorialVisible} onDone={handleTutorialDone} />
+
+      <RenameModal
+        visible={pendingTerritory != null}
+        title="Save this place"
+        initialValue={territorySuggestedName}
+        placeholder="Name this place"
+        saving={savingTerritory}
+        onCancel={handleCancelTerritory}
+        onSave={handleSaveTerritory}
+      />
     </View>
   );
 }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
-import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Pencil, Share2 } from "lucide-react-native";
+import { ArrowLeft, MapPin, Route as RouteIcon, Timer, Gauge, TrendingUp, Zap, Pencil, Send, Share2 } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { decodePolyline } from "@/lib/polyline";
 import { useTheme } from "@/hooks/useThemeStore";
@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuthStore";
 import { speedUnitForCountry } from "@/lib/speedUnits";
 import RenameModal from "@/components/RenameModal";
 import ShareCardModal from "@/components/ShareCardModal";
+import ShareTripToFriendModal from "@/components/ShareTripToFriendModal";
 import { ICON_STROKE } from "@/components/TripCard";
 import type { Trip } from "@/components/TripCard";
 import { loadMapbox, initMapbox } from "@/lib/mapboxNative";
@@ -89,6 +90,7 @@ export default function TripDetailScreen() {
   const [showRename, setShowRename] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [showShareToFriend, setShowShareToFriend] = useState(false);
 
   /**
    * `loadMapbox()` rather than a static import — the package reaches a
@@ -218,6 +220,9 @@ export default function TripDetailScreen() {
         <Text style={styles.topTitle} numberOfLines={1}>{trip ? tripDisplayName : "Trip"}</Text>
         {trip ? (
           <View style={styles.topActions}>
+            <TouchableOpacity onPress={() => setShowShareToFriend(true)} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Send this trip to a friend">
+              <Send size={18} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowShare(true)} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share this trip">
               <Share2 size={18} color={colors.textPrimary} strokeWidth={ICON_STROKE} />
             </TouchableOpacity>
@@ -401,6 +406,19 @@ export default function TripDetailScreen() {
           type="trip"
           payload={{ trip: trip as unknown as Trip, car }}
           caption={`${tripDisplayName} · ${trip.distance_km.toFixed(1)} km on Driveverse`}
+        />
+      )}
+
+      {trip && (
+        <ShareTripToFriendModal
+          visible={showShareToFriend}
+          onClose={() => setShowShareToFriend(false)}
+          trip={{
+            id: trip.id,
+            title: tripDisplayName,
+            distanceLabel: `${distance.value} ${distance.unit}`,
+            durationLabel: duration.value,
+          }}
         />
       )}
     </View>
