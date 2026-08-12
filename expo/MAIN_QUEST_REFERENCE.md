@@ -114,6 +114,29 @@ The trigger is also **deliberately looser than the daily quests'
 A new driver reaching out should not have their tutorial held hostage by
 whether the other person has opened the app yet.
 
+### The convoy half shipped wrong the first time
+
+The friends half of this step is correctly loose (a pending request already
+counts); the convoy half was **too loose in the opposite direction**, and it
+shipped that way — caught by re-reading `hooks/usePartyStore.ts` against the
+migration rather than trusting the migration in isolation.
+
+`party_members` rows arrive in three shapes: a leader is auto-seated and
+`joinParty` (a public convoy, no invite) both `INSERT` straight to
+`'accepted'`; `invite_to_convoy` `INSERT`s at `'invited'`, and `acceptInvite`
+is a separate `UPDATE` that moves it to `'accepted'`. The first trigger was
+`AFTER INSERT` only, with no status check — so it credited the *invitee* the
+moment someone else invited them, before they had done anything, including
+declining. Being invited is not joining, and the trigger never re-fired on
+the actual accept because it wasn't watching `UPDATE` at all.
+
+Fixed to fire on `INSERT OR UPDATE` and gate on `new.status = 'accepted'`
+either way. Verified against all four real paths on a local Postgres: the
+leader auto-seat and `joinParty` still credit immediately (direct insert at
+`'accepted'`); an invite alone credits nobody; accepting credits the
+invitee at that point, not before; declining (delete while still
+`'invited'`) never credits at all.
+
 ---
 
 ## 5. The capstone's gate — the subtle one

@@ -360,6 +360,16 @@ create trigger trg_main_quest_friend
   after insert or update on public.friends
   for each row execute function public.main_quest_on_friend();
 
+-- Only 'accepted' counts. `party_members` rows land in three different
+-- shapes and only some of them are a driver actually joined:
+--   • the leader auto-seat and `joinParty` (a public convoy, no invite)
+--     both INSERT straight to 'accepted' — this step should fire right away.
+--   • `invite_to_convoy` INSERTs at 'invited', and `acceptInvite` (an
+--     UPDATE) is what moves it to 'accepted'. An INSERT-only, status-blind
+--     trigger credits the driver the moment someone else invites them —
+--     before they have done anything, including declining — which is not
+--     "join a convoy". So this fires on INSERT OR UPDATE and gates on the
+--     status actually being 'accepted' either way.
 create or replace function public.main_quest_on_party_member()
 returns trigger
 language plpgsql
@@ -367,7 +377,9 @@ security definer
 set search_path = public
 as $$
 begin
-  perform public._complete_main_quest_step(new.user_id, 'not_alone');
+  if new.status = 'accepted' then
+    perform public._complete_main_quest_step(new.user_id, 'not_alone');
+  end if;
   return new;
 end;
 $$;
@@ -378,7 +390,7 @@ begin
   if exists (select 1 from information_schema.tables
              where table_schema = 'public' and table_name = 'party_members') then
     create trigger trg_main_quest_party_member
-      after insert on public.party_members
+      after insert or update on public.party_members
       for each row execute function public.main_quest_on_party_member();
   end if;
 end $$;
