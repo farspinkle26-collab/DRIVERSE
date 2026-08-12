@@ -68,10 +68,18 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import { loadWebBrowser, openAuthSession } from "@/lib/authBrowser";
 import { parseAuthCallback } from "@/lib/authCallback";
 import { createAppLink } from "@/lib/deepLink";
+import { withTimeout } from "@/lib/promiseTimeout";
 import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 
 export type SocialProvider = "google" | "apple";
+
+/**
+ * How long to wait for a network call *after* the browser has already
+ * handed control back to the app — never for the browser step itself, which
+ * is bounded by the driver's own pace, not a clock. See `lib/promiseTimeout.ts`.
+ */
+export const AUTH_NETWORK_TIMEOUT_MS = 15000;
 
 let cachedRedirectTo: string | null = null;
 
@@ -204,8 +212,16 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
 
   switch (callback.kind) {
     case "code": {
-      const { data: sessionData, error: exchangeErr } =
-        await supabase.auth.exchangeCodeForSession(callback.code);
+      // The browser hands control back to the app right as its network
+      // state is least settled (backgrounded, radio reclaimed, wifi/cellular
+      // handoff) — exactly when a stalled fetch with no server-side timeout
+      // is most likely. Without this cap a stall here leaves `loading` true
+      // forever and the app sits on the splash — see `lib/promiseTimeout.ts`.
+      const { data: sessionData, error: exchangeErr } = await withTimeout(
+        supabase.auth.exchangeCodeForSession(callback.code),
+        AUTH_NETWORK_TIMEOUT_MS,
+        "Signing in is taking too long. Check your connection and try again."
+      );
       if (exchangeErr) throw exchangeErr;
       return sessionData.session ?? null;
     }
@@ -214,10 +230,14 @@ async function signInWithGoogleOAuth(): Promise<Session | null> {
       // The implicit flow's shape. `lib/supabase.ts` pins `flowType: 'pkce'`
       // so this should not happen — but a session handed back in a form we can
       // use is worth using rather than discarding on principle.
-      const { data: sessionData, error: setErr } = await supabase.auth.setSession({
-        access_token: callback.accessToken,
-        refresh_token: callback.refreshToken,
-      });
+      const { data: sessionData, error: setErr } = await withTimeout(
+        supabase.auth.setSession({
+          access_token: callback.accessToken,
+          refresh_token: callback.refreshToken,
+        }),
+        AUTH_NETWORK_TIMEOUT_MS,
+        "Signing in is taking too long. Check your connection and try again."
+      );
       if (setErr) throw setErr;
       return sessionData.session ?? null;
     }

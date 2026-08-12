@@ -4,7 +4,8 @@ import { AppState } from "react-native";
 import { User, UserRole } from "@/types";
 import { supabase } from "@/lib/supabase";
 import { uploadAvatar } from "@/lib/uploadAvatar";
-import { signInWithSocialProvider, SocialProvider } from "@/lib/socialAuth";
+import { AUTH_NETWORK_TIMEOUT_MS, signInWithSocialProvider, SocialProvider } from "@/lib/socialAuth";
+import { withTimeout } from "@/lib/promiseTimeout";
 import type { Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 const GUEST_USER: User = {
@@ -128,11 +129,18 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   // ================================================================
   const loadUserProfile = useCallback(async (userId: string) => {
     try {
-      const { data: profile, error: profileErr } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
+      // LAUNCH SAFETY — every sign-in path (email, Google, Apple, and the
+      // mount-time session restore) awaits this function, and each of those
+      // callers only clears `loading` once it settles. A `try/catch` here
+      // only helps if Supabase's fetch *rejects*; a stalled connection with
+      // no server-side timeout just never resolves, which is what leaves the
+      // driver on the loading screen forever rather than seeing an error —
+      // see `lib/promiseTimeout.ts`.
+      const { data: profile, error: profileErr } = await withTimeout(
+        supabase.from("profiles").select("*").eq("id", userId).single(),
+        AUTH_NETWORK_TIMEOUT_MS,
+        "Loading your profile is taking too long."
+      );
 
       if (profileErr || !profile) {
         // Try to create a default profile
@@ -149,7 +157,11 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           verification_status: "verified",
         };
 
-        await supabase.from("profiles").upsert(defaultProfile);
+        await withTimeout(
+          supabase.from("profiles").upsert(defaultProfile),
+          AUTH_NETWORK_TIMEOUT_MS,
+          "Creating your profile is taking too long."
+        );
 
         setUser({
           id: userId,
