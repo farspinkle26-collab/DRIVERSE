@@ -115,6 +115,36 @@ talking to Google, and it is a web server as far as Google is concerned.
 Almost always the `exp://` dev redirect is allow-listed and `myapp://` is not,
 because dev was set up first. Both belong on the list; they are different URLs.
 
+### Stuck on the app's own loading screen after picking a Google account
+
+Different from every symptom above: the browser sheet closes correctly, the
+app regains focus, and then it sits on the `DRIVERSE` splash indefinitely —
+no error, no browser page, nothing in the Supabase Users table pointing at a
+redirect misconfiguration. This is not a chain-configuration problem; it was
+a missing timeout.
+
+`exchangeCodeForSession` (`lib/socialAuth.ts`) and the shared `loadUserProfile`
+(`hooks/useAuthStore.ts`, called after every sign-in path) are plain network
+calls with no timeout of their own, sitting right after the moment the OS
+hands control back from the browser — exactly when the phone's network state
+is least settled (backgrounded, radio reclaimed, a wifi/cellular handoff).
+A `try/catch` only helps if a promise *rejects*; a stalled `fetch` with
+nothing on the other end just never settles, so `finally { setLoading(false)
+}` never runs and `useAuth().loading` stays `true` forever. `app/index.tsx`
+renders `<LoadingScreen />` for exactly that state, with no timer of its own
+— unlike the fonts/session gates in `app/_layout.tsx`, which is why this one
+had never been reported that way before.
+
+Both network calls are now wrapped in `withTimeout` (`lib/promiseTimeout.ts`,
+`AUTH_NETWORK_TIMEOUT_MS` = 15s), and `app/index.tsx` carries its own 20s
+backstop on top of that in case something else in the chain stalls — a
+timeout turns a hang into a rejection, which every existing `.catch()` /
+`finally` in this flow already knows how to handle. Deliberately **not**
+applied to the browser-wait step itself (`lib/authBrowser.ts`'s
+`openViaSystemBrowser`): how long a driver takes to pick an account is not a
+network condition, and timing that out would cancel a perfectly good sign-in
+mid-thought.
+
 ---
 
 ## 3. The two code bugs fixed alongside this
