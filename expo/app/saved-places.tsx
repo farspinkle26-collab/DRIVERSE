@@ -27,10 +27,12 @@ import { Stack, useRouter } from "expo-router";
 import { ArrowLeft, Bookmark, Navigation2, Trash2 } from "lucide-react-native";
 import { CutCornerSurface } from "@/components/CutCorner";
 import TierLimitNotice from "@/components/platinum/TierLimitNotice";
+import { PLACE_CATEGORY_ICONS } from "@/constants/placesCategories";
+import { TerritoryGlyph } from "@/components/MapGlyphs";
 import {
-  PLACE_CATEGORY_ICONS,
-  PLACE_CATEGORY_LABELS,
-} from "@/constants/placesCategories";
+  CUSTOM_PLACE_CATEGORY,
+  savedPlaceLabel,
+} from "@/lib/savedPlaceDisplay";
 import {
   borderWidth,
   colors,
@@ -113,13 +115,17 @@ export default function SavedPlacesScreen() {
               <Text style={styles.emptyHeading}>Nothing saved yet</Text>
               <Text style={styles.emptyBody}>
                 Tap a cafe, gas station, workshop or hangout on the map and hit
-                Save. It shows up here.
+                Save — or long-press anywhere to drop and name your own pin.
+                Either way, it shows up here.
               </Text>
             </View>
           )
         ) : (
           places.map((place) => {
-            const Glyph = PLACE_CATEGORY_ICONS[place.category];
+            const Glyph =
+              place.category === CUSTOM_PLACE_CATEGORY
+                ? TerritoryGlyph
+                : PLACE_CATEGORY_ICONS[place.category];
             return (
               <CutCornerSurface
                 key={place.id}
@@ -137,7 +143,7 @@ export default function SavedPlacesScreen() {
                     {place.name}
                   </Text>
                   <Text style={styles.placeMeta}>
-                    {PLACE_CATEGORY_LABELS[place.category]} ·{" "}
+                    {savedPlaceLabel(place.category)} ·{" "}
                     {place.lat.toFixed(4)}, {place.lng.toFixed(4)}
                   </Text>
                 </View>

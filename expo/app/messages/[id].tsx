@@ -15,11 +15,20 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
-import { ArrowLeft, MessageCircle, Send } from "lucide-react-native";
+import { ArrowLeft, MessageCircle, Route as RouteIcon, Send } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { supabase } from "@/lib/supabase";
 import { ICON_STROKE } from "@/components/TripCard";
-import { borderWidth, colors, radius, spacing, textStyle } from "@/constants/theme";
+import { borderWidth, colors, cut, fontFamily, radius, spacing, textStyle } from "@/constants/theme";
+import { CutCornerSurface } from "@/components/CutCorner";
+
+/** A shared trip's card, denormalised at send time — see database_migration_direct_message_share.sql. */
+interface SharedTripMetadata {
+  trip_id: string;
+  title: string;
+  distance_label: string;
+  duration_label: string;
+}
 
 interface DirectMessageRow {
   id: string;
@@ -28,6 +37,9 @@ interface DirectMessageRow {
   content: string;
   is_read: boolean;
   created_at: string;
+  /** Missing on rows written before database_migration_direct_message_share.sql — treated as "text". */
+  message_type?: "text" | "trip";
+  metadata?: SharedTripMetadata | null;
 }
 
 export default function DirectChatScreen() {
@@ -181,13 +193,46 @@ export default function DirectChatScreen() {
           }
           renderItem={({ item }) => {
             const mine = item.sender_id === user?.id;
+            const time = new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+            // A shared trip renders as a tappable card rather than a text
+            // bubble. `metadata` is denormalised at send time, so this still
+            // renders even if the trip was since deleted or made private —
+            // only tapping through hits that case (a "Trip not found" the
+            // same as any other stale link would).
+            if (item.message_type === "trip" && item.metadata?.trip_id) {
+              const trip = item.metadata;
+              return (
+                <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
+                  <Pressable onPress={() => router.push(`/trip/${trip.trip_id}` as any)}>
+                    <CutCornerSurface
+                      fill={colors.carbonSurface}
+                      borderColor={mine ? colors.racingRed : colors.hairline}
+                      borderWidth={borderWidth.hairline}
+                      cutSize={cut.sm}
+                      corners="topRight"
+                      style={styles.tripCard}
+                      contentStyle={styles.tripCardContent}
+                    >
+                      <RouteIcon size={20} color={colors.racingRed} strokeWidth={ICON_STROKE} />
+                      <View style={styles.tripCardText}>
+                        <Text style={styles.tripCardTitle} numberOfLines={1}>{trip.title}</Text>
+                        <Text style={styles.tripCardMeta}>
+                          {trip.distance_label} · {trip.duration_label}
+                        </Text>
+                      </View>
+                    </CutCornerSurface>
+                    <Text style={styles.bubbleTime}>{time}</Text>
+                  </Pressable>
+                </View>
+              );
+            }
+
             return (
               <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
                 <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
                   <Text style={styles.bubbleText}>{item.content}</Text>
-                  <Text style={styles.bubbleTime}>
-                    {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </Text>
+                  <Text style={styles.bubbleTime}>{time}</Text>
                 </View>
               </View>
             );
@@ -284,6 +329,19 @@ const styles = StyleSheet.create({
     marginTop: spacing.spacingXs,
     alignSelf: "flex-end",
   },
+  tripCard: { maxWidth: "78%" },
+  tripCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.spacingSm,
+    padding: spacing.spacingMd,
+  },
+  tripCardText: { flexShrink: 1 },
+  tripCardTitle: {
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
+    color: colors.textPrimary,
+  },
+  tripCardMeta: { ...textStyle("dataSm"), color: colors.textSecondary },
 
   inputRow: {
     flexDirection: "row",
