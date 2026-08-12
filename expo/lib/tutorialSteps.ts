@@ -69,8 +69,17 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
 ];
 
-/** Rewarded once, on genuine completion only — not on skip. */
-export const TUTORIAL_COMPLETION_XP = 100;
+/**
+ * Rewarded once, on genuine completion only — not on skip.
+ *
+ * Kept below `xpForLevel(1)` (100, see `lib/xpMath.ts`) on purpose: that
+ * threshold is what a brand-new account needs to clear Level 1, and the
+ * tutorial is the very first thing almost every account does. A reward at
+ * or above it would level every new driver up to Level 2 with 0 XP before
+ * they had driven anywhere — which is what shipped originally, and reads as
+ * a bug ("why is my new account on Lv. 2?") rather than a reward.
+ */
+export const TUTORIAL_COMPLETION_XP = 40;
 
 /** A measured rect, padded outward — the spotlight sits slightly proud of the button it's cut around. */
 export function paddedRect(rect: Rect, padding: number): Rect {
