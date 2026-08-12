@@ -12,7 +12,7 @@
  * frame.
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -24,7 +24,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import Svg, { Circle } from "react-native-svg";
 import {
   Calendar,
@@ -50,6 +50,7 @@ import {
 } from "@/components/CutCorner";
 import HubStatStrip from "@/components/HubStatStrip";
 import ShareCardModal from "@/components/ShareCardModal";
+import MainQuestChain from "@/components/MainQuestChain";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import { tripCode } from "@/lib/tripStats";
 import { speedUnitForCountry } from "@/lib/speedUnits";
@@ -341,7 +342,26 @@ export default function DriveHubScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated, user } = useAuth();
   const speedUnit = useMemo(() => speedUnitForCountry(user?.country), [user?.country]);
-  const [view, setView] = useState<HubView>("trips");
+  // `?view=quests` — how the map's First Mile nudge lands on the right tab,
+  // matching the `/community?tab=convoy` convention already in use.
+  //
+  // `at` is a nonce the caller bumps on every tap. Without it a second tap
+  // would do nothing: this tab stays mounted, so `view` would already be
+  // whatever the driver last switched it to, and an effect keyed only on
+  // `view=quests` sees no change to react to.
+  const { view: viewParam, at: viewNonce } = useLocalSearchParams<{
+    view?: string;
+    at?: string;
+  }>();
+  const [view, setView] = useState<HubView>(
+    viewParam === "quests" || viewParam === "explore" ? (viewParam as HubView) : "trips"
+  );
+
+  useEffect(() => {
+    if (viewParam === "quests" || viewParam === "explore" || viewParam === "trips") {
+      setView(viewParam as HubView);
+    }
+  }, [viewParam, viewNonce]);
   const [shareQuest, setShareQuest] = useState<DailyQuest | null>(null);
 
   const {
@@ -485,6 +505,12 @@ export default function DriveHubScreen() {
         ) : null}
 
         {/* ─── QUESTS ────────────────────────────────────────── */}
+        {/* The First Mile chain sits ABOVE the daily set, and renders
+            nothing at all once it is finished. A driver on their first day
+            has no idea what a daily quest is worth yet; the guided chain is
+            what tells them. See components/MainQuestChain.tsx. */}
+        {view === "quests" ? <MainQuestChain /> : null}
+
         {view === "quests" ? (
           questsLoading && quests.length === 0 ? (
             <ActivityIndicator color={colors.racingRed} style={styles.loader} />

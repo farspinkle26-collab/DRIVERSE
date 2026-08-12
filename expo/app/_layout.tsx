@@ -12,6 +12,7 @@ import { NotificationContext } from "@/hooks/useNotificationStore";
 import { FriendRequestsListener } from "@/hooks/useFriendRequestsStore";
 import { XPProvider } from "@/hooks/useXPStore";
 import { QuestsProvider } from "@/hooks/useQuestStore";
+import { MainQuestProvider } from "@/hooks/useMainQuestStore";
 import { OnlineUsersProvider } from "@/hooks/useOnlineUsers";
 import { EventsProvider } from "@/hooks/useEventsStore";
 import { PartyProvider } from "@/hooks/usePartyStore";
@@ -231,6 +232,10 @@ function RootLayoutContent() {
                   <ChatContext>
                     <XPProvider>
                       <QuestsProvider>
+                        {/* Inside QuestsProvider: the main quest's last
+                            step is "complete your first daily quest", and
+                            the Quests tab renders both chains together. */}
+                        <MainQuestProvider>
                         <OnlineUsersProvider>
                           <PartyProvider>
                             <EventsProvider>
@@ -255,6 +260,7 @@ function RootLayoutContent() {
                             </EventsProvider>
                           </PartyProvider>
                         </OnlineUsersProvider>
+                        </MainQuestProvider>
                       </QuestsProvider>
                     </XPProvider>
                   </ChatContext>

@@ -178,6 +178,28 @@ and `bun run check:launch-path` (parses the built bundle, walks eager edges
 only, from both the entry points *and* the root layout behind the route
 context, and fails on any unreviewed `requireNativeModule`).
 
+**There are two quest systems, and they are not the same shape.** The daily
+quests (`expo/DAILY_QUEST_SYSTEM.md`) are three procedurally generated,
+auto-completing objectives that roll over at UTC midnight forever. **The
+First Mile** (`expo/MAIN_QUEST_REFERENCE.md`) is an eight-step guided chain
+run *once per account*, rendered above the daily set and advertised by a card
+on the map until it is done, then gone. No generator, no expiry, no
+repetition — so its catalogue is TypeScript (`expo/constants/mainQuests.ts`)
+and the database stores only which steps a driver finished
+(`user_main_quests`). They share exactly one thing, `_apply_quest_xp`, so
+`user_xp` keeps one writer and one curve. Three points carry the design:
+**five steps are trigger-verified and three cannot be** — "open your trip",
+"open your rank screen", "share your card" write no row, so those three go
+through an RPC whose SQL whitelists exactly them (200 XP of un-farmable
+exposure, reasoned about in §3 rather than waved away); **the capstone is
+gated on the chain, not just the level**, because step 1 pays exactly
+`xpForLevel(1)` and a pure "reach Level 2" check would fire the payoff step
+before the six steps it rewards (§5); and **the First Ignition drive is free**,
+which required changing *both* halves of the 5-drive cap in
+`database_migration_main_quests.sql` — a lockstep hazard with
+`database_migration_drive_limit.sql`, which defines the same two functions
+without the discount and silently removes it if re-run afterwards (§6).
+
 **Finishing a drive writes two different rows.** A `trips` row is written
 automatically the moment the driver ends a drive (the log, the XP, the Drive
 Hub); a `saved_routes` row is written only if they open the save sheet and
