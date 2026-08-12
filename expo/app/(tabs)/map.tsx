@@ -202,7 +202,6 @@ import { parseLimitRejection } from "@/lib/platinumLimits";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
 import { FEATURE_BENEFIT } from "@/constants/platinum";
 import {
-  driveQuotaLabel,
   fetchDriveQuota,
   isOutOfDrives,
   type DriveQuota,
@@ -3880,24 +3879,6 @@ export default function MapScreen() {
             </Pressable>
           </TutorialTarget>
 
-          {/* How many drives are left this month. Regular drivers only —
-              `driveQuotaLabel` returns null for unlimited and for an unknown
-              quota, so this row simply does not exist for a Platinum driver
-              or on a database without the migration. Shown ahead of time on
-              purpose: a cap a driver only discovers by hitting it reads as
-              the app breaking, not as a tier. */}
-          {driveQuotaLabel(driveQuota) ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${driveQuotaLabel(driveQuota)}. Upgrade for unlimited drives.`}
-              onPress={() => openPaywall(FEATURE_BENEFIT.drivesPerMonth)}
-              hitSlop={spacing.spacingSm}
-              style={({ pressed }) => pressed && styles.chromePressed}
-            >
-              <Text style={styles.driveQuotaText}>{driveQuotaLabel(driveQuota)}</Text>
-            </Pressable>
-          ) : null}
-
           {/* Same slot, two different menus. Not in a convoy: the button is
               a shortcut to browsing/creating one, same as it always was.
               In a convoy: it opens a quick menu right here instead of
@@ -5233,20 +5214,6 @@ const styles = StyleSheet.create({
     borderWidth: borderWidth.emphasis,
     borderColor: colors.racingRed,
   },
-  /**
-   * "3 of 5 drives left this month", under the DRIVE disc. A caption, not a
-   * warning: it sits in `textSecondary` and does not compete with the red
-   * disc above it, because it is information for later, not an alert now.
-   * `mapLabelShadow` because it can land over pale map tiles — the
-   * sanctioned exception documented in `constants/theme.ts`.
-   */
-  driveQuotaText: {
-    ...textStyle("caption"),
-    ...mapLabelShadow,
-    color: colors.textSecondary,
-    textAlign: "center",
-  },
-
   /* ---------------- Top chrome: greeting + featured event ---------------- */
   topChrome: {
     position: "absolute",
