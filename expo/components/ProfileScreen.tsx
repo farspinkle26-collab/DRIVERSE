@@ -88,6 +88,7 @@ import { rankForLevel, rankProgress } from "@/constants/ranks";
 import { flagForCountry } from "@/constants/countries";
 import RankBadge from "@/components/RankBadge";
 import ShareCardModal from "@/components/ShareCardModal";
+import DeleteAccountModal from "@/components/DeleteAccountModal";
 import TripCard, { ICON_STROKE } from "@/components/TripCard";
 import { PlatinumNameBadge, PlatinumWordmark } from "@/components/platinum/PlatinumBadge";
 import { FounderNameBadge, FounderWordmark } from "@/components/founder/FounderBadge";
@@ -453,6 +454,7 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [tripMenuTrip, setTripMenuTrip] = useState<TripItem | null>(null);
   const [showShareRank, setShowShareRank] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
 
   // ─── Add-car form ──────────────────────────────────────────
   const [showAddCar, setShowAddCar] = useState(false);
@@ -884,6 +886,18 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
         },
       },
     ]);
+  }, [logout, router]);
+
+  /**
+   * The account is already gone server-side by the time this runs
+   * (`components/DeleteAccountModal.tsx` only calls it after
+   * `deleteAccount()` succeeds) — this is just ending the now-invalid local
+   * session and leaving the screen, the same tail `handleLogout` runs.
+   */
+  const handleAccountDeleted = useCallback(async () => {
+    setDeleteAccountOpen(false);
+    await logout();
+    router.replace("/login" as any);
   }, [logout, router]);
 
   const handleDeleteCar = useCallback((carId: string) => {
@@ -2031,6 +2045,17 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
               destructive
               onPress={handleLogout}
             />
+            {/* Further separated from Sign Out — one ends a session, this
+                ends the account. App Store 5.1.1(v): self-service deletion,
+                no email/call required. The confirmation itself is a
+                dedicated modal (type-to-confirm), not this row's own alert —
+                see components/DeleteAccountModal.tsx. */}
+            <SettingRow
+              icon={<Trash2 size={ICON_MD} color={colors.racingRed} strokeWidth={ICON_STROKE} />}
+              label="Delete Account"
+              destructive
+              onPress={() => setDeleteAccountOpen(true)}
+            />
           </View>
         )}
       </ScrollView>
@@ -2294,6 +2319,14 @@ export default function ProfileScreen({ userId }: { userId?: string }) {
           type="rank"
           payload={{ rank, level, totalXp }}
           caption={`${rank.name} on Driveverse`}
+        />
+      ) : null}
+
+      {isSelf ? (
+        <DeleteAccountModal
+          visible={deleteAccountOpen}
+          onClose={() => setDeleteAccountOpen(false)}
+          onDeleted={handleAccountDeleted}
         />
       ) : null}
     </View>
