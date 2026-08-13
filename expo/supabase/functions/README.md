@@ -27,6 +27,10 @@ See `../../PLATINUM_REFERENCE.md` for the tier as a whole.
 - `generate-showcase` — authenticated `POST /generate-showcase` (`{ carId, imageBase64, mimeType, style }`). The server ignores legacy style values and always applies the Driveverse Signature treatment. Unlike `generate-car-image` it does **not** touch `car_collections`; it writes a standalone artwork to the `car-showcases` bucket and a row to `ai_showcases`, returning `{ imageUrl, style, quota }`. Gates, in order: Platinum entitlement (via `is_platinum()` against the webhook-written mirror — never anything the client sends) and the monthly quota (via `ai_showcase_quota()`). The ledger row is written before the response so parallel requests can't each spend the same remaining allowance.
 - `revenuecat-webhook` — `POST /revenuecat-webhook`, called by RevenueCat, not by the app. Keeps `platinum_subscribers` in step with subscription lifecycle events. Derives activity from `expiration_at_ms` plus a small set of terminal event types, so an event type we haven't seen yet fails toward the expiry date rather than toward a wrong boolean. Drops duplicate and out-of-order deliveries; returns 500 on a write failure so RevenueCat retries. Requires `REVENUECAT_WEBHOOK_SECRET`, matched against the Authorization header configured in the RevenueCat dashboard — without it set, every request is refused rather than allowing unauthenticated writes to the entitlement mirror.
 
+## Account deletion
+
+- `delete-account` — authenticated `POST /delete-account`, no body. App Store Guideline 5.1.1(v): self-service, no email/call required — the confirmation step is client-side (`components/DeleteAccountModal.tsx`, type-to-confirm), this is what actually runs once a driver confirms. Deletes their Storage uploads (`avatars`/`car-photos`/`place-photos`, listed by `${userId}/` prefix), best-effort cleans the app's original "towing" template tables the current feature set doesn't otherwise touch (`tow_requests`, `chat_messages`, `company_registrations.reviewed_by` — tolerant of the table not existing, since it's unclear which of `database_setup_complete.sql` / `chat_system_tables.sql` ever ran against a given project), then calls `auth.admin.deleteUser()`. Every table the app's real features write to — `profiles`, `car_collections`, `trips`, `user_xp`, `daily_quests`, `user_main_quests`, `saved_places`, `saved_routes`, `friends`, `parties`/`party_members`, `direct_messages`, group chat, events, badges — has `ON DELETE CASCADE` to `auth.users(id)` (audited against every `database_migration_*.sql` file), so that one call removes all of it in one transaction. Uses the service role key — this is the one place it can safely live, since the function only ever acts on the caller's own id from their verified JWT.
+
 ## Deploy
 
 ```
@@ -36,6 +40,7 @@ supabase functions deploy places-refresh-cache
 supabase functions deploy generate-car-image
 supabase functions deploy generate-showcase
 supabase functions deploy revenuecat-webhook
+supabase functions deploy delete-account
 ```
 
 Apply `database_migration_osm_places.sql` first (creates `osm_places_cache` and `places`), and `database_migration_platinum.sql` before the two Platinum functions (creates the mirror, the ledger, `is_platinum()` and `ai_showcase_quota()`).

@@ -280,6 +280,32 @@ When asked about the schema, prefer reading `expo/database_schema.json` and
 the specific `expo/database_migration_*.sql` file for the feature in question
 over guessing column names.
 
+**Account deletion** (`expo/supabase/functions/delete-account`,
+`expo/components/DeleteAccountModal.tsx`) is required for App Store approval
+(Guideline 5.1.1(v)) and works because every table the app's real features
+write to has `ON DELETE CASCADE` to `auth.users(id)` — audited directly
+against every `database_migration_*.sql` file, all ~26 of them, before this
+shipped. One `auth.admin.deleteUser()` call (service-role only, so this has
+to be an edge function) cascades through all of it in one transaction: cars,
+trips, XP, quests, saved places/routes, friends, convoys, DMs, group chat,
+events, badges, main-quest progress. **This is a real constraint on future
+schema changes**: any new table that stores a driver's own data must
+reference `auth.users(id)` (or a table that does) with `ON DELETE CASCADE`,
+or account deletion silently stops covering it. Two things cascade cannot
+reach and the function handles by hand: Storage objects (`avatars` /
+`car-photos` / `place-photos`, each keyed `${userId}/...`, listed and
+removed by prefix), and a handful of tables from the app's original
+"towing" template (`tow_requests`, `chat_messages`,
+`company_registrations.reviewed_by`) that live in
+`database_setup_complete.sql` / `chat_system_tables.sql` — outside the
+`database_migration_*.sql` pattern the app's real features use, and
+**verified to have no cascade at all**: a local Postgres test confirmed
+`auth.admin.deleteUser()` fails outright with a foreign key violation the
+moment a driver has even one `tow_requests` row, until those are cleaned up
+first. Since it's unclear which of those two template files ever ran
+against a given project, every cleanup statement tolerates the referenced
+table simply not existing (Postgres `42P01`) rather than aborting.
+
 ## Content repo (`content/`)
 
 - `content/posts/*.md` — one file per social post (Instagram/TikTok).
