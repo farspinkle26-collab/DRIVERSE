@@ -114,8 +114,9 @@ export const MAIN_QUEST_STEPS: MainQuestStep[] = [
     id: "mark_territory",
     order: 3,
     title: "Mark Your Territory",
-    description: "Save your first place — a cafe, fuel stop, workshop or hangout.",
-    teaches: "The places layer, and the pins only you can see.",
+    description:
+      "Star a cafe or fuel stop on the map, or long-press anywhere to drop and name your own pin.",
+    teaches: "Long-press the map. That pin is yours — nobody else can see it.",
     xp: 75,
     icon: "MapPin",
     verifiedBy: "trigger",

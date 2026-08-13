@@ -581,7 +581,26 @@ select distinct user_id, 'first_daily_quest', 0 from public.daily_quests where s
 on conflict do nothing;
 
 -- ============================================================
--- 10. VERIFICATION
+-- 10. ENABLE REALTIME
+-- ============================================================
+--
+-- Without this, `hooks/useMainQuestStore.ts`'s subscription is listening to
+-- a table nobody publishes changes on: every trigger above still runs and
+-- writes the ledger correctly, but the client never hears about it. From
+-- the driver's side that reads as "I did the thing and the chain still
+-- shows it undone" — indistinguishable from the triggers being broken,
+-- when the actual gap is this one missing statement. Same pattern
+-- `database_migration_daily_quests.sql` §16 already uses for
+-- `daily_quests`/`user_quest_stats`/`user_badges`/`user_xp`.
+
+do $$
+begin
+  begin alter publication supabase_realtime add table public.user_main_quests;
+  exception when duplicate_object then null; end;
+end $$;
+
+-- ============================================================
+-- 11. VERIFICATION
 -- ============================================================
 --
 --   -- the ledger for one driver

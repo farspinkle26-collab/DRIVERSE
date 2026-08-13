@@ -312,8 +312,13 @@ export default function SaveRouteModal({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
+        {/* "height" on Android, not undefined: a transparent Modal opens its
+            own native window that does not inherit the Activity's
+            adjustResize, so a KeyboardAvoidingView with no behavior does
+            nothing and the keyboard covers the field — see RenameModal.tsx's
+            header for the full account. */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.sheetWrap}
         >
           <View style={styles.sheet}>

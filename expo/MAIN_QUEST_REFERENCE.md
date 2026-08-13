@@ -233,6 +233,37 @@ There is deliberately **no dismiss control**. The thing it points at is
 finishable in a few minutes and then gone for good; a dismiss would only
 create a way to lose the tutorial permanently by accident.
 
+### The step ran, the screen didn't know — the exact risk flagged in advance
+
+The device pass called out one unverified risk above anything else: "the
+chain only updates live if the `user_main_quests` subscription is
+delivering." It was the first thing that broke. Reported as: a driver saved
+a territory pin, and the First Mile still showed step 3 undone.
+
+The trigger fired and the ledger row was written — this was never a trigger
+bug. `hooks/useMainQuestStore.ts` subscribes to `postgres_changes` on
+`user_main_quests`, and Supabase only pushes those events for tables
+explicitly added to the `supabase_realtime` publication. The migration
+never did that. Every other realtime-backed table in this app has the
+matching `ALTER PUBLICATION supabase_realtime ADD TABLE …` somewhere —
+`daily_quests` / `user_quest_stats` / `user_badges` / `user_xp`
+(`database_migration_daily_quests.sql` §16), `direct_messages` / `friends`
+(`database_migration_profile_v2.sql`) — and `user_main_quests` was the one
+left out.
+
+The failure mode this produces is worse than a normal missed update: the
+client's *only* refresh path besides realtime is `MainQuestProvider`'s
+mount effect, and that provider is mounted once at the app root and never
+remounts on navigation. So progress a driver just made looked permanently
+stuck — not stale for a few seconds, stuck until the app was force-quit and
+relaunched — because there was never going to be a second chance for the
+client to ask again.
+
+Fixed with the same `ALTER PUBLICATION` statement, in the same idempotent
+`EXCEPTION WHEN duplicate_object` shape §16 already uses. Verified against a
+local Postgres with a stub `supabase_realtime` publication: the table is
+correctly added, and re-running the migration is still a clean no-op.
+
 ---
 
 ## 9. Setup
@@ -271,7 +302,7 @@ The whole chain, in order, on a fresh account:
    fire in the same beat: badge granted, chain reads `7 / 8` or `8 / 8`, and
    both the map card and the chain section disappear on the next load.
 
-Server-side checks are listed at the bottom of the migration file (§10
+Server-side checks are listed at the bottom of the migration file (§11
 there), including the two calls that must return `false`:
 
 ```sql
@@ -284,7 +315,6 @@ select public.complete_main_quest_step('reach_level_2');  -- false
 Everything above was verified against a local Postgres 16 (triggers, the
 whitelist, the capstone gate, the free-drive arithmetic, idempotent re-runs,
 and the backfill against a pre-existing database) and by the pure-rule test
-suite. **The device pass in §10 has not been run.** In particular the
-realtime path — five of the eight steps land from triggers with no client
-involvement, and the chain only updates live if the `user_main_quests`
-subscription is delivering — is exercised by nothing but that walkthrough.
+suite. **The device pass in §10 has not been run.** The realtime gap this
+section used to flag as unverified turned out to be real — see §8's writeup
+— and is now fixed, but a full device pass is still owed.

@@ -106,7 +106,12 @@ export default function CreateConvoyModal({ visible, onClose, onCreated }: Creat
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={styles.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetWrap}>
+        {/* "height" on Android, not undefined: a transparent Modal opens its
+            own native window that does not inherit the Activity's
+            adjustResize, so a KeyboardAvoidingView with no behavior does
+            nothing and the keyboard covers the field — see RenameModal.tsx's
+            header for the full account. */}
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.sheetWrap}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.spacingLg }]}>
             <View style={styles.header}>
               <View style={styles.headerLeft}>
