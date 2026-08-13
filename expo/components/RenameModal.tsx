@@ -1,10 +1,30 @@
+/**
+ * Driveverse — a single-field name prompt, in a bottom sheet.
+ *
+ * Shared by every "give this a name" moment: renaming a trip
+ * (`app/trip/[id].tsx`), renaming a saved route (`app/route/[id].tsx`), and
+ * naming a territory pin dropped on the map (`app/(tabs)/map.tsx`). One
+ * component, so all three agree pixel-for-pixel and a fix here fixes all of
+ * them at once.
+ *
+ * KEYBOARD — `behavior="height"` on Android, not `undefined`.
+ *   A transparent RN `Modal` opens its own native window on Android, and
+ *   that window does not inherit the Activity's `windowSoftInputMode`
+ *   (`adjustResize`) the way an ordinary screen does — so a
+ *   `KeyboardAvoidingView` with no `behavior` at all does nothing, and the
+ *   sheet's own `justifyContent: "flex-end"` pins it exactly where the
+ *   keyboard is about to cover it. `login.tsx`, `signup.tsx` and
+ *   `customize-profile.tsx` already use `"height"` on Android outside a
+ *   Modal; inside one it is not just consistent, it is required.
+ */
+
 import React, { useEffect, useState } from "react";
 import {
   Modal,
   View,
   Text,
   TextInput,
-  TouchableOpacity,
+  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -12,7 +32,15 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X } from "lucide-react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { CutCornerButton } from "@/components/CutCorner";
+import {
+  borderWidth,
+  colors,
+  fontFamily,
+  radius,
+  spacing,
+  textStyle,
+} from "@/constants/theme";
 
 interface RenameModalProps {
   visible: boolean;
@@ -23,6 +51,8 @@ interface RenameModalProps {
   onCancel: () => void;
   onSave: (value: string) => void;
 }
+
+const ICON_STROKE = 1.75;
 
 export default function RenameModal({
   visible,
@@ -40,86 +70,82 @@ export default function RenameModal({
     if (visible) setValue(initialValue);
   }, [visible, initialValue]);
 
+  const canSave = !!value.trim() && !saving;
+  const submit = () => canSave && onSave(value.trim());
+
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onCancel}>
-      <View style={styles.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.kav}>
-          <View style={[styles.sheet, { marginBottom: insets.bottom + 20 }]}>
-            <View style={styles.headerRow}>
-              <Text style={styles.title}>{title}</Text>
-              <TouchableOpacity onPress={onCancel} hitSlop={10}>
-                <X size={20} color="#8A8A9A" />
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={styles.input}
-              value={value}
-              onChangeText={setValue}
-              placeholder={placeholder}
-              placeholderTextColor="#5A5A6E"
-              maxLength={100}
-              autoFocus
-              selectTextOnFocus
-              returnKeyType="done"
-              onSubmitEditing={() => value.trim() && onSave(value.trim())}
-            />
-            <TouchableOpacity
-              style={[styles.saveBtn, (!value.trim() || saving) && styles.saveBtnDisabled]}
-              onPress={() => value.trim() && onSave(value.trim())}
-              disabled={!value.trim() || saving}
-              activeOpacity={0.85}
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.kav}
+      >
+        <Pressable style={styles.backdrop} onPress={onCancel} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.spacingLg }]}>
+          <View style={styles.header}>
+            <Text style={styles.title}>{title}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              onPress={onCancel}
+              hitSlop={spacing.spacingSm}
             >
-              <LinearGradient
-                colors={["#FF6B35", "#FF3B6F"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.saveBtnGradient}
-              >
-                {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>Save</Text>}
-              </LinearGradient>
-            </TouchableOpacity>
+              <X size={20} color={colors.textSecondary} strokeWidth={ICON_STROKE} />
+            </Pressable>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+
+          <TextInput
+            style={styles.input}
+            value={value}
+            onChangeText={setValue}
+            placeholder={placeholder}
+            placeholderTextColor={colors.textSecondary}
+            maxLength={100}
+            autoFocus
+            selectTextOnFocus
+            returnKeyType="done"
+            onSubmitEditing={submit}
+          />
+
+          <CutCornerButton
+            title={saving ? "Saving…" : "Save"}
+            corners="topRight"
+            disabled={!canSave}
+            onPress={submit}
+            icon={saving ? <ActivityIndicator size="small" color={colors.voidBlack} /> : undefined}
+          />
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "flex-end",
-  },
-  kav: { justifyContent: "flex-end" },
+  kav: { flex: 1, justifyContent: "flex-end" },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
   sheet: {
-    backgroundColor: "#111119",
-    borderRadius: 20,
-    padding: 20,
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: colors.carbonSurface,
+    borderTopWidth: borderWidth.hairline,
+    borderLeftWidth: borderWidth.hairline,
+    borderRightWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    paddingHorizontal: spacing.spacingXl,
+    paddingTop: spacing.spacingLg,
+    gap: spacing.spacingMd,
   },
-  headerRow: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
   },
-  title: { fontSize: 17, fontWeight: "800", color: "#FFFFFF" },
+  title: { ...textStyle("displayMd"), color: colors.textPrimary },
   input: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    backgroundColor: colors.voidBlack,
+    borderRadius: radius.sharp,
+    borderWidth: borderWidth.hairline,
+    borderColor: colors.hairline,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.spacingMd,
     height: 48,
-    fontSize: 15,
-    color: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    marginBottom: 16,
+    ...textStyle("body", { fontFamily: fontFamily.bodySemiBold }),
   },
-  saveBtn: { borderRadius: 14, overflow: "hidden" },
-  saveBtnDisabled: { opacity: 0.5 },
-  saveBtnGradient: { height: 50, justifyContent: "center", alignItems: "center" },
-  saveBtnText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
 });
