@@ -52,6 +52,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -94,6 +95,7 @@ import {
   spacing,
   textStyle,
 } from "@/constants/theme";
+import { PRIVACY_POLICY_URL, EULA_URL } from "@/constants/legal";
 import { usePlatinum } from "@/hooks/usePlatinumStore";
 import { appAlert } from "@/lib/appAlert";
 import {
@@ -540,6 +542,30 @@ export default function PlatinumPaywallScreen() {
                 : `Billed through ${STORE_NAME}. Renews automatically until cancelled; manage or cancel any time in your ${STORE_NAME} account.`}
             </Text>
 
+            {/* App Store guideline 3.1.2(c): functional Privacy Policy / Terms
+                of Use links directly in the purchase flow, not just somewhere
+                else in the app. Both must open the real hosted pages, not a
+                static in-app screen — see constants/legal.ts. */}
+            <View style={styles.legalLinks}>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Privacy Policy"
+                onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)}
+                hitSlop={spacing.spacingXs}
+              >
+                <Text style={styles.legalLinkText}>Privacy Policy</Text>
+              </Pressable>
+              <Text style={styles.legalLinkDivider}>&middot;</Text>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel="Terms of Use"
+                onPress={() => void Linking.openURL(EULA_URL)}
+                hitSlop={spacing.spacingXs}
+              >
+                <Text style={styles.legalLinkText}>Terms of Use</Text>
+              </Pressable>
+            </View>
+
             {/* App Store guideline 3.1.1 requires restore to be reachable
                 from the paywall. Present, deliberately not prominent. */}
             <Pressable
@@ -891,6 +917,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "center",
     paddingHorizontal: spacing.spacingSm,
+  },
+  legalLinks: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.spacingSm,
+  },
+  legalLinkText: {
+    ...textStyle("caption"),
+    color: colors.textSecondary,
+    textDecorationLine: "underline",
+  },
+  legalLinkDivider: {
+    ...textStyle("caption"),
+    color: colors.hairline,
   },
   restore: {
     alignSelf: "center",
