@@ -1,0 +1,69 @@
+:root {
+  --void-black: #0b0c10;
+  --carbon-surface: #17181d;
+  --racing-red: #ff2e37;
+  --text-primary: #f4f5f7;
+  --text-secondary: #9aa0ac;
+  --hairline: #2a2c33;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--void-black);
+  color: var(--text-primary);
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+.legal-prose h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 2.25rem 0 0.75rem;
+}
+
+.legal-prose h2:first-child {
+  margin-top: 0;
+}
+
+.legal-prose p {
+  margin: 0 0 1rem;
+  color: var(--text-primary);
+}
+
+.legal-prose ul {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+}
+
+.legal-prose li {
+  margin-bottom: 0.5rem;
+}
+
+.legal-prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.legal-prose a {
+  color: var(--racing-red);
+  text-decoration: underline;
+}
+
+.legal-intro {
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+}
