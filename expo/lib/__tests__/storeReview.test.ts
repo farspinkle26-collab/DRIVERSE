@@ -1,44 +1,31 @@
 /**
- * Only the pure half — `isOnboardingReviewPrompt`. `requestStoreReview`
+ * Only the pure half — `hasReachedReviewMilestone`. `requestStoreReview`
  * lazily requires a native module and is exercised on device instead (see
  * the module header for why it can't be a static import in the first
  * place, which is also why it can't be jest.mock'd cleanly here).
  */
-import { isOnboardingReviewPrompt } from "@/lib/storeReview";
+import {
+  hasReachedReviewMilestone,
+  REVIEW_MILESTONE_STEP_COUNT,
+} from "@/lib/storeReview";
 
-describe("isOnboardingReviewPrompt", () => {
-  it("fires on the midpoint of customize-profile's real 6-step flow", () => {
-    // STEPS = ["welcome", "benefits", "photo", "nation", "car", "identity"]
-    // — the prompt fires advancing from "photo" (index 2) into "nation"
-    // (index 3), i.e. once the driver is halfway and has entered something.
-    expect(isOnboardingReviewPrompt(3, 6)).toBe(true);
-    [0, 1, 2, 4, 5].forEach((i) =>
-      expect(isOnboardingReviewPrompt(i, 6)).toBe(false)
-    );
+describe("hasReachedReviewMilestone", () => {
+  it("is false below the threshold", () => {
+    expect(hasReachedReviewMilestone(0)).toBe(false);
+    expect(hasReachedReviewMilestone(1)).toBe(false);
+    expect(hasReachedReviewMilestone(REVIEW_MILESTONE_STEP_COUNT - 1)).toBe(false);
   });
 
-  it("tracks the flow's length rather than a hardcoded step", () => {
-    // The whole point of deriving from STEPS.length: the two value screens
-    // were added later, and the prompt moved with them instead of staying
-    // pinned to what used to be the middle.
-    expect(isOnboardingReviewPrompt(2, 4)).toBe(true);
-    expect(isOnboardingReviewPrompt(2, 6)).toBe(false);
+  it("is true at and above the threshold", () => {
+    expect(hasReachedReviewMilestone(REVIEW_MILESTONE_STEP_COUNT)).toBe(true);
+    expect(hasReachedReviewMilestone(REVIEW_MILESTONE_STEP_COUNT + 1)).toBe(true);
+    expect(hasReachedReviewMilestone(8)).toBe(true); // the full First Mile chain
   });
 
-  it("rounds down for an odd step count, landing on a real step", () => {
-    expect(isOnboardingReviewPrompt(2, 5)).toBe(true); // floor(5/2) = 2
-    expect(isOnboardingReviewPrompt(1, 5)).toBe(false);
-    expect(isOnboardingReviewPrompt(3, 5)).toBe(false);
-  });
-
-  it("never fires for a degenerate step count", () => {
-    expect(isOnboardingReviewPrompt(0, 0)).toBe(false);
-    expect(isOnboardingReviewPrompt(0, -1)).toBe(false);
-  });
-
-  it("fires exactly once across a full walkthrough of a flow", () => {
-    const stepCount = 4;
-    const hits = [0, 1, 2, 3].filter((i) => isOnboardingReviewPrompt(i, stepCount));
-    expect(hits).toEqual([2]);
+  it("the threshold itself is a genuine handful, not the trivial first step", () => {
+    // Regression pin: this used to fire mid-onboarding (App Store 5.6.3
+    // rejection). One completed step alone must not be enough.
+    expect(REVIEW_MILESTONE_STEP_COUNT).toBeGreaterThan(1);
+    expect(hasReachedReviewMilestone(1)).toBe(false);
   });
 });

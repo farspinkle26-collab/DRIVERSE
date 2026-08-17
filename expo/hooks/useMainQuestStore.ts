@@ -19,8 +19,20 @@
  *   every cold start for drivers who finished the chain months ago if it
  *   could not tell those apart — so `shouldNudge` takes `loaded` as its own
  *   input rather than inferring it. See `lib/mainQuest.ts`.
+ *
+ * WHY THE STORE-REVIEW PROMPT LIVES HERE
+ *   App Store Guideline 5.6.3: the native rating sheet must not fire before
+ *   the driver has a real basis to judge the app — see `lib/storeReview.ts`
+ *   for the full reasoning and why it moved off the old mid-onboarding
+ *   trigger. This is the one place that already knows, live, how many First
+ *   Mile steps a driver has actually completed, so it is also the one place
+ *   that fires the prompt: once, the first time `hasReachedReviewMilestone`
+ *   turns true for this install. The AsyncStorage flag is what makes it
+ *   "once" — completedIds is re-derived on every load and would otherwise
+ *   re-cross the threshold on every cold start after the milestone.
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import createContextHook from "@nkzw/create-context-hook";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -30,7 +42,14 @@ import {
   shouldNudge,
   type MainQuestState,
 } from "@/lib/mainQuest";
+import { hasReachedReviewMilestone, requestStoreReview } from "@/lib/storeReview";
 import type { MainQuestStepId } from "@/constants/mainQuests";
+
+/** Once-per-install guard — see the header's "WHY THE STORE-REVIEW PROMPT
+ *  LIVES HERE". Not versioned with the rest of the app's AsyncStorage keys
+ *  because it has no relationship to any of them; it exists purely to make
+ *  this one prompt fire exactly once. */
+const REVIEW_PROMPTED_KEY = "driverse:review-prompted";
 
 interface MainQuestRow {
   step_id: string;
@@ -157,6 +176,38 @@ export const [MainQuestProvider, useMainQuest] = createContextHook(() => {
     () => shouldNudge({ signedIn: !!userId, loaded, completedIds }),
     [userId, loaded, completedIds]
   );
+
+  /* ─── Store-review prompt ───────────────────────────────── */
+
+  // Runs on every `state.completed` change but the AsyncStorage read makes
+  // it idempotent, so a ref only guards against overlapping calls while one
+  // check is already in flight (e.g. two realtime events landing close
+  // together), not against firing twice across the driver's lifetime.
+  const reviewCheckInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (!hasReachedReviewMilestone(state.completed)) return;
+    if (reviewCheckInFlightRef.current) return;
+    reviewCheckInFlightRef.current = true;
+
+    (async () => {
+      try {
+        const alreadyPrompted = await AsyncStorage.getItem(REVIEW_PROMPTED_KEY);
+        if (alreadyPrompted) return;
+        // Set the flag before asking, not after: `requestStoreReview()` can
+        // silently no-op (module unlinked, web, OS quota spent) and the
+        // milestone must still read as "handled" either way — the reward
+        // for it was already granted server-side, independent of this.
+        await AsyncStorage.setItem(REVIEW_PROMPTED_KEY, "1");
+        void requestStoreReview();
+      } catch {
+        // Never the reason quest state fails to update.
+      } finally {
+        reviewCheckInFlightRef.current = false;
+      }
+    })();
+  }, [loaded, state.completed]);
 
   return useMemo(
     () => ({

@@ -264,6 +264,30 @@ Fixed with the same `ALTER PUBLICATION` statement, in the same idempotent
 local Postgres with a stub `supabase_realtime` publication: the table is
 correctly added, and re-running the migration is still a clean no-op.
 
+### The store-review prompt rides on this chain now
+
+App Store Guideline 5.6.3: the native rating sheet must not fire before the
+driver has a real basis to judge the app. It used to fire mid-onboarding,
+at the midpoint of `app/customize-profile.tsx`'s account-setup flow —
+Apple rejected the app for exactly that. See `lib/storeReview.ts`'s header
+for the full account.
+
+It now fires once, the first time a driver has completed
+`REVIEW_MILESTONE_STEP_COUNT` (3) First Mile steps —
+`hooks/useMainQuestStore.ts` is the one call site, since it already tracks
+`state.completed` live. Every First Mile step requires having actually
+used a real feature, strictly after onboarding ends, so the milestone
+cannot be reached during onboarding or on first launch by construction.
+An AsyncStorage flag (`driverse:review-prompted`) makes it fire exactly
+once per install rather than re-crossing the threshold on every cold
+start once the milestone is behind the driver.
+
+The milestone's XP is granted by the SQL triggers earlier in this
+document, with no awareness this prompt exists — the reward is for
+reaching the milestone, not for reviewing, and is unconditional on
+whether `requestStoreReview()` actually shows anything (the OS may
+decline silently; the module may be unlinked; the platform may be web).
+
 ---
 
 ## 9. Setup

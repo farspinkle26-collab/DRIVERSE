@@ -42,7 +42,6 @@ import {
   ONBOARDING_BENEFITS,
   STAT_PROOF_POINTS,
 } from "@/constants/onboardingValue";
-import { isOnboardingReviewPrompt, requestStoreReview } from "@/lib/storeReview";
 import {
   borderWidth,
   colors,
@@ -63,9 +62,9 @@ import {
  * reads from `constants/onboardingValue.ts`, which is also where the rule
  * about never inventing a statistic for this screen is written down.
  *
- * Adding steps here moves the store-review prompt automatically: it fires at
- * `floor(STEPS.length / 2)` (`lib/storeReview.ts`), which is derived from
- * this array rather than hardcoded, so it stays at the flow's midpoint.
+ * This screen no longer triggers the store-review prompt — see
+ * `lib/storeReview.ts` for why mid-onboarding was the wrong moment (App
+ * Store Guideline 5.6.3) and where the prompt fires instead.
  *
  * `photo` leads because a driver's face is what every other driver sees on
  * the map, in a convoy and in chat — an account that reaches the map with the
@@ -183,9 +182,6 @@ export default function CustomizeProfileScreen() {
   const [step, setStep] = useState<Step>(STEPS[0]);
   const stepIndex = STEPS.indexOf(step);
   const progress = useRef(new Animated.Value((stepIndex + 1) / STEPS.length)).current;
-  // Guards the store-review prompt to once per screen mount — a driver who
-  // steps back to "nation" and forward again must not see it twice.
-  const reviewPromptedRef = useRef(false);
 
   // Step 1: Profile photo. Local URI only — the upload happens on finish, so
   // a driver who backs out of signup has not written anything to storage.
@@ -300,19 +296,6 @@ export default function CustomizeProfileScreen() {
       setStep(STEPS[nextIdx]);
       animateProgress((nextIdx + 1) / STEPS.length);
       scrollRef.current?.scrollTo({ y: 0, animated: true });
-
-      // The midpoint of onboarding — mid-flow, not mid-app. A driver who has
-      // stayed for two steps of four is already invested and has not yet had
-      // the chance to churn out silently; asking here, rather than after a
-      // trip or a rank-up, is what puts brand-new drivers in the review pool
-      // at all, not just the ones who stuck around. See lib/storeReview.ts.
-      if (
-        !reviewPromptedRef.current &&
-        isOnboardingReviewPrompt(nextIdx, STEPS.length)
-      ) {
-        reviewPromptedRef.current = true;
-        void requestStoreReview();
-      }
     }
   };
 
@@ -448,9 +431,8 @@ export default function CustomizeProfileScreen() {
       const success = await completeProfileCustomization(selectedCountry?.name);
       if (success) {
         // Straight into the Platinum paywall, not the garage — this is the
-        // one guaranteed moment before a driver can churn out silently (see
-        // lib/storeReview.ts's header for the same reasoning applied to the
-        // store-review prompt). `?onboarding=1` is what tells app/platinum.tsx
+        // one guaranteed moment before a driver can churn out silently.
+        // `?onboarding=1` is what tells app/platinum.tsx
         // to replace forward into the app instead of the usual `router.back()`
         // a friction-point paywall uses, and to offer a real "Skip" rather
         // than assuming there is somewhere to go back to.
