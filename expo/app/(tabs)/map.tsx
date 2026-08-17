@@ -179,6 +179,7 @@ import { encodeSpeedProfile, speedProfileFromFixes } from "@/lib/speedTrace";
 import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeDraft";
 import { calculateDriveXP } from "@/lib/tripStats";
 import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
+import { withTimeout } from "@/lib/promiseTimeout";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
@@ -244,6 +245,17 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
  */
 /** How far out landmarks are pulled from the current centre. */
 const LANDMARK_RADIUS_METERS = 15_000;
+/**
+ * How long to wait for the initial one-shot GPS fix before giving up on it.
+ * `getCurrentPositionAsync` has no timeout of its own, and on a Wi-Fi-only
+ * iPad (no GNSS hardware — this is the App Store 2.1(a) rejection) a
+ * navigation-grade fix never arrives at all, so the await would hang
+ * forever. Bounded here so "no fix" becomes a handled state — last-known
+ * position, or a working Retry — instead of a permanent spinner. Generous
+ * on purpose: a cold Wi-Fi/network fix can legitimately take several
+ * seconds, and last-known already paints the map instantly in the meantime.
+ */
+const LOCATION_FIX_TIMEOUT_MS = 12_000;
 /** How far the map centre must move before landmarks are refetched. */
 const LANDMARK_REFETCH_METERS = 6_000;
 /** Pan settling time before a landmark refetch fires. */
@@ -785,6 +797,11 @@ export default function MapScreen() {
   const [heading, setHeading] = useState(0);
   const [locating, setLocating] = useState(true);
   const [locError, setLocError] = useState<string | null>(null);
+  // Bumped by the Retry button to re-run the GPS acquisition effect below.
+  // Without this, Retry only re-showed the spinner: the effect has run-once
+  // deps, so nothing re-requested location — dead on any device that failed
+  // the first fix (App Store 2.1(a), the Wi-Fi-only iPad).
+  const [locRetryToken, setLocRetryToken] = useState(0);
 
   // Landmark state (Mapbox POI geocoding, fetched around the driver)
   const [cafes, setCafes] = useState<CafePOI[]>([]);
@@ -1291,32 +1308,83 @@ export default function MapScreen() {
           return;
         }
 
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.BestForNavigation,
-          timeInterval: 3000,
-        });
+        // Paint the map from any cached fix first. This is instant and works
+        // on hardware with no GPS chip at all — a Wi-Fi-only iPad still has a
+        // last-known network position — so the driver is never left staring
+        // at a spinner while the fresh fix is still coming (App Store 2.1(a)).
+        const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
+        if (lastKnown && mounted) {
+          const seed = {
+            latitude: lastKnown.coords.latitude,
+            longitude: lastKnown.coords.longitude,
+          };
+          setUserLocation(seed);
+          setLocating(false);
+          setTimeout(() => {
+            animateCamera(
+              { center: seed, zoom: 16, pitch: 45, heading: lastKnown.coords.heading ?? 0 },
+              { duration: 1200 }
+            );
+          }, 300);
+          Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+          fetchLandmarksAround(seed.latitude, seed.longitude);
+        }
+
+        // Then try for a fresh fix — but BOUNDED, so it can never hang.
+        // `Accuracy.High` (not BestForNavigation) is deliberate: the initial
+        // fix must be satisfiable by Wi-Fi/network positioning on a device
+        // with no GNSS, and BestForNavigation demanded a navigation-grade
+        // satellite fix that a Wi-Fi-only iPad can never produce — which,
+        // combined with getCurrentPositionAsync having no timeout of its own,
+        // is exactly what hung the app forever on Apple's review device.
+        let fresh: Location.LocationObject | null = null;
+        try {
+          fresh = await withTimeout(
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+            LOCATION_FIX_TIMEOUT_MS,
+            "location-fix-timeout"
+          );
+        } catch {
+          // Timed out or errored. Handled below by whether we have any fix.
+        }
 
         if (!mounted) return;
 
-        const coords = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        };
-        setUserLocation(coords);
-        if (loc.coords.heading != null) setHeading(loc.coords.heading);
-        setLocating(false);
+        if (fresh) {
+          const coords = {
+            latitude: fresh.coords.latitude,
+            longitude: fresh.coords.longitude,
+          };
+          setUserLocation(coords);
+          if (fresh.coords.heading != null) setHeading(fresh.coords.heading);
+          setLocating(false);
+          setLocError(null);
 
-        setTimeout(() => {
-          animateCamera(
-            { center: coords, zoom: 16, pitch: 45, heading: loc.coords.heading ?? 0 },
-            { duration: 1200 }
+          // Only re-centre the camera on the fresh fix if we hadn't already
+          // seeded from last-known — otherwise the two animations fight.
+          if (!lastKnown) {
+            setTimeout(() => {
+              animateCamera(
+                { center: coords, zoom: 16, pitch: 45, heading: fresh!.coords.heading ?? 0 },
+                { duration: 1200 }
+              );
+            }, 300);
+            Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+          }
+          fetchLandmarksAround(coords.latitude, coords.longitude);
+        } else if (!lastKnown) {
+          // No fresh fix AND nothing cached: this is the only genuine failure.
+          // Surface it with a working Retry (which now re-runs this effect via
+          // locRetryToken) rather than leaving a permanent spinner. Do not
+          // start the watch — the retry re-enters here and starts it.
+          setLocError(
+            "Couldn't get a location fix. Check that Location Services are on and you have a network or clear view of the sky, then tap Retry."
           );
-        }, 300);
-
-        Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
-
-        // Landmarks for where the driver actually is
-        fetchLandmarksAround(coords.latitude, coords.longitude);
+          setLocating(false);
+          return;
+        }
+        // Otherwise: last-known is painted and the live watch below will
+        // upgrade it as real fixes arrive — the map is usable meanwhile.
 
         // Watch GPS position for real-time tracking
         sub = await Location.watchPositionAsync(
@@ -1458,8 +1526,10 @@ export default function MapScreen() {
       mounted = false;
       sub?.remove();
     };
+  // Re-runs when Retry bumps locRetryToken — the cleanup above removes the
+  // previous watch first, so a retry starts a clean acquisition.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [locRetryToken]);
 
   // --- Recording timer --- (stops ticking while paused; pausedAccumRef keeps the
   // elapsed clock continuous across a pause/resume cycle)
@@ -3090,6 +3160,10 @@ export default function MapScreen() {
             onPress={() => {
               setLocError(null);
               setLocating(true);
+              // Bump the token so the GPS effect actually re-runs — clearing
+              // the flags alone left the spinner spinning with nothing
+              // re-requesting location.
+              setLocRetryToken((t) => t + 1);
             }}
           />
         </View>
