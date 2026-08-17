@@ -75,6 +75,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MapPolyline from "@/components/MapPolyline";
 import MapboxMapStatus from "@/components/MapboxMapStatus";
+import GlidingMarkerView from "@/components/GlidingMarkerView";
 import { loadMapbox, initMapbox } from "@/lib/mapboxNative";
 import { useMapboxCamera } from "@/hooks/useMapboxCamera";
 import { toPosition, zoomForLatitudeDelta, latitudeDeltaForZoom } from "@/lib/mapboxCoords";
@@ -180,6 +181,9 @@ import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeD
 import { calculateDriveXP } from "@/lib/tripStats";
 import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
 import { withTimeout } from "@/lib/promiseTimeout";
+import { lerpHeadingDeg } from "@/lib/glide";
+import { useGlideLatLng } from "@/hooks/useGlideLatLng";
+import { useGlideNumber } from "@/hooks/useGlideNumber";
 import { rankForLevel } from "@/constants/ranks";
 import { useXP } from "@/hooks/useXPStore";
 import { useOnlineUsers, OnlineUser, ProblemType } from "@/hooks/useOnlineUsers";
@@ -256,6 +260,36 @@ const LANDMARK_RADIUS_METERS = 15_000;
  * seconds, and last-known already paints the map instantly in the meantime.
  */
 const LOCATION_FIX_TIMEOUT_MS = 12_000;
+
+/**
+ * Marker/speed smoothing (`lib/glide.ts`).
+ *
+ * This device's own GPS watch ticks roughly once a second
+ * (`timeInterval: 1000` below), so the own-driver marker, its heading, and
+ * the live speedometer all glide over a duration just under that — long
+ * enough to look continuous, short enough to have settled before the next
+ * real fix lands.
+ */
+const OWN_MARKER_GLIDE_MS = 900;
+/**
+ * A jump larger than this in one ~1s tick is not real driving — even at the
+ * live recorder's own 200 km/h sanity cap (`GPS_SPEED_SANITY_KMH`), a second
+ * of travel covers well under this — so it snaps instead of animating a fake
+ * "flight" across the map. Catches GPS reacquisition after a tunnel, the
+ * very first fix of the session, and similar teleports.
+ */
+const OWN_MARKER_SNAP_METERS = 300;
+/**
+ * Other drivers broadcast their position roughly every
+ * `LOCATION_BROADCAST_MS` (4s, see `hooks/useOnlineUsers.ts`) — the actual
+ * cause of the "other drivers teleport" complaint this exists to fix. Glides
+ * just under that interval so motion looks continuous between broadcasts
+ * rather than settling early and then jumping again.
+ */
+const OTHER_MARKER_GLIDE_MS = 3800;
+/** Generous — this only exists to catch a driver's first-ever sighting or a
+ *  long gap in updates, not to second-guess a fast but real highway drive. */
+const OTHER_MARKER_SNAP_METERS = 3000;
 /** How far the map centre must move before landmarks are refetched. */
 const LANDMARK_REFETCH_METERS = 6_000;
 /** Pan settling time before a landmark refetch fires. */
@@ -795,6 +829,20 @@ export default function MapScreen() {
   // GPS state
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [heading, setHeading] = useState(0);
+  // Smoothed *rendering-only* position/heading for this driver's own marker
+  // (lib/glide.ts) — userLocation/heading themselves stay raw everywhere
+  // else (trip recording, distance, XP, camera centering, the weather
+  // fetch); only the marker's own coordinate and rotation glide. The
+  // fallback below is never actually shown — the marker only renders once
+  // userLocation is non-null — and a jump away from it always exceeds the
+  // snap threshold, so the first real fix snaps in rather than "flying"
+  // from the equator.
+  const glidedOwnLocation = useGlideLatLng(
+    userLocation ?? { latitude: 0, longitude: 0 },
+    OWN_MARKER_GLIDE_MS,
+    OWN_MARKER_SNAP_METERS
+  );
+  const glidedHeading = useGlideNumber(heading, OWN_MARKER_GLIDE_MS, lerpHeadingDeg);
   const [locating, setLocating] = useState(true);
   const [locError, setLocError] = useState<string | null>(null);
   // Bumped by the Retry button to re-run the GPS acquisition effect below.
@@ -841,6 +889,11 @@ export default function MapScreen() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [tripHistory, setTripHistory] = useState<TripRecord[]>([]); // past trips
   const [currentSpeed, setCurrentSpeed] = useState(0); // km/h during recording
+  // Rendering-only smoothing for the live speedometer readout — currentSpeed
+  // itself stays the raw per-tick value everywhere it's used for anything
+  // that has to be accurate (top speed, XP, the drive score, the share
+  // card's heatmap). See lib/glide.ts.
+  const displaySpeed = useGlideNumber(currentSpeed, OWN_MARKER_GLIDE_MS);
   const [tripTopSpeed, setTripTopSpeed] = useState(0); // max km/h reached this trip
   const [routeSplitIdx, setRouteSplitIdx] = useState<number | null>(null); // index where user crossed on route polyline
   // Turn-by-turn steps parsed from the last fetched Directions route
@@ -2872,9 +2925,11 @@ export default function MapScreen() {
               ? party.color
               : playerColor(onlineUser.user_id);
           return (
-            <Mapbox.MarkerView
+            <GlidingMarkerView
               key={`online-${onlineUser.user_id}`}
-              coordinate={toPosition({ latitude: onlineUser.latitude, longitude: onlineUser.longitude })}
+              target={{ latitude: onlineUser.latitude, longitude: onlineUser.longitude }}
+              glideMs={OTHER_MARKER_GLIDE_MS}
+              snapThresholdMeters={OTHER_MARKER_SNAP_METERS}
               anchor={{ x: 0.5, y: 0.36 }}
               allowOverlap
             >
@@ -2997,7 +3052,7 @@ export default function MapScreen() {
                   </Text>
                 ) : null}
               </Pressable>
-            </Mapbox.MarkerView>
+            </GlidingMarkerView>
           );
         })}
 
@@ -3094,7 +3149,7 @@ export default function MapScreen() {
             ~0° and the car points up the screen exactly as it did. */}
         {userLocation && (
           <Mapbox.MarkerView
-            coordinate={toPosition(userLocation)}
+            coordinate={toPosition(glidedOwnLocation)}
             anchor={{ x: 0.5, y: 0.5 }}
             allowOverlap
           >
@@ -3105,7 +3160,7 @@ export default function MapScreen() {
                   {
                     transform: [
                       { translateY: carFloat },
-                      { rotate: `${flatRotation(heading)}deg` },
+                      { rotate: `${flatRotation(glidedHeading)}deg` },
                     ],
                   },
                 ]}
@@ -3119,7 +3174,7 @@ export default function MapScreen() {
         {/* "You · Lv." label rides in a separate marker so it stays upright */}
         {userLocation && !isRecording && (
           <Mapbox.MarkerView
-            coordinate={toPosition(userLocation)}
+            coordinate={toPosition(glidedOwnLocation)}
             anchor={{ x: 0.5, y: -0.35 }}
             allowOverlap
           >
@@ -3430,7 +3485,7 @@ export default function MapScreen() {
                 style={styles.speedometerBox}
                 contentStyle={styles.speedometerContent}
               >
-                <Text style={styles.speedometerValue}>{convertSpeed(currentSpeed, speedUnit).toFixed(0)}</Text>
+                <Text style={styles.speedometerValue}>{convertSpeed(displaySpeed, speedUnit).toFixed(0)}</Text>
                 <Text style={styles.speedometerUnit}>{speedUnitLabel(speedUnit)}</Text>
                 <View style={styles.speedometerGearRow}>
                   <View style={styles.speedometerGearDot} />
