@@ -96,7 +96,7 @@ Numbers live in `TIER_LIMITS` (`constants/platinum.ts`) and are mirrored in
 | Garage cars | 2 | ∞ | `useActiveCarStore.addCar`, `ProfileScreen.handleAddCar` | `enforce_garage_limit` |
 | Active events created | 1 | ∞ | `useEventsStore.createEvent` | `enforce_event_limit` |
 | Saved places | 10 | ∞ | `useSavedPlacesStore.savePlace` | `enforce_saved_place_limit` |
-| Convoy members | 2 | 8 | `usePartyStore.inviteFriend` / `createParty` | `enforce_convoy_limit` |
+| Convoy members | 5 | 8 | `usePartyStore.inviteFriend` / `createParty` | `enforce_convoy_limit` |
 | Saved routes | 10 | ∞ | `useRoutesStore.saveRoute` | `enforce_saved_route_limit` |
 | **Recorded drives / month** | **5** | **∞** | `map.tsx` `toggleDrive` via `lib/driveQuota.ts` | `enforce_drive_limit` |
 | AI showcases / month | — | 5 | `ShowcaseModal` | `generate-showcase` edge function |
@@ -165,7 +165,7 @@ the values shipped; all four are one-line changes in `TIER_LIMITS` +
 | Decision | Value | Reasoning |
 |---|---|---|
 | Saved places cap | **10** | Suggested in the brief. Enough for a driver's real regular spots; low enough that an enthusiast hits it. |
-| Convoy capacity | **2 → 8** | Top of the suggested 6–8. 8 is a plausible weekend convoy and makes the 4× jump legible. |
+| Convoy capacity | **2 → 5 → 8** | Launched at 2, raised to 5 so a full carload or a small friend group fits free; Platinum's 8 stays a meaningfully bigger weekend convoy on top of that, not just "one more seat." |
 | AI showcase allowance | **5 / month** | Real per-image cost. Uncapped is an uncapped bill; 5 covers a typical garage and bounds the worst case. |
 | Pricing | **$5 / month, $50 / year** (~17% off) | Display fallbacks only. Real prices always come from `product.priceString`, already localised by the store; the "SAVE n%" badge is computed from those, not from these. Keep `PLATINUM_FALLBACK_PRICE` in step with the stores by hand — nothing verifies it. |
 

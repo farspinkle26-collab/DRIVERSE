@@ -230,7 +230,7 @@ export const [PartyProvider, useParty] = createContextHook(() => {
   // ─── Tier cap ────────────────────────────────────────────
   //
   // Convoy size is capped by the ORGANISER's tier, not each joiner's:
-  // Regular convoys hold 2 drivers, Platinum 8. That is what makes the perk
+  // Regular convoys hold 5 drivers, Platinum 8. That is what makes the perk
   // coherent — a Platinum organiser can gather 8 Regular drivers, and a
   // Regular organiser's convoy doesn't grow just because a Platinum driver
   // joined it. The same rule is enforced in `enforce_convoy_limit()`.

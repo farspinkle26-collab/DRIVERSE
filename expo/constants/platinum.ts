@@ -167,7 +167,7 @@ export const TIER_LIMITS: Record<
     /** Bookmarked cafes / gas stations / workshops / hangouts. */
     savedPlaces: 10,
     /** Convoy party size, including the organiser. */
-    convoyMembers: 2,
+    convoyMembers: 5,
     /**
      * Routes kept in the driver's library — the enforceable half of
      * "Route Discovery". See PLATINUM_REFERENCE.md §"Route Discovery".
@@ -333,9 +333,9 @@ export const PLATINUM_BENEFITS: PlatinumBenefit[] = [
   {
     id: "convoy",
     title: "Bigger Convoys",
-    description: "Roll 8 deep. Regular convoys cap at 2.",
+    description: "Roll 8 deep. Regular convoys cap at 5.",
     icon: "Users",
-    triggerHeadline: "Regular convoys cap at 2 drivers",
+    triggerHeadline: "Regular convoys cap at 5 drivers",
   },
 ];
 
