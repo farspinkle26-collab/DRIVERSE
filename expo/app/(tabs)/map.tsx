@@ -181,6 +181,7 @@ import { describeSaveFailure, sanitizeCount, sanitizeMetric } from "@/lib/routeD
 import { calculateDriveXP } from "@/lib/tripStats";
 import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
 import { withTimeout } from "@/lib/promiseTimeout";
+import { keepScreenAwake, allowScreenSleep } from "@/lib/keepAwake";
 import { lerpHeadingDeg } from "@/lib/glide";
 import { useGlideLatLng } from "@/hooks/useGlideLatLng";
 import { useGlideNumber } from "@/hooks/useGlideNumber";
@@ -1343,6 +1344,21 @@ export default function MapScreen() {
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { routeInfoRef.current = routeInfo; }, [routeInfo]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+
+  // A driver following turn-by-turn directions or recording a drive isn't
+  // touching the phone — it's mounted, or in a pocket, glanced at rather
+  // than held. The OS's normal screen-sleep timeout assumes active touch,
+  // so left alone it turns the screen off mid-navigation. Released the
+  // moment neither is true, not just on unmount, so arriving or stopping a
+  // recording hands screen-sleep back immediately rather than at whatever
+  // point this screen itself unmounts.
+  useEffect(() => {
+    if (navigating || isRecording) {
+      keepScreenAwake();
+      return () => allowScreenSleep();
+    }
+    return undefined;
+  }, [navigating, isRecording]);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
