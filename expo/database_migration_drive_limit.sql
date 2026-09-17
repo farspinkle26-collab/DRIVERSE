@@ -43,6 +43,11 @@
 -- It is restated here rather than left to the platinum migration because a
 -- database that has this file but an older platinum.sql would otherwise get
 -- NULL for 'drives_per_month' and enforce nothing at all.
+--
+-- 'convoy_members' regular cap raised 2 -> 5 here and in
+-- database_migration_platinum.sql together — see constants/platinum.ts.
+-- Re-run this file (or the platinum one, but this one runs later per the
+-- header above, so it's the one that actually sticks) to apply it.
 
 create or replace function public.platinum_limit(feature text, uid uuid)
 returns integer
@@ -69,7 +74,7 @@ as $$
         when 'saved_places'     then 10
         when 'saved_routes'     then 10
         when 'drives_per_month' then 5
-        when 'convoy_members'   then 2
+        when 'convoy_members'   then 5
         when 'ai_showcases'     then 0
       end
   end;

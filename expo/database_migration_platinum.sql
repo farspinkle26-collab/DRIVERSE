@@ -169,7 +169,7 @@ as $$
         when 'saved_places'     then 10
         when 'saved_routes'     then 10
         when 'drives_per_month' then 5
-        when 'convoy_members'   then 2
+        when 'convoy_members'   then 5
         when 'ai_showcases'     then 0
       end
   end;

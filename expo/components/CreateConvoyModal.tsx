@@ -29,7 +29,7 @@ interface CreateConvoyModalProps {
  * Capacity choices, filtered by the organiser's tier at render time.
  *
  * The old list offered up to "Unlimited", which is no longer true for anyone:
- * Regular convoys hold 2 and Platinum 8. Offering a number the store will
+ * Regular convoys hold 5 and Platinum 8. Offering a number the store will
  * then clamp would be a menu that lies, so the options are derived from the
  * cap rather than fixed — and the ceiling itself is always the last option,
  * labelled "Max".

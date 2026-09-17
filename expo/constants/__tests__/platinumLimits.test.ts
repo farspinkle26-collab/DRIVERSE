@@ -27,7 +27,7 @@ describe("limitFor — the cap that applies to a driver", () => {
     expect(limitFor("garageCars", REGULAR)).toBe(2);
     expect(limitFor("activeEvents", REGULAR)).toBe(1);
     expect(limitFor("savedPlaces", REGULAR)).toBe(10);
-    expect(limitFor("convoyMembers", REGULAR)).toBe(2);
+    expect(limitFor("convoyMembers", REGULAR)).toBe(5);
     expect(limitFor("savedRoutes", REGULAR)).toBe(10);
     // The core action: 5 recorded drives per calendar month.
     expect(limitFor("drivesPerMonth", REGULAR)).toBe(5);
@@ -105,10 +105,10 @@ describe("isAtLimit — saved routes enforcement", () => {
 });
 
 describe("isAtLimit — convoy capacity enforcement", () => {
-  it("caps a Regular-led convoy at 2 (organiser + 1)", () => {
-    expect(isAtLimit("convoyMembers", 1, REGULAR)).toBe(false);
-    expect(isAtLimit("convoyMembers", 2, REGULAR)).toBe(true);
-    expect(isAtLimit("convoyMembers", 3, REGULAR)).toBe(true);
+  it("caps a Regular-led convoy at 5 (organiser + 4)", () => {
+    expect(isAtLimit("convoyMembers", 4, REGULAR)).toBe(false);
+    expect(isAtLimit("convoyMembers", 5, REGULAR)).toBe(true);
+    expect(isAtLimit("convoyMembers", 6, REGULAR)).toBe(true);
   });
 
   it("caps a Platinum-led convoy at 8 — bigger, but still bounded", () => {
