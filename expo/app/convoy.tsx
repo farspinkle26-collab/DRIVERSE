@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, Stack } from "expo-router";
-import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio, Flag, Search, Navigation, MapPin } from "lucide-react-native";
+import { ArrowLeft, Crown, UserPlus, LogOut, X, Check, Radio, Flag, Search, Navigation, MapPin, MessageCircle } from "lucide-react-native";
 import { useAuth } from "@/hooks/useAuthStore";
 import { useParty, type InviteCandidate } from "@/hooks/usePartyStore";
 import { supabase } from "@/lib/supabase";
@@ -28,6 +28,7 @@ import {
   colors,
   cut,
   fontFamily,
+  onRacingRed,
   radius,
   spacing,
   textStyle,
@@ -152,6 +153,35 @@ export default function ConvoyScreen() {
   useEffect(() => {
     if (isAuthenticated && !party) browsePublicParties();
   }, [isAuthenticated, party, browsePublicParties]);
+
+  // Every party gets a `group_conversations` row the moment it's created
+  // (database_migration_community_v2.sql's `kind = 'convoy'` trigger) — this
+  // just looks it up so the button below has somewhere to send the driver.
+  // `app/convoy/[id].tsx` (browsing someone else's convoy) already does this;
+  // this screen — your OWN active convoy — never did.
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!party) {
+      setConversationId(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("group_conversations")
+      .select("id")
+      .eq("party_id", party.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setConversationId(data?.id ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on the id, not the whole `party` object — usePartyStore hands
+    // back a fresh object on every update (a member joining, a destination
+    // changing), and none of that should re-run this lookup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [party?.id]);
 
   const handleJoinPublic = useCallback(async (convoyId: string) => {
     setJoiningId(convoyId);
@@ -502,6 +532,16 @@ export default function ConvoyScreen() {
               ))}
             </View>
 
+            {conversationId && (
+              <CutCornerButton
+                title="Open convoy chat"
+                corners="topRight"
+                icon={<MessageCircle size={16} color={onRacingRed} strokeWidth={ICON_STROKE} />}
+                onPress={() => router.push(`/messages/group/${conversationId}` as any)}
+                style={styles.chatBtn}
+              />
+            )}
+
             {/* ─── INVITE ANY DRIVER ─────────────────────────────
                 Not "Invite Friends" any more. A convoy invite used to need an
                 accepted friend request on both the client and in RLS, which
@@ -684,6 +724,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   convoyLimitNotice: {
+    marginBottom: spacing.spacingMd,
+  },
+  chatBtn: {
     marginBottom: spacing.spacingMd,
   },
   rowSub: {
