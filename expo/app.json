@@ -30,7 +30,7 @@
         "backgroundColor": "#060609"
       },
       "package": "app.rork.driverse",
-      "versionCode": 33,
+      "versionCode": 34,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyD_DU3RnAjfkIubXCfRpApH5usllH7O628"
