@@ -2,6 +2,7 @@ import { Linking, Platform } from 'react-native';
 
 const WHATSAPP_PHONE = '+6281380680009';
 const ATPM_WHATSAPP_PHONE = '+6285688056778';
+const EMERGENCY_TOWING_PHONE = '+628568805678';
 
 const openWhatsAppUrl = async (encodedMessage: string, phoneNumber?: string): Promise<boolean> => {
   try {
@@ -36,6 +37,11 @@ export const openWhatsAppWithText = async (message: string, phoneNumber?: string
 export const openAtpmWhatsApp = async (message: string): Promise<boolean> => {
   const encodedMessage = encodeURIComponent(message);
   return openWhatsAppUrl(encodedMessage, ATPM_WHATSAPP_PHONE);
+};
+
+export const openEmergencyTowingWhatsApp = async (message: string): Promise<boolean> => {
+  const encodedMessage = encodeURIComponent(message);
+  return openWhatsAppUrl(encodedMessage, EMERGENCY_TOWING_PHONE);
 };
 
 export const testWhatsAppAvailability = async (): Promise<boolean> => {
