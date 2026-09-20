@@ -138,6 +138,7 @@ import {
   Fuel,
   LifeBuoy,
   Flag,
+  Truck,
 } from "lucide-react-native";
 import {
   CutCornerBadge,
@@ -182,6 +183,7 @@ import { calculateDriveXP } from "@/lib/tripStats";
 import { haversineMeters, bearingBetween, headingDelta } from "@/lib/tripGeoStats";
 import { withTimeout } from "@/lib/promiseTimeout";
 import { keepScreenAwake, allowScreenSleep } from "@/lib/keepAwake";
+import { openEmergencyTowingWhatsApp } from "@/utils/whatsapp";
 import { lerpHeadingDeg } from "@/lib/glide";
 import { useGlideLatLng } from "@/hooks/useGlideLatLng";
 import { useGlideNumber } from "@/hooks/useGlideNumber";
@@ -2502,6 +2504,20 @@ export default function MapScreen() {
     await clearProblem();
   }, [clearProblem]);
 
+  /**
+   * Goes straight to WhatsApp with an emergency towing service — no problem
+   * signal is raised, no confirmation step, since a driver reaching for this
+   * is already mid-emergency. `openEmergencyTowingWhatsApp` tries the native
+   * WhatsApp app first and falls back to wa.me, exactly like the other
+   * WhatsApp entry points in this app.
+   */
+  const handleEmergencyTowing = useCallback(() => {
+    setProblemChooserOpen(false);
+    void openEmergencyTowingWhatsApp(
+      "Halo, saya butuh towing darurat. Mohon bantuannya."
+    );
+  }, []);
+
   const handleSignalPress = useCallback(() => {
     if (myProblem) {
       handleClearProblem();
@@ -4354,7 +4370,15 @@ export default function MapScreen() {
                   onPress={() => handleRaiseProblem(p.key)}
                 />
               ))}
+              <ActionRow
+                label="Emergency towing"
+                icon={<Truck size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />}
+                onPress={handleEmergencyTowing}
+              />
             </View>
+            <Text style={styles.sheetBodyText}>
+              Emergency towing opens WhatsApp with a towing service directly — it doesn't alert other drivers.
+            </Text>
 
             <Pressable
               accessibilityRole="button"
