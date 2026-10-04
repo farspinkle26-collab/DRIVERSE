@@ -1,0 +1,22 @@
+# EAS Build ignore file
+# Ignore local build artifacts and caches to keep upload small (< 15 MB)
+
+node_modules/
+.expo/
+dist/
+web-build/
+networkerror.txt
+
+# Local Android build caches
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+
+# Local iOS build caches
+ios/build/
+ios/Pods/
+
+# Environment files with private secrets (publishable keys are in eas.json)
+.env*.local
+.env
