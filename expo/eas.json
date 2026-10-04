@@ -12,7 +12,14 @@
       "ios": {
         "simulator": false
       },
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mxpvuwqsieroxjujrpmm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_1G9yEP-57BR1h-1P4a61eQ_B2MgvHtF",
+        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yd3pncGZyMGFtdzM1b25ycWV4czNtZCJ9.RPoVghBq7PNmSj1WvvHmVA",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_HWCqiflvGkYAxFRDNFrWNSQcQNk",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_pfHDSEtTmnWrQurgkNohQEkFLCj"
+      }
     },
     "preview": {
       "extends": "diagnostic"
@@ -21,7 +28,14 @@
       "android": {
         "buildType": "app-bundle"
       },
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mxpvuwqsieroxjujrpmm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_1G9yEP-57BR1h-1P4a61eQ_B2MgvHtF",
+        "EXPO_PUBLIC_MAPBOX_TOKEN": "pk.eyJ1IjoiZHJpdmVyc2UiLCJhIjoiY21yd3pncGZyMGFtdzM1b25ycWV4czNtZCJ9.RPoVghBq7PNmSj1WvvHmVA",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_HWCqiflvGkYAxFRDNFrWNSQcQNk",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_pfHDSEtTmnWrQurgkNohQEkFLCj"
+      }
     }
   },
   "submit": {
