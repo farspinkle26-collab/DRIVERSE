@@ -204,7 +204,7 @@ import { useTheme } from "@/hooks/useThemeStore";
 import { supabase } from "@/lib/supabase";
 import { MAPBOX_ACCESS_TOKEN, mapboxStyleUrl } from "@/constants/mapbox";
 import { convertSpeed, speedUnitForCountry, speedUnitLabel } from "@/lib/speedUnits";
-import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace } from "@/lib/mapboxApi";
+import { searchPlaces, getDirectionsWithSteps, reverseGeocodePlace, PlaceSuggestion } from "@/lib/mapboxApi";
 import { coordinateLabel, shortPlaceLabel } from "@/lib/tripEndpoints";
 import { appAlert } from "@/lib/appAlert";
 import { parseLimitRejection } from "@/lib/platinumLimits";
@@ -1157,6 +1157,35 @@ export default function MapScreen() {
   const [greetingExpanded, setGreetingExpanded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // Live geocoder results for the search bar — any address, city or named
+  // place, not just the nine fixed landmark categories already loaded for
+  // the visible area. `placeSearchFetchRef` lets a stale response lose to a
+  // newer query instead of flashing wrong results, same pattern as
+  // `fetchLandmarksAround`'s `landmarkFetchRef`.
+  const [livePlaceResults, setLivePlaceResults] = useState<PlaceSuggestion[]>([]);
+  const [livePlaceSearching, setLivePlaceSearching] = useState(false);
+  const placeSearchFetchRef = useRef(0);
+
+  // Debounced so typing doesn't fire a geocoder request per keystroke.
+  // Clearing the query (closing search, or backspacing to under 2 chars)
+  // drops any in-flight results rather than leaving a stale list showing.
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!searchOpen || query.length < 2) {
+      setLivePlaceResults([]);
+      setLivePlaceSearching(false);
+      return;
+    }
+    const fetchId = ++placeSearchFetchRef.current;
+    setLivePlaceSearching(true);
+    const timer = setTimeout(async () => {
+      const results = await searchPlaces(query, userLocation, "id", { limit: 6 });
+      if (fetchId !== placeSearchFetchRef.current) return;
+      setLivePlaceResults(results);
+      setLivePlaceSearching(false);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchOpen, searchQuery, userLocation]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [privacySheetOpen, setPrivacySheetOpen] = useState(false);
   /** Last region the map reported. Drives the clustering threshold. */
@@ -1875,6 +1904,22 @@ export default function MapScreen() {
     setRouteInfo(null);
     animateCamera(
       { center: { latitude: cafe.lat, longitude: cafe.lng }, zoom: 17, pitch: 40 },
+      { duration: 500 }
+    );
+  }, [animateCamera]);
+
+  /**
+   * A live geocoder result (any address, city or named place — see
+   * `livePlaceResults` above) picked as a destination. Reuses the existing
+   * "location" variant of `SelectedDestination`, the same one a dropped pin
+   * uses, so routing, the route card and the Route button need no changes.
+   */
+  const handleSearchPlacePress = useCallback((place: PlaceSuggestion) => {
+    setSelectedDestination({ type: "location", lat: place.latitude, lng: place.longitude, name: place.name });
+    setLocationChosen(false);
+    setRouteInfo(null);
+    animateCamera(
+      { center: { latitude: place.latitude, longitude: place.longitude }, zoom: 16, pitch: 40 },
       { duration: 500 }
     );
   }, [animateCamera]);
@@ -3952,7 +3997,7 @@ export default function MapScreen() {
             <Search size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search landmarks"
+              placeholder="Search places or an address"
               placeholderTextColor={colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -3968,7 +4013,7 @@ export default function MapScreen() {
               <X size={spacing.spacingLg} color={colors.textSecondary} strokeWidth={CHROME_ICON_STROKE} />
             </Pressable>
           </View>
-          {searchResults.length > 0 ? (
+          {(searchResults.length > 0 || livePlaceResults.length > 0) ? (
             <View style={styles.searchResults}>
               {searchResults.map((res, i) => {
                 const Glyph = CAT_GLYPHS[res.category];
@@ -3997,13 +4042,41 @@ export default function MapScreen() {
                   </Pressable>
                 );
               })}
+              {/* Live geocoder matches — any address, city or named place
+                  beyond the nine fixed landmark categories above. */}
+              {livePlaceResults.map((place, i) => (
+                <Pressable
+                  key={place.id}
+                  accessibilityRole="button"
+                  style={[styles.searchResultRow, (i > 0 || searchResults.length > 0) && styles.searchResultRowBorder]}
+                  onPress={() => {
+                    closeSearch();
+                    handleSearchPlacePress(place);
+                  }}
+                >
+                  <View style={styles.searchResultIcon}>
+                    <MapPin size={spacing.spacingLg} color={colors.textPrimary} strokeWidth={CHROME_ICON_STROKE} />
+                  </View>
+                  <View style={styles.searchResultText}>
+                    <Text style={styles.searchResultName} numberOfLines={1}>{place.name}</Text>
+                    <Text style={styles.searchResultVicinity} numberOfLines={1}>{place.fullAddress}</Text>
+                  </View>
+                </Pressable>
+              ))}
             </View>
           ) : searchQuery.trim().length > 0 ? (
             <View style={styles.searchResults}>
-              <Text style={styles.searchEmpty}>
-                No landmark here matches “{searchQuery.trim()}”. Landmarks load for the area you're looking at —
-                pan the map to the area you mean, then search again.
-              </Text>
+              {livePlaceSearching ? (
+                <View style={styles.searchResultRow}>
+                  <ActivityIndicator size="small" color={colors.textSecondary} />
+                  <Text style={styles.searchResultVicinity}>Searching…</Text>
+                </View>
+              ) : (
+                <Text style={styles.searchEmpty}>
+                  No places found for “{searchQuery.trim()}”. Try a different spelling, or pan the map
+                  closer to the area you mean.
+                </Text>
+              )}
             </View>
           ) : null}
         </View>
